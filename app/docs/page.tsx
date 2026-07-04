@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import NavBar from '@/components/NavBar'
-import { getDocs } from '@/lib/storage'
+import Modal, { Field } from '@/components/Modal'
+import { getDocs, setDocs } from '@/lib/storage'
 import { Doc } from '@/lib/types'
 
 const TAG_COLORS = [
@@ -35,7 +36,22 @@ export default function DocsPage() {
     return TAG_COLORS[index % TAG_COLORS.length]
   }
 
-  if (loading) return <div>Loading...</div>
+  // --- Add doc modal ---
+  const [docModalOpen, setDocModalOpen] = useState(false)
+  const [dDraft, setDDraft] = useState<Doc>({ id: '', name: '', url: '', tag: '' })
+  const openAddDoc = () => {
+    setDDraft({ id: `doc-${Date.now()}`, name: '', url: '', tag: '' })
+    setDocModalOpen(true)
+  }
+  const saveDoc = async () => {
+    if (!dDraft.name.trim() || !dDraft.url.trim()) return
+    const updated = [...docs, { ...dDraft, tag: dDraft.tag.trim() || 'General' }]
+    setDocsState(updated)
+    setDocModalOpen(false)
+    await setDocs(updated)
+  }
+
+  if (loading) return <div className="p-8 text-los-text-muted">Loading…</div>
 
   return (
     <div className="min-h-screen bg-los-bg">
@@ -44,7 +60,7 @@ export default function DocsPage() {
       <div className="mt-60px p-6" style={{ marginTop: '60px' }}>
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-los-text">Docs</h1>
-          <button className="px-4 py-2 bg-los-accent text-white rounded-lg hover:bg-blue-600">
+          <button onClick={openAddDoc} className="los-btn los-btn-primary">
             + Add Doc
           </button>
         </div>
@@ -100,6 +116,28 @@ export default function DocsPage() {
           </div>
         )}
       </div>
+
+      <Modal
+        open={docModalOpen}
+        onClose={() => setDocModalOpen(false)}
+        title="Add Doc"
+        footer={
+          <>
+            <button onClick={() => setDocModalOpen(false)} className="los-btn los-btn-ghost">Cancel</button>
+            <button onClick={saveDoc} className="los-btn los-btn-primary">Save</button>
+          </>
+        }
+      >
+        <Field label="Name">
+          <input className="los-input" autoFocus value={dDraft.name} onChange={(e) => setDDraft({ ...dDraft, name: e.target.value })} placeholder="Document name" />
+        </Field>
+        <Field label="URL">
+          <input className="los-input" value={dDraft.url} onChange={(e) => setDDraft({ ...dDraft, url: e.target.value })} placeholder="https://…" />
+        </Field>
+        <Field label="Tag">
+          <input className="los-input" value={dDraft.tag} onChange={(e) => setDDraft({ ...dDraft, tag: e.target.value })} placeholder="e.g. Finance, Strategy, HR, Legal" />
+        </Field>
+      </Modal>
     </div>
   )
 }

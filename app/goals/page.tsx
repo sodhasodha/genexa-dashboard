@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import NavBar from '@/components/NavBar'
+import Modal, { Field } from '@/components/Modal'
 import { getGoals, setGoals } from '@/lib/storage'
 import { Goal } from '@/lib/types'
 
@@ -38,7 +39,38 @@ export default function GoalsPage() {
     return 'bg-los-amber'
   }
 
-  if (loading) return <div>Loading...</div>
+  // --- Add / Edit goal modal ---
+  const emptyGoal = (): Goal => ({ id: '', name: '', current: 0, target: 0, notes: '' })
+  const [goalModalOpen, setGoalModalOpen] = useState(false)
+  const [gDraft, setGDraft] = useState<Goal>(emptyGoal())
+  const [gEditing, setGEditing] = useState(false)
+
+  const openAddGoal = () => {
+    setGDraft({ ...emptyGoal(), id: `goal-${Date.now()}` })
+    setGEditing(false)
+    setGoalModalOpen(true)
+  }
+  const openEditGoal = (g: Goal) => {
+    setGDraft({ ...g })
+    setGEditing(true)
+    setGoalModalOpen(true)
+  }
+  const saveGoal = async () => {
+    if (!gDraft.name.trim()) return
+    const exists = goals.some((g) => g.id === gDraft.id)
+    const updated = exists ? goals.map((g) => (g.id === gDraft.id ? gDraft : g)) : [...goals, gDraft]
+    setGoalsState(updated)
+    setGoalModalOpen(false)
+    await setGoals(updated)
+  }
+  const deleteGoal = async (id: string) => {
+    const updated = goals.filter((g) => g.id !== id)
+    setGoalsState(updated)
+    setGoalModalOpen(false)
+    await setGoals(updated)
+  }
+
+  if (loading) return <div className="p-8 text-los-text-muted">Loading…</div>
 
   return (
     <div className="min-h-screen bg-los-bg">
@@ -47,7 +79,7 @@ export default function GoalsPage() {
       <div className="mt-60px p-6" style={{ marginTop: '60px' }}>
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-los-text">Goals</h1>
-          <button className="px-4 py-2 bg-los-accent text-white rounded-lg hover:bg-blue-600">
+          <button onClick={openAddGoal} className="los-btn los-btn-primary">
             + Add Goal
           </button>
         </div>
@@ -59,7 +91,12 @@ export default function GoalsPage() {
               <div key={goal.id} className="los-card p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold text-los-text">{goal.name}</h2>
-                  <button className="text-los-text-muted hover:text-los-text">⋯</button>
+                  <button
+                    onClick={() => openEditGoal(goal)}
+                    className="text-los-text-muted hover:text-los-text text-lg leading-none"
+                  >
+                    ⋯
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
@@ -98,6 +135,66 @@ export default function GoalsPage() {
           })}
         </div>
       </div>
+
+      <Modal
+        open={goalModalOpen}
+        onClose={() => setGoalModalOpen(false)}
+        title={gEditing ? 'Edit Goal' : 'Add Goal'}
+        footer={
+          <>
+            {gEditing && (
+              <button
+                onClick={() => deleteGoal(gDraft.id)}
+                className="los-btn los-btn-ghost text-los-red mr-auto"
+              >
+                Delete
+              </button>
+            )}
+            <button onClick={() => setGoalModalOpen(false)} className="los-btn los-btn-ghost">
+              Cancel
+            </button>
+            <button onClick={saveGoal} className="los-btn los-btn-primary">
+              Save
+            </button>
+          </>
+        }
+      >
+        <Field label="Goal name">
+          <input
+            className="los-input"
+            autoFocus
+            value={gDraft.name}
+            onChange={(e) => setGDraft({ ...gDraft, name: e.target.value })}
+            placeholder="e.g. Monthly Revenue"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Current ($)">
+            <input
+              type="number"
+              className="los-input"
+              value={gDraft.current}
+              onChange={(e) => setGDraft({ ...gDraft, current: Number(e.target.value) })}
+            />
+          </Field>
+          <Field label="Target ($)">
+            <input
+              type="number"
+              className="los-input"
+              value={gDraft.target}
+              onChange={(e) => setGDraft({ ...gDraft, target: Number(e.target.value) })}
+            />
+          </Field>
+        </div>
+        <Field label="Notes">
+          <textarea
+            className="los-textarea"
+            value={gDraft.notes}
+            onChange={(e) => setGDraft({ ...gDraft, notes: e.target.value })}
+            placeholder="Sub-goals, milestones, context"
+          />
+        </Field>
+      </Modal>
     </div>
   )
 }

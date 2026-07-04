@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import NavBar from '@/components/NavBar'
+import Modal, { Field } from '@/components/Modal'
 import { getTasks, setTasks, getProcessedSlackTs, addProcessedSlackTs } from '@/lib/storage'
 import { Task, TaskOperation } from '@/lib/types'
 
@@ -145,10 +146,46 @@ export default function TasksPage() {
   const deleteTask = (taskId: string) => {
     const updated = tasks.filter((t) => t.id !== taskId)
     setTasksState(updated)
+    tasksRef.current = updated
     setTasks(updated)
   }
 
-  if (loading) return <div>Loading...</div>
+  // --- Add / Edit task modal ---
+  const emptyDraft = (): Task => ({
+    id: '',
+    name: '',
+    col: 'today',
+    priority: 'normal',
+    starred: false,
+    due_date: null,
+    notes: '',
+    created: Date.now(),
+  })
+  const [taskModalOpen, setTaskModalOpen] = useState(false)
+  const [draft, setDraft] = useState<Task>(emptyDraft())
+  const [isEditing, setIsEditing] = useState(false)
+
+  const openAdd = () => {
+    setDraft({ ...emptyDraft(), id: `task-${Date.now()}` })
+    setIsEditing(false)
+    setTaskModalOpen(true)
+  }
+  const openEdit = (t: Task) => {
+    setDraft({ ...t })
+    setIsEditing(true)
+    setTaskModalOpen(true)
+  }
+  const saveTask = async () => {
+    if (!draft.name.trim()) return
+    const exists = tasks.some((t) => t.id === draft.id)
+    const updated = exists ? tasks.map((t) => (t.id === draft.id ? draft : t)) : [...tasks, draft]
+    setTasksState(updated)
+    tasksRef.current = updated
+    setTaskModalOpen(false)
+    await setTasks(updated)
+  }
+
+  if (loading) return <div className="p-8 text-los-text-muted">Loading…</div>
 
   return (
     <div className="min-h-screen bg-los-bg">
@@ -167,7 +204,7 @@ export default function TasksPage() {
             >
               ⟳ Sync Slack
             </button>
-            <button className="px-4 py-2 bg-los-accent text-white rounded-lg hover:bg-blue-600">
+            <button onClick={openAdd} className="los-btn los-btn-primary">
               + Add Task
             </button>
           </div>
@@ -189,12 +226,16 @@ export default function TasksPage() {
                     key={task.id}
                     draggable
                     onDragStart={() => handleDragStart(task)}
-                    className="los-card p-3 bg-white cursor-move hover:shadow-los-card-hover"
+                    onClick={() => openEdit(task)}
+                    className="los-card p-3 bg-white cursor-pointer hover:shadow-los-card-hover"
                   >
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <p className="text-sm font-medium text-los-text flex-1">{task.name}</p>
                       <button
-                        onClick={() => toggleStar(task.id)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleStar(task.id)
+                        }}
                         className="text-lg"
                       >
                         {task.starred ? '⭐' : '☆'}
@@ -222,7 +263,10 @@ export default function TasksPage() {
                     )}
 
                     <button
-                      onClick={() => deleteTask(task.id)}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        deleteTask(task.id)
+                      }}
                       className="text-xs text-los-text-muted hover:text-los-red mt-2"
                     >
                       Delete
@@ -234,6 +278,84 @@ export default function TasksPage() {
           ))}
         </div>
       </div>
+
+      <Modal
+        open={taskModalOpen}
+        onClose={() => setTaskModalOpen(false)}
+        title={isEditing ? 'Edit Task' : 'Add Task'}
+        footer={
+          <>
+            {isEditing && (
+              <button
+                onClick={() => {
+                  deleteTask(draft.id)
+                  setTaskModalOpen(false)
+                }}
+                className="los-btn los-btn-ghost text-los-red mr-auto"
+              >
+                Delete
+              </button>
+            )}
+            <button onClick={() => setTaskModalOpen(false)} className="los-btn los-btn-ghost">
+              Cancel
+            </button>
+            <button onClick={saveTask} className="los-btn los-btn-primary">
+              Save
+            </button>
+          </>
+        }
+      >
+        <Field label="Task">
+          <input
+            className="los-input"
+            autoFocus
+            value={draft.name}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            placeholder="What needs doing?"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Column">
+            <select
+              className="los-select"
+              value={draft.col}
+              onChange={(e) => setDraft({ ...draft, col: e.target.value as Task['col'] })}
+            >
+              {COLUMNS.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Priority">
+            <select
+              className="los-select"
+              value={draft.priority}
+              onChange={(e) => setDraft({ ...draft, priority: e.target.value as Task['priority'] })}
+            >
+              <option value="normal">Normal</option>
+              <option value="warm">Warm</option>
+              <option value="hot">Hot</option>
+            </select>
+          </Field>
+        </div>
+        <Field label="Due date">
+          <input
+            type="date"
+            className="los-input"
+            value={draft.due_date || ''}
+            onChange={(e) => setDraft({ ...draft, due_date: e.target.value || null })}
+          />
+        </Field>
+        <Field label="Notes">
+          <textarea
+            className="los-textarea"
+            value={draft.notes}
+            onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
+          />
+        </Field>
+      </Modal>
     </div>
   )
 }

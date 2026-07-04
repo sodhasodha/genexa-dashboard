@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import NavBar from '@/components/NavBar'
 import MetricCard from '@/components/MetricCard'
+import { MorningCheckInModal, EodLogModal } from '@/components/CheckInModals'
 import {
   getGoals,
   getClientTracker,
@@ -46,6 +47,11 @@ export default function HomePage() {
   const [briefingOpen, setBriefingOpen] = useState(false)
   const [briefingText, setBriefingText] = useState('')
   const [briefingLoading, setBriefingLoading] = useState(false)
+  const [morningOpen, setMorningOpen] = useState(false)
+  const [eodOpen, setEodOpen] = useState(false)
+  const [selectedEvent, setSelectedEvent] = useState<any | null>(null)
+
+  const refreshStreak = async () => setLogStreak(await getLogStreak())
 
   const loadFinance = async () => {
     setFinanceLoading(true)
@@ -217,18 +223,18 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Link
-              href="/health"
+            <button
+              onClick={() => setMorningOpen(true)}
               className="px-4 py-2 text-sm font-medium text-los-text bg-los-surface rounded-lg hover:bg-los-surface-2 transition border border-los-border"
             >
               Morning Check-in
-            </Link>
-            <Link
-              href="/health"
+            </button>
+            <button
+              onClick={() => setEodOpen(true)}
               className="px-4 py-2 text-sm font-medium text-los-text bg-los-surface rounded-lg hover:bg-los-surface-2 transition border border-los-border"
             >
               EOD Log
-            </Link>
+            </button>
             <button
               onClick={runBriefing}
               className="px-4 py-2 text-sm font-medium text-white bg-los-accent rounded-lg hover:bg-blue-600 transition"
@@ -378,7 +384,11 @@ export default function HomePage() {
             ) : (
               <div className="space-y-3 flex-1 overflow-y-auto">
                 {calendarEvents.map((ev) => (
-                  <div key={ev.id} className="rounded-lg bg-los-surface-2 p-3">
+                  <button
+                    key={ev.id}
+                    onClick={() => setSelectedEvent(ev)}
+                    className="w-full text-left rounded-lg bg-los-surface-2 p-3 hover:bg-los-surface transition"
+                  >
                     <p className="text-sm font-medium text-los-text truncate">{ev.summary || '(no title)'}</p>
                     <p className="text-xs text-los-text-muted mt-1">
                       {new Date(ev.start?.dateTime || ev.start?.date).toLocaleDateString('en-US', {
@@ -386,7 +396,7 @@ export default function HomePage() {
                       })}{' '}
                       · {fmtEventTime(ev)}
                     </p>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -437,6 +447,72 @@ export default function HomePage() {
                 <pre className="whitespace-pre-wrap font-sans text-sm text-los-text leading-relaxed">{briefingText}</pre>
               ) : (
                 <p className="text-sm text-los-text-muted">Gathering context and generating your briefing…</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Morning Check-in / EOD Log */}
+      <MorningCheckInModal open={morningOpen} onClose={() => setMorningOpen(false)} onSaved={refreshStreak} />
+      <EodLogModal open={eodOpen} onClose={() => setEodOpen(false)} onSaved={refreshStreak} />
+
+      {/* Calendar event drawer */}
+      {selectedEvent && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => setSelectedEvent(null)}>
+          <div
+            className="w-full max-w-md h-full bg-white shadow-2xl p-8 overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-start mb-6 gap-4">
+              <h2 className="text-xl font-semibold text-los-text">{selectedEvent.summary || '(no title)'}</h2>
+              <button onClick={() => setSelectedEvent(null)} className="text-los-text-muted hover:text-los-text text-lg leading-none">
+                ✕
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <p className="los-label mb-1">When</p>
+                <p className="text-sm text-los-text">
+                  {new Date(selectedEvent.start?.dateTime || selectedEvent.start?.date).toLocaleString('en-US', {
+                    weekday: 'long', month: 'short', day: 'numeric',
+                    ...(selectedEvent.start?.dateTime ? { hour: 'numeric', minute: '2-digit' } : {}),
+                  })}
+                  {selectedEvent.end?.dateTime &&
+                    ` – ${new Date(selectedEvent.end.dateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`}
+                </p>
+              </div>
+              {selectedEvent.location && (
+                <div>
+                  <p className="los-label mb-1">Location</p>
+                  <p className="text-sm text-los-text">{selectedEvent.location}</p>
+                </div>
+              )}
+              {Array.isArray(selectedEvent.attendees) && selectedEvent.attendees.length > 0 && (
+                <div>
+                  <p className="los-label mb-1">Attendees</p>
+                  <div className="space-y-1">
+                    {selectedEvent.attendees.map((a: any, i: number) => (
+                      <p key={i} className="text-sm text-los-text">{a.displayName || a.email}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {selectedEvent.hangoutLink && (
+                <a
+                  href={selectedEvent.hangoutLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="los-btn los-btn-primary inline-block"
+                >
+                  Join call
+                </a>
+              )}
+              {selectedEvent.description && (
+                <div>
+                  <p className="los-label mb-1">Details</p>
+                  <p className="text-sm text-los-text-muted whitespace-pre-wrap">{selectedEvent.description}</p>
+                </div>
               )}
             </div>
           </div>

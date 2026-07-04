@@ -91,6 +91,64 @@ body.health-dark-mode {
   color: #9B9B95;
 }
 
+/* Form controls — consistent across all modals/forms */
+.los-input,
+.los-select,
+.los-textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid rgba(0,0,0,0.10);
+  border-radius: 12px;
+  background: #F8F7F4;
+  font-size: 14px;
+  color: #0F0F0F;
+  font-family: 'Inter', sans-serif;
+  transition: border-color 0.2s ease;
+}
+
+.los-input:focus,
+.los-select:focus,
+.los-textarea:focus {
+  outline: none;
+  border-color: #1D4ED8;
+  background: #FFFFFF;
+}
+
+.los-textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.5;
+}
+
+.los-btn {
+  padding: 10px 18px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.los-btn-primary {
+  background: #1D4ED8;
+  color: #FFFFFF;
+}
+
+.los-btn-primary:hover {
+  background: #1E40AF;
+}
+
+.los-btn-ghost {
+  background: #F8F7F4;
+  color: #0F0F0F;
+  border-color: rgba(0,0,0,0.08);
+}
+
+.los-btn-ghost:hover {
+  background: #EFEEEA;
+}
+
 /* Animations */
 @keyframes shimmer {
   0% {

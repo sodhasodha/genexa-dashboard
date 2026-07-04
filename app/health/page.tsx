@@ -10,9 +10,6 @@ export default function HealthPage() {
   const [yesterdayHabits, setYesterdayHabits] = useState<any>(null)
 
   useEffect(() => {
-    // Add dark mode class to body
-    document.body.classList.add('health-dark-mode')
-
     // Get yesterday's data
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)
@@ -27,10 +24,6 @@ export default function HealthPage() {
       setYesterdayHabits(habits)
       setLoading(false)
     })()
-
-    return () => {
-      document.body.classList.remove('health-dark-mode')
-    }
   }, [])
 
   if (loading) return <div>Loading...</div>
@@ -68,7 +61,7 @@ export default function HealthPage() {
             cy="60"
             r="45"
             fill="none"
-            stroke="rgba(255,255,255,0.1)"
+            stroke="rgba(0,0,0,0.08)"
             strokeWidth="8"
           />
           <circle
@@ -88,7 +81,7 @@ export default function HealthPage() {
             y="60"
             textAnchor="middle"
             dominantBaseline="central"
-            fill="white"
+            fill="#0F0F0F"
             fontSize="20"
             fontWeight="bold"
             fontFamily="JetBrains Mono"
@@ -96,17 +89,17 @@ export default function HealthPage() {
             {value}
           </text>
         </svg>
-        <p className="text-center text-sm text-gray-400">{label}</p>
+        <p className="text-center text-sm text-los-text-muted">{label}</p>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-screen bg-los-bg text-los-text">
       <NavBar />
 
       <div className="mt-60px p-6" style={{ marginTop: '60px' }}>
-        <h1 className="text-2xl font-bold mb-8">Health Hub</h1>
+        <h1 className="text-2xl font-bold text-los-text mb-8">Health Hub</h1>
 
         {/* Yesterday's Summary Rings */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
@@ -139,9 +132,9 @@ export default function HealthPage() {
             { label: 'Sleep', value: `${yesterdayLog?.sleep || 0}h` },
             { label: 'Exercise', value: yesterdayHabits?.gym ? '✓' : '✗' },
           ].map((metric, idx) => (
-            <div key={idx} className="bg-gray-900 rounded-lg p-4 text-center">
-              <p className="text-gray-400 text-xs mb-1">{metric.label}</p>
-              <p className="text-xl font-bold font-mono">{metric.value}</p>
+            <div key={idx} className="los-card p-4 text-center">
+              <p className="los-label mb-1">{metric.label}</p>
+              <p className="los-metric-number text-los-text">{metric.value}</p>
             </div>
           ))}
         </div>
@@ -154,9 +147,9 @@ export default function HealthPage() {
             { label: 'Avg Burned', value: '2,100' },
             { label: 'Exercise Days', value: '5/7' },
           ].map((stat, idx) => (
-            <div key={idx} className="bg-gray-900 rounded-lg p-4">
-              <p className="text-gray-400 text-xs mb-2 uppercase font-semibold">{stat.label}</p>
-              <p className="text-2xl font-bold font-mono">{stat.value}</p>
+            <div key={idx} className="los-card p-4">
+              <p className="los-label mb-2">{stat.label}</p>
+              <p className="los-metric-number text-los-text">{stat.value}</p>
             </div>
           ))}
         </div>
