@@ -5,6 +5,14 @@ import Sidebar from '@/components/Sidebar'
 export const metadata: Metadata = {
   title: 'Genexa OS',
   description: 'Genexa operations dashboard',
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.png', type: 'image/png', sizes: '32x32' },
+    ],
+    shortcut: '/favicon.png',
+    apple: '/apple-touch-icon.png',
+  },
 }
 
 export default function RootLayout({
