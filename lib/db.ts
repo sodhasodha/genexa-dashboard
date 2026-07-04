@@ -267,6 +267,16 @@ export async function dbGetDailyHabits(date: string): Promise<DailyHabits | null
   return rows.length ? rowToHabits(rows[0]) : null
 }
 
+export async function dbGetAllDailyHabits(): Promise<DailyHabits[]> {
+  const { rows } = await sql`SELECT * FROM daily_habits ORDER BY date ASC`
+  return rows.map(rowToHabits)
+}
+
+export async function dbGetAllDailyLogs(): Promise<DailyLog[]> {
+  const { rows } = await sql`SELECT * FROM daily_logs ORDER BY date ASC`
+  return rows.map(rowToLog)
+}
+
 export async function dbSetDailyHabits(date: string, habits: DailyHabits): Promise<void> {
   await sql`
     INSERT INTO daily_habits (date, gym, eat_healthy, deep_work, eod_done)
