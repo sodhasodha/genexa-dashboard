@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { dbGetDailyHabits, dbSetDailyHabits } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 // GET /api/data/habits?date=YYYY-MM-DD → DailyHabits | null
 export async function GET(request: NextRequest) {

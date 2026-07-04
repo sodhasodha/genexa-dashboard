@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 const WHOP_API_URL = 'https://api.whop.com/api/v2'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 // Sum of successfully-paid Whop payments since the start of the current month (UTC).
 export async function GET() {

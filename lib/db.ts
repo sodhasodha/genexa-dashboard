@@ -95,7 +95,7 @@ function rowToClient(r: any): CRMClient {
     vertical: r.vertical,
     paymentType: r.payment_type,
     amount: r.amount === null || r.amount === undefined ? null : num(r.amount),
-    termDays: numOrUndef(r.term_days),
+    termDays: r.term_days === null || r.term_days === undefined ? null : num(r.term_days),
     outstanding: num(r.outstanding),
     nextPaymentDue: r.next_payment_due,
     nextContact: r.next_contact,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { dbGetDailyLog, dbSetDailyLog } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 // GET /api/data/logs?date=YYYY-MM-DD → DailyLog | null
 export async function GET(request: NextRequest) {

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 const FATHOM_API_URL = 'https://api.fathom.ai/external/v1'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 export async function GET() {
   try {

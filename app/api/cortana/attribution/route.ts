@@ -5,6 +5,7 @@ const CORTANA_API_URL = 'https://app.usecortana.ai/api/v1'
 const DEFAULT_BUSINESS_ID = '893e8bff-93f9-41b2-b85b-0e98b5bafb7d'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 // GET /api/cortana/attribution?businessId=&startDate=&endDate=
 // Returns a top-line ROAS/CPA summary plus a per-source attribution breakdown.

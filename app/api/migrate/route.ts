@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { migrate } from '@/lib/db/migrate'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 // POST /api/migrate — create tables and seed initial data (idempotent).
 export async function POST() {

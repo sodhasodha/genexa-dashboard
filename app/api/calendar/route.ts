@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCalendarClient, isGoogleConfigured } from '@/lib/google'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 export async function GET() {
   try {

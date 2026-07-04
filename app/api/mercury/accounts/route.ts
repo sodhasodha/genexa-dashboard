@@ -4,6 +4,7 @@ import { fixieFetch } from '@/lib/fixieFetch'
 const MERCURY_API_URL = 'https://api.mercury.com/api/v1'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 export async function GET() {
   try {

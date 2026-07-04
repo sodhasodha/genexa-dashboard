@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 const MONDAY_API_URL = 'https://api.monday.com/v2'
 
 export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 export async function GET() {
   try {
