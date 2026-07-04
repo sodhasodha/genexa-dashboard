@@ -1,0 +1,176 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #F3F2EE;
+  color: #0F0F0F;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  transition: background-color 0.3s ease;
+}
+
+body.health-dark-mode {
+  background-color: #0a0a0a;
+  color: #e4e4e4;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F3F2EE;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CCCCCC;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #999999;
+}
+
+/* Utility classes */
+.los-card {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06);
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.los-card:hover {
+  box-shadow: 0 2px 4px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.10);
+}
+
+.los-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #9B9B95;
+}
+
+.los-metric-number {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.los-nav-tab {
+  font-size: 13px;
+  font-weight: 450;
+  padding: 8px 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.los-nav-tab.active {
+  background: white;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.los-nav-tab.inactive {
+  color: #9B9B95;
+}
+
+/* Animations */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 18px 4px currentColor;
+    opacity: 0.5;
+  }
+  50% {
+    box-shadow: 0 0 18px 4px currentColor;
+    opacity: 1;
+  }
+}
+
+@keyframes spring-bounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0.3),
+    rgba(255, 255, 255, 0)
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-spring {
+  animation: spring-bounce 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* Pixel dissolve animation */
+@keyframes pixel-flash {
+  0% {
+    opacity: 1;
+    background-color: currentColor;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.pixel {
+  position: fixed;
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+  animation: pixel-flash 900ms ease-out forwards;
+}
+
+/* Health dark mode scrollbar */
+body.health-dark-mode ::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+
+body.health-dark-mode ::-webkit-scrollbar-thumb {
+  background: #333333;
+}
+
+body.health-dark-mode ::-webkit-scrollbar-thumb:hover {
+  background: #555555;
+}
