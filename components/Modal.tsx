@@ -30,7 +30,7 @@ export default function Modal({ open, onClose, title, children, footer, maxWidth
       onClick={onClose}
     >
       <div
-        className={`los-card w-full ${maxWidth} max-h-[88vh] flex flex-col p-8`}
+        className={`los-card w-full ${maxWidth} max-h-[88vh] flex flex-col p-5 sm:p-7`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-6">

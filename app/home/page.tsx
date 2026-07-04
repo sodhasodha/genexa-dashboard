@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { MorningCheckInModal, EodLogModal } from '@/components/CheckInModals'
-import { Sparkline, TrendPill, LineChart, MultiLineChart, TimeRange } from '@/components/Charts'
+import { Sparkline, TrendPill, LineChart, TimeRange } from '@/components/Charts'
 import { getClientTracker, getTasks, getClients, getDailyHabits, setDailyHabits } from '@/lib/storage'
 import { Task, CRMClient } from '@/lib/types'
 
@@ -18,11 +18,6 @@ type HabitState = { gym: boolean; eatHealthy: boolean; deepWork: boolean; eodDon
 const fmtCurrency = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const fmtK = (n: number) => (Math.abs(n) >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(0)}`)
 
-const FINANCE_SERIES = [
-  { key: 'checking', name: 'Checking', color: '#3b82f6' },
-  { key: 'credit', name: 'Credit Card', color: '#8b5cf6' },
-]
-
 export default function HomePage() {
   const today = new Date().toISOString().split('T')[0]
 
@@ -31,9 +26,10 @@ export default function HomePage() {
   const [whopMTD, setWhopMTD] = useState<number | null>(null)
   const [revSeries, setRevSeries] = useState<number[]>([])
   const [financeRange, setFinanceRange] = useState(30)
-  const [financeSeries, setFinanceSeries] = useState<{ date: string; checking: number; credit: number }[]>([])
+  const [financeSeries, setFinanceSeries] = useState<{ date: string; checking: number; credit: number; warChest: number }[]>([])
+  const [warChest, setWarChest] = useState(0)
   const [financeLoading, setFinanceLoading] = useState(true)
-  const [scoreRange, setScoreRange] = useState(30)
+  const [scoreRange, setScoreRange] = useState(7)
   const [scoreSeries, setScoreSeries] = useState<{ date: string; score: number }[]>([])
   const [scoreNow, setScoreNow] = useState(0)
   const [weakest, setWeakest] = useState<{ label: string; message: string; value: number } | null>(null)
@@ -81,6 +77,7 @@ export default function HomePage() {
     try {
       const d = await fetch(`/api/finance/series?days=${days}`).then((r) => r.json())
       if (Array.isArray(d.series)) setFinanceSeries(d.series)
+      if (typeof d.warChest === 'number') setWarChest(d.warChest)
     } catch (e) {
       console.error('finance series', e)
     }
@@ -192,7 +189,7 @@ export default function HomePage() {
     ev.start?.dateTime ? new Date(ev.start.dateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'All day'
 
   return (
-    <div className="px-6 py-5 max-w-[1400px] mx-auto flex flex-col gap-4">
+    <div className="px-4 sm:px-6 py-5 max-w-[1400px] mx-auto flex flex-col gap-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-los-text tracking-tight">Good morning, Aryan</h1>
@@ -200,7 +197,7 @@ export default function HomePage() {
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => setMorningOpen(true)} className="los-btn los-btn-ghost">Morning Check-in</button>
           <button onClick={() => setEodOpen(true)} className="los-btn los-btn-ghost">EOD Log</button>
           <button onClick={runBriefing} className="los-btn los-btn-primary">⚡ Daily Briefing</button>
@@ -243,25 +240,29 @@ export default function HomePage() {
       {/* Finance dual-line chart + Meeting Brief */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <div className="lg:col-span-2 los-card p-4 flex flex-col">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-sm font-semibold text-los-text">Finance</h2>
+          <div className="flex justify-between items-start mb-3 gap-3 flex-wrap">
+            <div>
+              <h2 className="text-sm font-semibold text-los-text">The War Chest</h2>
+              <p className="text-[11px] text-los-text-muted">Checking − Credit Card Balance</p>
+              <p className="font-mono font-bold text-3xl mt-1" style={{ color: '#3b82f6', letterSpacing: '-0.03em' }}>
+                {fmtCurrency(warChest)}
+              </p>
+            </div>
             <div className="flex items-center gap-2">
               {financeLoading && <span className="text-[11px] text-los-text-muted">…</span>}
               <TimeRange value={financeRange} onChange={setFinanceRange} />
             </div>
           </div>
-          <MultiLineChart data={financeSeries.map((d) => ({ label: d.date.slice(5), checking: d.checking, credit: d.credit }))} series={FINANCE_SERIES} height={180} format={(v) => fmtK(v)} />
-          <div className="grid grid-cols-3 gap-3 mt-4">
-            {[
-              ['Checking', fmtCurrency(checkingBalance), 'text-los-text'],
-              ['Credit Owed', fmtCurrency(creditBalance), '', '#8b5cf6'],
-              ['MTD Revenue', whopMTD === null ? '—' : fmtCurrency(whopMTD), 'text-los-green'],
-            ].map(([label, value, cls, color]) => (
-              <div key={label as string} className="rounded-lg bg-los-surface-2 px-3 py-2.5">
-                <p className="los-label mb-1">{label}</p>
-                <p className={`font-mono font-semibold text-base ${cls}`} style={color ? { color: color as string } : undefined}>{value}</p>
-              </div>
-            ))}
+          <LineChart data={financeSeries.map((d) => ({ label: d.date.slice(5), value: d.warChest }))} height={180} format={(v) => fmtK(v)} color="#3b82f6" />
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <div className="rounded-lg bg-los-surface-2 px-3 py-2.5">
+              <p className="los-label mb-1">Checking</p>
+              <p className="font-mono font-semibold text-base text-los-text">{fmtCurrency(checkingBalance)}</p>
+            </div>
+            <div className="rounded-lg bg-los-surface-2 px-3 py-2.5">
+              <p className="los-label mb-1">Credit Card Balance</p>
+              <p className="font-mono font-semibold text-base" style={{ color: '#8b5cf6' }}>{fmtCurrency(creditBalance)}</p>
+            </div>
           </div>
         </div>
 

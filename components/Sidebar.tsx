@@ -2,9 +2,8 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ReactNode } from 'react'
+import { ReactNode, useState } from 'react'
 
-// Compact stroke icons (16px, currentColor).
 const Icon = ({ d }: { d: string }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d={d} />
@@ -28,49 +27,73 @@ const MAIN = [
 ]
 const BOTTOM = [{ href: '/docs', label: 'Docs', icon: 'docs' }]
 
-function NavLink({ href, label, icon, active }: { href: string; label: string; icon: string; active: boolean }) {
+function Logo() {
   return (
-    <Link href={href} className={`nav-item ${active ? 'active' : ''}`}>
-      <span className="opacity-90">{icons[icon]}</span>
-      <span>{label}</span>
-    </Link>
+    <div className="flex items-center gap-2">
+      <div className="w-6 h-6 rounded-md bg-los-accent flex items-center justify-center text-white text-xs font-bold">G</div>
+      <span className="font-semibold text-los-text tracking-tight">Genexa OS</span>
+    </div>
   )
 }
 
-export default function Sidebar() {
-  const pathname = usePathname()
-  const isActive = (href: string) => pathname === href || (href === '/home' && pathname === '/')
-
+function NavContent({ onNavigate, isActive }: { onNavigate?: () => void; isActive: (h: string) => boolean }) {
+  const link = (item: { href: string; label: string; icon: string }) => (
+    <Link key={item.href} href={item.href} onClick={onNavigate} className={`nav-item ${isActive(item.href) ? 'active' : ''}`}>
+      <span className="opacity-90">{icons[item.icon]}</span>
+      <span>{item.label}</span>
+    </Link>
+  )
   return (
-    <aside className="w-56 shrink-0 h-screen sticky top-0 bg-los-surface border-r border-los-border flex flex-col px-3 py-4">
-      <div className="px-2 mb-6 flex items-center gap-2">
-        <div className="w-6 h-6 rounded-md bg-los-accent flex items-center justify-center text-white text-xs font-bold">G</div>
-        <span className="font-semibold text-los-text tracking-tight">Genexa OS</span>
+    <div className="flex flex-col h-full px-3 py-4">
+      <div className="px-2 mb-6">
+        <Logo />
       </div>
-
       <p className="los-label px-2 mb-2">Workspace</p>
-      <nav className="space-y-0.5">
-        {MAIN.map((item) => (
-          <NavLink key={item.href} {...item} active={isActive(item.href)} />
-        ))}
-      </nav>
-
+      <nav className="space-y-0.5">{MAIN.map(link)}</nav>
       <div className="mt-auto">
-        <div className="space-y-0.5 pt-4">
-          {BOTTOM.map((item) => (
-            <NavLink key={item.href} {...item} active={isActive(item.href)} />
-          ))}
-        </div>
+        <div className="space-y-0.5 pt-4">{BOTTOM.map(link)}</div>
         <div className="border-t border-los-border mt-3 pt-3 flex items-center gap-2.5 px-2">
-          <div className="w-7 h-7 rounded-full bg-los-accent-soft text-los-accent flex items-center justify-center text-[11px] font-semibold">
-            AS
-          </div>
+          <div className="w-7 h-7 rounded-full bg-los-accent-soft text-los-accent flex items-center justify-center text-[11px] font-semibold">AS</div>
           <div className="leading-tight">
             <p className="text-xs text-los-text">Aryan Sodha</p>
             <p className="text-[11px] text-los-text-muted">CEO</p>
           </div>
         </div>
       </div>
-    </aside>
+    </div>
+  )
+}
+
+export default function Sidebar() {
+  const pathname = usePathname()
+  const [open, setOpen] = useState(false)
+  const isActive = (href: string) => pathname === href || (href === '/home' && pathname === '/')
+
+  return (
+    <>
+      {/* Desktop sidebar */}
+      <aside className="hidden md:block w-56 shrink-0 h-screen sticky top-0 bg-los-surface border-r border-los-border">
+        <NavContent isActive={isActive} />
+      </aside>
+
+      {/* Mobile top bar */}
+      <div className="md:hidden fixed top-0 left-0 right-0 z-40 h-12 bg-los-surface border-b border-los-border flex items-center justify-between px-4">
+        <Logo />
+        <button onClick={() => setOpen(true)} aria-label="Open menu" className="text-los-text-secondary">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M3 6h18M3 12h18M3 18h18" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Mobile drawer */}
+      {open && (
+        <div className="md:hidden fixed inset-0 z-50 bg-black/60" onClick={() => setOpen(false)}>
+          <aside className="w-64 h-full bg-los-surface border-r border-los-border" onClick={(e) => e.stopPropagation()}>
+            <NavContent isActive={isActive} onNavigate={() => setOpen(false)} />
+          </aside>
+        </div>
+      )}
+    </>
   )
 }

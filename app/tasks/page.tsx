@@ -188,16 +188,16 @@ export default function TasksPage() {
 
   return (
     <div className="min-h-screen">
-      <div className="px-6 py-5 flex flex-col" style={{ height: '100vh' }}>
-        <div className="flex items-center justify-between mb-4">
+      <div className="px-4 sm:px-6 py-5 flex flex-col h-[calc(100dvh-3rem)] md:h-screen">
+        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-semibold text-los-text tracking-tight">Tasks</h1>
             {slackStatus && <span className="text-xs text-los-text-muted">{slackStatus}</span>}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={syncSlack}
-              className="px-3 py-2 text-sm bg-los-surface border border-los-border text-los-text rounded-lg hover:bg-los-surface-2"
+              className="los-btn los-btn-ghost"
             >
               ⟳ Sync Slack
             </button>
@@ -208,26 +208,26 @@ export default function TasksPage() {
         </div>
 
         {/* Kanban Board */}
-        <div className="grid grid-cols-5 gap-3 flex-1 min-h-0 overflow-x-auto">
+        <div className="flex gap-4 flex-1 min-h-0 overflow-x-auto pb-2">
           {COLUMNS.map((col) => (
             <div
               key={col.id}
               onDragOver={handleDragOver}
               onDrop={() => handleDrop(col.id)}
-              className="los-card p-3 flex flex-col min-w-[240px]"
+              className="los-card p-4 flex flex-col w-[280px] shrink-0"
             >
               <h2 className="los-label mb-3 flex items-center justify-between">
                 {col.label}
-                <span className="text-los-text-muted">{tasksByColumn(col.id).length}</span>
+                <span className="text-los-text-muted bg-los-surface-2 px-1.5 py-0.5 rounded">{tasksByColumn(col.id).length}</span>
               </h2>
-              <div className="space-y-3 flex-1 overflow-y-auto">
+              <div className="space-y-2.5 flex-1 overflow-y-auto pr-0.5">
                 {tasksByColumn(col.id).map((task) => (
                   <div
                     key={task.id}
                     draggable
                     onDragStart={() => handleDragStart(task)}
                     onClick={() => openEdit(task)}
-                    className="rounded-lg p-2.5 bg-los-surface-2 border border-los-border cursor-pointer hover:border-los-border-hover transition"
+                    className="rounded-lg p-3 bg-los-surface-2 border border-los-border cursor-pointer hover:border-los-border-hover transition"
                   >
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <p className="text-sm font-medium text-los-text flex-1">{task.name}</p>
@@ -314,7 +314,7 @@ export default function TasksPage() {
             placeholder="What needs doing?"
           />
         </Field>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Column">
             <select
               className="los-select"

@@ -5,67 +5,75 @@ import Modal, { Field } from '@/components/Modal'
 import { getGoals, setGoals } from '@/lib/storage'
 import { Goal } from '@/lib/types'
 
+type TypeKey = 'revenue' | 'profit' | 'wellbeing'
+const TYPES: { key: TypeKey; label: string; unit: '$' | 'score'; defTarget: number; color: string }[] = [
+  { key: 'revenue', label: 'Revenue', unit: '$', defTarget: 18000, color: '#22c55e' },
+  { key: 'profit', label: 'Profit', unit: '$', defTarget: 8000, color: '#3b82f6' },
+  { key: 'wellbeing', label: 'Wellbeing Score', unit: 'score', defTarget: 80, color: '#8b5cf6' },
+]
+
+// Trailing `n` months as 'YYYY-MM', newest first. Auto-rolls with the calendar.
+function lastMonths(n: number): string[] {
+  const out: string[] = []
+  const now = new Date()
+  for (let i = 0; i < n; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+  return out
+}
+const monthLabel = (m: string) => {
+  const [y, mo] = m.split('-').map(Number)
+  return new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+}
+const fmtVal = (v: number, unit: '$' | 'score') => (unit === '$' ? `$${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`)
+
 export default function GoalsPage() {
   const [goals, setGoalsState] = useState<Goal[]>([])
+  const [whopMTD, setWhopMTD] = useState(0)
+  const [scoreNow, setScoreNow] = useState(0)
   const [loading, setLoading] = useState(true)
+
+  const months = lastMonths(6)
+  const currentMonth = months[0]
 
   useEffect(() => {
     ;(async () => {
-      const loaded = await getGoals()
-      if (loaded.length === 0) {
-        // Pre-seed with revenue goal
-        const defaultGoals: Goal[] = [
-          {
-            id: '1',
-            name: 'Monthly Revenue',
-            current: 12000,
-            target: 18000,
-            notes: 'Current: $12k, Target: $18k',
-          },
-        ]
-        setGoalsState(defaultGoals)
-        await setGoals(defaultGoals)
-      } else {
-        setGoalsState(loaded)
-      }
+      const [loaded] = await Promise.all([getGoals()])
+      setGoalsState(loaded)
       setLoading(false)
     })()
+    fetch('/api/whop/revenue').then((r) => r.json()).then((d) => typeof d.mtdRevenue === 'number' && setWhopMTD(d.mtdRevenue)).catch(() => {})
+    fetch('/api/score/series?days=7').then((r) => r.json()).then((d) => typeof d.current === 'number' && setScoreNow(d.current)).catch(() => {})
   }, [])
 
-  const getBarColor = (percentage: number) => {
-    if (percentage >= 100) return 'bg-los-green'
-    if (percentage >= 60) return 'bg-los-accent'
-    return 'bg-los-amber'
+  const cell = (month: string, type: TypeKey) => {
+    const def = TYPES.find((t) => t.key === type)!
+    const g = goals.find((x) => x.id === `${month}:${type}`)
+    const target = g?.target ?? def.defTarget
+    let current = g?.current ?? 0
+    if (month === currentMonth) {
+      if (type === 'revenue') current = whopMTD
+      if (type === 'wellbeing') current = scoreNow
+    }
+    return { target, current, def }
   }
 
-  // --- Add / Edit goal modal ---
-  const emptyGoal = (): Goal => ({ id: '', name: '', current: 0, target: 0, notes: '' })
-  const [goalModalOpen, setGoalModalOpen] = useState(false)
-  const [gDraft, setGDraft] = useState<Goal>(emptyGoal())
-  const [gEditing, setGEditing] = useState(false)
-
-  const openAddGoal = () => {
-    setGDraft({ ...emptyGoal(), id: `goal-${Date.now()}` })
-    setGEditing(false)
-    setGoalModalOpen(true)
+  // Edit modal
+  const [modalOpen, setModalOpen] = useState(false)
+  const [edit, setEdit] = useState<{ month: string; type: TypeKey; current: number; target: number }>({ month: '', type: 'revenue', current: 0, target: 0 })
+  const openEdit = (month: string, type: TypeKey) => {
+    const c = cell(month, type)
+    setEdit({ month, type, current: c.current, target: c.target })
+    setModalOpen(true)
   }
-  const openEditGoal = (g: Goal) => {
-    setGDraft({ ...g })
-    setGEditing(true)
-    setGoalModalOpen(true)
-  }
-  const saveGoal = async () => {
-    if (!gDraft.name.trim()) return
-    const exists = goals.some((g) => g.id === gDraft.id)
-    const updated = exists ? goals.map((g) => (g.id === gDraft.id ? gDraft : g)) : [...goals, gDraft]
+  const save = async () => {
+    const id = `${edit.month}:${edit.type}`
+    const label = TYPES.find((t) => t.key === edit.type)!.label
+    const others = goals.filter((g) => g.id !== id)
+    const updated = [...others, { id, name: `${monthLabel(edit.month)} — ${label}`, current: edit.current, target: edit.target, notes: '' }]
     setGoalsState(updated)
-    setGoalModalOpen(false)
-    await setGoals(updated)
-  }
-  const deleteGoal = async (id: string) => {
-    const updated = goals.filter((g) => g.id !== id)
-    setGoalsState(updated)
-    setGoalModalOpen(false)
+    setModalOpen(false)
     await setGoals(updated)
   }
 
@@ -73,124 +81,69 @@ export default function GoalsPage() {
 
   return (
     <div className="min-h-screen">
-      <div className="px-6 py-5 max-w-[1400px] mx-auto">
+      <div className="px-4 sm:px-6 py-5 max-w-[1400px] mx-auto">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-semibold text-los-text tracking-tight">Goals</h1>
-          <button onClick={openAddGoal} className="los-btn los-btn-primary">
-            + Add Goal
-          </button>
+          <div>
+            <h1 className="text-xl font-semibold text-los-text tracking-tight">Goals</h1>
+            <p className="text-xs text-los-text-muted mt-0.5">Last 6 months · revenue · profit · wellbeing</p>
+          </div>
         </div>
 
-        <div className="space-y-4 max-w-4xl">
-          {goals.map((goal) => {
-            const percentage = (goal.current / goal.target) * 100
-            return (
-              <div key={goal.id} className="los-card p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-los-text">{goal.name}</h2>
-                  <button
-                    onClick={() => openEditGoal(goal)}
-                    className="text-los-text-muted hover:text-los-text text-lg leading-none"
-                  >
-                    ⋯
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-                  <div>
-                    <p className="los-label mb-1">Current</p>
-                    <p className="text-2xl font-bold text-los-text font-mono">
-                      ${(goal.current / 1000).toFixed(1)}k
-                    </p>
-                  </div>
-                  <div>
-                    <p className="los-label mb-1">Target</p>
-                    <p className="text-2xl font-bold text-los-text font-mono">
-                      ${(goal.target / 1000).toFixed(1)}k
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs text-los-text-muted">Progress</span>
-                    <span className="text-sm font-semibold text-los-text">{Math.round(percentage)}%</span>
-                  </div>
-                  <div className="relative h-8 bg-los-surface-2 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full ${getBarColor(percentage)} rounded-full transition-all duration-500 animate-shimmer`}
-                      style={{ width: `${Math.min(percentage, 100)}%` }}
-                    />
-                  </div>
-                </div>
-
-                {goal.notes && (
-                  <p className="text-sm text-los-text-muted italic">{goal.notes}</p>
-                )}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {months.map((month) => (
+            <div key={month} className={`los-card p-4 ${month === currentMonth ? 'border-los-accent/40' : ''}`}>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-los-text">{monthLabel(month)}</h2>
+                {month === currentMonth && <span className="text-[10px] text-los-accent bg-los-accent-soft px-2 py-0.5 rounded">Current</span>}
               </div>
-            )
-          })}
+              <div className="space-y-3">
+                {TYPES.map((t) => {
+                  const c = cell(month, t.key)
+                  const pct = c.target > 0 ? Math.min((c.current / c.target) * 100, 100) : 0
+                  return (
+                    <button key={t.key} onClick={() => openEdit(month, t.key)} className="w-full text-left group">
+                      <div className="flex items-baseline justify-between mb-1">
+                        <span className="los-label group-hover:text-los-text-secondary transition">{t.label}</span>
+                        <span className="font-mono text-xs text-los-text">
+                          {fmtVal(c.current, t.unit)} <span className="text-los-text-muted">/ {fmtVal(c.target, t.unit)}</span>
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-los-surface-2 overflow-hidden">
+                        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: t.color }} />
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
       <Modal
-        open={goalModalOpen}
-        onClose={() => setGoalModalOpen(false)}
-        title={gEditing ? 'Edit Goal' : 'Add Goal'}
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={`${monthLabel(edit.month)} — ${TYPES.find((t) => t.key === edit.type)?.label}`}
         footer={
           <>
-            {gEditing && (
-              <button
-                onClick={() => deleteGoal(gDraft.id)}
-                className="los-btn los-btn-ghost text-los-red mr-auto"
-              >
-                Delete
-              </button>
-            )}
-            <button onClick={() => setGoalModalOpen(false)} className="los-btn los-btn-ghost">
-              Cancel
-            </button>
-            <button onClick={saveGoal} className="los-btn los-btn-primary">
-              Save
-            </button>
+            <button onClick={() => setModalOpen(false)} className="los-btn los-btn-ghost">Cancel</button>
+            <button onClick={save} className="los-btn los-btn-primary">Save</button>
           </>
         }
       >
-        <Field label="Goal name">
-          <input
-            className="los-input"
-            autoFocus
-            value={gDraft.name}
-            onChange={(e) => setGDraft({ ...gDraft, name: e.target.value })}
-            placeholder="e.g. Monthly Revenue"
-          />
-        </Field>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Current ($)">
-            <input
-              type="number"
-              className="los-input"
-              value={gDraft.current}
-              onChange={(e) => setGDraft({ ...gDraft, current: Number(e.target.value) })}
-            />
+        {edit.month === currentMonth && edit.type !== 'profit' && (
+          <p className="text-[11px] text-los-text-muted mb-3">
+            Current value for this month is live ({edit.type === 'revenue' ? 'Whop MTD revenue' : 'personal score'}); set the target below.
+          </p>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Current">
+            <input type="number" className="los-input" value={edit.current} onChange={(e) => setEdit({ ...edit, current: Number(e.target.value) })} />
           </Field>
-          <Field label="Target ($)">
-            <input
-              type="number"
-              className="los-input"
-              value={gDraft.target}
-              onChange={(e) => setGDraft({ ...gDraft, target: Number(e.target.value) })}
-            />
+          <Field label="Target">
+            <input type="number" className="los-input" value={edit.target} onChange={(e) => setEdit({ ...edit, target: Number(e.target.value) })} />
           </Field>
         </div>
-        <Field label="Notes">
-          <textarea
-            className="los-textarea"
-            value={gDraft.notes}
-            onChange={(e) => setGDraft({ ...gDraft, notes: e.target.value })}
-            placeholder="Sub-goals, milestones, context"
-          />
-        </Field>
       </Modal>
     </div>
   )

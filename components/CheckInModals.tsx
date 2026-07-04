@@ -148,7 +148,7 @@ export function EodLogModal({ open, onClose, onSaved }: BaseProps) {
         </>
       }
     >
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Hours exercised">
           <input type="number" step="0.5" className="los-input" value={form.exerciseHours} onChange={(e) => set('exerciseHours', e.target.value)} />
         </Field>

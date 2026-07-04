@@ -1,75 +1,83 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { dbGetAllDailyHabits, dbGetAllDailyLogs } from '@/lib/db'
+import { dbGetAllDailyLogs } from '@/lib/db'
+import type { DailyLog } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
 
 const dayStr = (offsetDays: number) => new Date(Date.now() - offsetDays * 86400000).toISOString().slice(0, 10)
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
 
-// Weighted components. Each contributes a normalized 0–1 value.
-const WEIGHTS = { gym: 0.2, eat: 0.15, deep: 0.2, sleep: 0.25, steps: 0.2 }
-const LABELS: Record<string, string> = { gym: 'gym streak', eat: 'eating healthy', deep: 'deep work', sleep: 'sleep', steps: 'steps' }
+// Each input normalized to 0–1 against a daily goal, then weighted (weights sum to 1).
+const WEIGHTS = { sleep: 0.2, steps: 0.15, exercise: 0.15, eaten: 0.15, energy: 0.15, burned: 0.1, feeling: 0.1 }
+const LABELS: Record<string, string> = {
+  sleep: 'sleep', steps: 'steps', exercise: 'exercise', eaten: 'calorie intake', energy: 'energy', burned: 'calories burned', feeling: 'mood',
+}
 const MESSAGES: Record<string, string> = {
-  gym: 'Keep your gym streak going to raise your score',
-  eat: 'Stay consistent eating healthy to raise your score',
-  deep: 'Log more deep work to raise your score',
   sleep: 'Improve sleep to raise your score',
   steps: 'Hit your step goal to raise your score',
+  exercise: 'Exercise more to raise your score',
+  eaten: 'Watch your calorie intake to raise your score',
+  energy: 'Boost your energy to raise your score',
+  burned: 'Burn more calories to raise your score',
+  feeling: 'Lift your mood to raise your score',
 }
 
-// GET /api/score/series?days=N
+function components(log: DailyLog | undefined) {
+  return {
+    sleep: clamp01((log?.sleep ?? 0) / 8),
+    steps: clamp01((log?.stepsTaken ?? 0) / 10000),
+    exercise: clamp01((log?.exerciseHours ?? 0) / 1),
+    // Calorie intake: on-target under ~2200, degrading past it.
+    eaten: log?.caloriesEaten != null ? clamp01(1 - Math.max(0, log.caloriesEaten - 2200) / 1100) : 0,
+    energy: clamp01((log?.energy ?? 0) / 10),
+    burned: clamp01((log?.caloriesBurned ?? 0) / 2500),
+    feeling: clamp01((log?.feeling ?? 0) / 10),
+  }
+}
+const scoreFrom = (c: Record<string, number>, hasData: boolean) =>
+  hasData ? Math.round(Object.entries(WEIGHTS).reduce((s, [k, w]) => s + w * (c as any)[k], 0) * 100) : 0
+
+// GET /api/score/series?days=N  — 7-day rolling average, not a same-day spike.
 export async function GET(request: NextRequest) {
   try {
     const days = Math.min(Math.max(Number(request.nextUrl.searchParams.get('days')) || 30, 1), 400)
-    const [habits, logs] = await Promise.all([dbGetAllDailyHabits(), dbGetAllDailyLogs()])
-
-    const gymSet = new Set(habits.filter((h) => h.gym).map((h) => h.date))
-    const eatSet = new Set(habits.filter((h) => h.eatHealthy).map((h) => h.date))
-    const deepSet = new Set(habits.filter((h) => h.deepWork).map((h) => h.date))
+    const logs = await dbGetAllDailyLogs()
     const logByDate = new Map(logs.map((l) => [l.date, l]))
 
-    const streak = (set: Set<string>, dateStr: string) => {
-      let n = 0
-      const base = new Date(dateStr + 'T00:00:00Z').getTime()
-      while (set.has(new Date(base - n * 86400000).toISOString().slice(0, 10))) n++
-      return n
-    }
+    const dailyScore = (d: string) => scoreFrom(components(logByDate.get(d)), logByDate.has(d))
 
-    // Component normalized values for a given day.
-    const components = (d: string) => {
-      const log = logByDate.get(d)
-      return {
-        gym: Math.min(streak(gymSet, d) / 7, 1),
-        eat: Math.min(streak(eatSet, d) / 7, 1),
-        deep: Math.min(streak(deepSet, d) / 7, 1),
-        sleep: Math.min((log?.sleep ?? 0) / 8, 1),
-        steps: Math.min((log?.stepsTaken ?? 0) / 10000, 1),
-      }
+    // Rolling 7-day average of the raw daily score.
+    const rolling = (d: string) => {
+      const base = new Date(d + 'T00:00:00Z').getTime()
+      let sum = 0
+      for (let k = 0; k < 7; k++) sum += dailyScore(new Date(base - k * 86400000).toISOString().slice(0, 10))
+      return Math.round(sum / 7)
     }
-    const scoreOf = (c: Record<string, number>) =>
-      Math.round(Object.entries(WEIGHTS).reduce((s, [k, w]) => s + w * (c as any)[k], 0) * 100)
 
     const series: { date: string; score: number }[] = []
     for (let i = days - 1; i >= 0; i--) {
       const d = dayStr(i)
-      series.push({ date: d, score: scoreOf(components(d)) })
+      series.push({ date: d, score: rolling(d) })
     }
 
-    // Weakest input today (drives the dynamic message).
-    const todayC = components(dayStr(0))
-    const weakestKey = (Object.keys(WEIGHTS) as (keyof typeof WEIGHTS)[]).reduce((a, b) =>
-      todayC[a] <= todayC[b] ? a : b
-    )
-    const current = series[series.length - 1].score
+    // Weakest input = lowest component averaged over the trailing 7 days that have data.
+    const recent = Array.from({ length: 7 }, (_, k) => logByDate.get(dayStr(k))).filter(Boolean) as DailyLog[]
+    const avgC: Record<string, number> = {}
+    for (const key of Object.keys(WEIGHTS)) {
+      const vals = recent.map((l) => (components(l) as any)[key])
+      avgC[key] = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
+    }
+    const weakestKey = Object.keys(WEIGHTS).reduce((a, b) => (avgC[a] <= avgC[b] ? a : b))
 
     return NextResponse.json({
       series,
-      current,
+      current: series[series.length - 1].score,
       weakest: {
         key: weakestKey,
         label: LABELS[weakestKey],
         message: MESSAGES[weakestKey],
-        value: Math.round(todayC[weakestKey] * 100),
+        value: Math.round((avgC[weakestKey] || 0) * 100),
       },
     })
   } catch (error) {

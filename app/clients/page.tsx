@@ -412,7 +412,7 @@ export default function ClientsPage() {
           </>
         }
       >
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Name">
             <input className="los-input" autoFocus value={cDraft.name} onChange={(e) => setCDraft({ ...cDraft, name: e.target.value })} />
           </Field>
@@ -488,7 +488,7 @@ export default function ClientsPage() {
         <Field label="Name">
           <input className="los-input" autoFocus value={rDraft.name} onChange={(e) => setRDraft({ ...rDraft, name: e.target.value })} />
         </Field>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Role">
             <select className="los-select" value={rDraft.role} onChange={(e) => setRDraft({ ...rDraft, role: e.target.value })}>
               {REL_ROLES.map((v) => <option key={v} value={v}>{v}</option>)}

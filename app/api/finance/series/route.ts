@@ -67,13 +67,22 @@ export async function GET(request: NextRequest) {
     const checkingSeries = reconstruct(checkingBal, checkingTx?.transactions || [], days)
     const creditRawSeries = reconstruct(creditRaw, creditTx?.transactions || [], days)
 
-    const series = checkingSeries.map((c, i) => ({
-      date: new Date(Date.now() - (days - 1 - i) * 86400000).toISOString().slice(0, 10),
-      checking: Math.round(c),
-      credit: Math.round(-creditRawSeries[i]), // owed (Total Balance) as a positive line
-    }))
+    const series = checkingSeries.map((c, i) => {
+      const credit = -creditRawSeries[i] // owed (Total Balance) as a positive number
+      return {
+        date: new Date(Date.now() - (days - 1 - i) * 86400000).toISOString().slice(0, 10),
+        checking: Math.round(c),
+        credit: Math.round(credit),
+        warChest: Math.round(c - credit), // Checking − Credit Card Balance
+      }
+    })
 
-    return NextResponse.json({ series, checking: checkingBal, credit: creditTotalBalance })
+    return NextResponse.json({
+      series,
+      checking: checkingBal,
+      credit: creditTotalBalance,
+      warChest: Math.round(checkingBal - creditTotalBalance),
+    })
   } catch (error) {
     console.error('finance series error:', error)
     return NextResponse.json({ error: 'Failed to build finance series' }, { status: 500 })
