@@ -5,7 +5,10 @@ import NavBar from '@/components/NavBar'
 import { getClients, getRelationships } from '@/lib/storage'
 import { CRMClient, Relationship } from '@/lib/types'
 
-const VERTICALS = ['All', 'Genexa', 'Consulting', 'Groundwork', 'Toolbox Growth']
+const VERTICALS = ['All', 'Genexa', 'Consulting', 'Groundwork', 'Toolbox', 'Other']
+
+// MRR per client = amount / (termDays / 30). Clients with null amount are excluded.
+const mrrFor = (c: CRMClient) => (c.amount && c.termDays ? c.amount / (c.termDays / 30) : 0)
 
 export default function ClientsPage() {
   const [clients, setClientsState] = useState<CRMClient[]>([])
@@ -30,8 +33,10 @@ export default function ClientsPage() {
     ? clients
     : clients.filter((c) => c.vertical === selectedVertical)
 
-  const totalMRR = filteredClients.reduce((sum, c) => sum + (c.amount || 0), 0)
+  const totalMRR = filteredClients.reduce((sum, c) => sum + mrrFor(c), 0)
   const totalOutstanding = filteredClients.reduce((sum, c) => sum + (c.outstanding || 0), 0)
+  // 90-day forecast assumes 30% MoM growth.
+  const forecast90 = totalMRR + totalMRR * 1.3 + totalMRR * 1.3 * 1.3
 
   const getChurnRiskColor = (risk: string) => {
     switch (risk) {
@@ -77,7 +82,7 @@ export default function ClientsPage() {
           <div className="los-card p-4">
             <p className="los-label mb-1">90-Day Forecast</p>
             <p className="los-metric-number text-los-green text-base">
-              ${(totalMRR * 1.3 * 3 / 1000).toFixed(1)}k
+              ${(forecast90 / 1000).toFixed(1)}k
             </p>
           </div>
         </div>
@@ -125,7 +130,7 @@ export default function ClientsPage() {
                     <td className="px-6 py-3 font-medium text-los-text">{client.name}</td>
                     <td className="px-6 py-3 text-los-text-muted text-xs">{client.vertical}</td>
                     <td className="px-6 py-3 font-mono text-los-text">
-                      ${(client.amount / 1000).toFixed(1)}k
+                      {client.amount == null ? '—' : `$${(client.amount / 1000).toFixed(1)}k`}
                     </td>
                     <td className="px-6 py-3 font-mono text-los-red">
                       ${(client.outstanding / 1000).toFixed(1)}k

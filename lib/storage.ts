@@ -147,9 +147,10 @@ export interface ClientTracker {
 }
 
 export function getClientTracker(): ClientTracker {
-  if (typeof window === 'undefined') return { active: 0, goal: 0 }
+  const DEFAULT: ClientTracker = { active: 8, goal: 10 }
+  if (typeof window === 'undefined') return DEFAULT
   const data = localStorage.getItem(KEYS.CLIENT_TRACKER)
-  return data ? JSON.parse(data) : { active: 0, goal: 0 }
+  return data ? JSON.parse(data) : DEFAULT
 }
 
 export function setClientTracker(tracker: ClientTracker): void {

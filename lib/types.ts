@@ -22,16 +22,16 @@ export interface CRMClient {
   id: string
   name: string
   company?: string
-  vertical: 'Genexa' | 'Consulting' | 'Groundwork' | 'Toolbox Growth'
+  vertical: 'Genexa' | 'Consulting' | 'Groundwork' | 'Toolbox' | 'Other'
   paymentType: 'Payment Plan' | 'Recurring' | 'Paid in Full'
-  amount: number
-  term?: number
+  amount: number | null
+  termDays?: number | null
   outstanding: number
   nextPaymentDue: string | null
-  nextContactDate: string | null
+  nextContact: string | null
   churnRisk: 'Low' | 'Medium' | 'High'
-  adStatus: 'Active' | 'Payment Error' | 'Inactive'
-  adHealth?: 'Great' | 'Good' | 'Fair' | 'Poor'
+  adStatus: 'Active' | 'Payment Error' | 'Inactive' | 'N/A'
+  adHealth?: 'Great' | 'Working on it' | 'Poor' | 'N/A'
   nextAction: string
   notes: string
 }

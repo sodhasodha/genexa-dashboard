@@ -14,8 +14,8 @@ const DDL: string[] = [
      target NUMERIC NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '')`,
   `CREATE TABLE IF NOT EXISTS clients (
      id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', company TEXT, vertical TEXT NOT NULL DEFAULT 'Genexa',
-     payment_type TEXT NOT NULL DEFAULT 'Recurring', amount NUMERIC NOT NULL DEFAULT 0, term INTEGER,
-     outstanding NUMERIC NOT NULL DEFAULT 0, next_payment_due TEXT, next_contact_date TEXT,
+     payment_type TEXT NOT NULL DEFAULT 'Recurring', amount NUMERIC, term_days INTEGER,
+     outstanding NUMERIC NOT NULL DEFAULT 0, next_payment_due TEXT, next_contact TEXT,
      churn_risk TEXT NOT NULL DEFAULT 'Low', ad_status TEXT NOT NULL DEFAULT 'Active', ad_health TEXT,
      next_action TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '')`,
   `CREATE TABLE IF NOT EXISTS relationships (
@@ -33,21 +33,21 @@ const DDL: string[] = [
 ]
 
 export const SEED_CLIENTS: CRMClient[] = [
-  { id: '1', name: 'Dr Gabriel', company: 'Multivita', vertical: 'Genexa', paymentType: 'Payment Plan', amount: 3000, outstanding: 0, nextPaymentDue: null, nextContactDate: null, churnRisk: 'Medium', adStatus: 'Active', nextAction: '', notes: '' },
-  { id: '2', name: 'Dr Darren', company: 'Pivotal Health Florida', vertical: 'Genexa', paymentType: 'Payment Plan', amount: 2000, outstanding: 0, nextPaymentDue: null, nextContactDate: null, churnRisk: 'Medium', adStatus: 'Active', nextAction: '', notes: '' },
-  { id: '3', name: 'Dr Chris Calapai', company: 'CC Medical', vertical: 'Genexa', paymentType: 'Paid in Full', amount: 2000, outstanding: 0, nextPaymentDue: null, nextContactDate: null, churnRisk: 'Low', adStatus: 'Payment Error', nextAction: '', notes: '' },
-  { id: '4', name: 'Dr Paul and Marc', company: 'Alt Health Healing', vertical: 'Genexa', paymentType: 'Payment Plan', amount: 4000, outstanding: 0, nextPaymentDue: null, nextContactDate: null, churnRisk: 'High', adStatus: 'Active', nextAction: '', notes: '' },
-  { id: '5', name: 'Dr Russell Smith', company: 'Genexa', vertical: 'Genexa', paymentType: 'Recurring', amount: 5000, outstanding: 0, nextPaymentDue: null, nextContactDate: null, churnRisk: 'Low', adStatus: 'Active', adHealth: 'Great', nextAction: '', notes: '' },
-  { id: '6', name: 'Dr Tarick', company: 'Genexa', vertical: 'Genexa', paymentType: 'Recurring', amount: 399, outstanding: 0, nextPaymentDue: null, nextContactDate: null, churnRisk: 'Low', adStatus: 'Active', nextAction: '', notes: '' },
-  { id: '7', name: 'Naveen', company: '', vertical: 'Consulting', paymentType: 'Recurring', amount: 0, outstanding: 0, nextPaymentDue: null, nextContactDate: null, churnRisk: 'Low', adStatus: 'Inactive', nextAction: '', notes: '' },
-  { id: '8', name: 'Franklyn', company: '', vertical: 'Consulting', paymentType: 'Recurring', amount: 0, outstanding: 0, nextPaymentDue: null, nextContactDate: null, churnRisk: 'Low', adStatus: 'Inactive', nextAction: '', notes: '' },
-  { id: '9', name: 'Scott', company: 'Groundwork Scaling', vertical: 'Groundwork', paymentType: 'Recurring', amount: 1500, outstanding: 0, nextPaymentDue: null, nextContactDate: null, churnRisk: 'Low', adStatus: 'Active', nextAction: '', notes: '' },
-  { id: '10', name: 'Jacob Ray', company: '', vertical: 'Toolbox Growth', paymentType: 'Recurring', amount: 0, outstanding: 0, nextPaymentDue: null, nextContactDate: null, churnRisk: 'Low', adStatus: 'Inactive', nextAction: '', notes: '' },
+  { id: 'c1', name: 'Dr Gabriel', company: 'Multivita', vertical: 'Genexa', paymentType: 'Payment Plan', amount: 3000, termDays: 30, churnRisk: 'Medium', adStatus: 'Active', adHealth: 'Great', outstanding: 3000, nextPaymentDue: '', nextContact: '', nextAction: '', notes: '' },
+  { id: 'c2', name: 'Dr Darren', company: 'Pivotal Health Florida', vertical: 'Genexa', paymentType: 'Payment Plan', amount: 2000, termDays: 30, churnRisk: 'Medium', adStatus: 'Active', adHealth: 'Working on it', outstanding: 2000, nextPaymentDue: '', nextContact: '', nextAction: '', notes: '' },
+  { id: 'c3', name: 'Dr Chris Calapai', company: 'CC Medical', vertical: 'Genexa', paymentType: 'Paid in Full', amount: 2000, termDays: 60, churnRisk: 'Medium', adStatus: 'Payment Error', adHealth: 'Working on it', outstanding: 2000, nextPaymentDue: '', nextContact: '', nextAction: '', notes: '' },
+  { id: 'c4', name: 'Dr Paul and Marc', company: 'Alt Health Healing', vertical: 'Genexa', paymentType: 'Payment Plan', amount: 4000, termDays: 30, churnRisk: 'High', adStatus: 'Active', adHealth: 'Working on it', outstanding: 0, nextPaymentDue: '', nextContact: '', nextAction: '', notes: '' },
+  { id: 'c5', name: 'Dr Russell Smith', company: 'TBC', vertical: 'Genexa', paymentType: 'Payment Plan', amount: 5000, termDays: 30, churnRisk: 'Low', adStatus: 'Active', adHealth: 'Great', outstanding: 5000, nextPaymentDue: '', nextContact: '', nextAction: '', notes: '' },
+  { id: 'c6', name: 'Dr Tarick', company: 'TBC', vertical: 'Genexa', paymentType: 'Recurring', amount: 399, termDays: 30, churnRisk: 'Low', adStatus: 'Active', adHealth: 'Great', outstanding: 399, nextPaymentDue: '', nextContact: '', nextAction: '', notes: '' },
+  { id: 'c7', name: 'Naveen', company: 'Consulting', vertical: 'Consulting', paymentType: 'Recurring', amount: null, termDays: null, churnRisk: 'Low', adStatus: 'N/A', adHealth: 'N/A', outstanding: 0, nextPaymentDue: '', nextContact: '', nextAction: '', notes: '' },
+  { id: 'c8', name: 'Franklyn', company: 'Consulting', vertical: 'Consulting', paymentType: 'Recurring', amount: null, termDays: null, churnRisk: 'Low', adStatus: 'N/A', adHealth: 'N/A', outstanding: 0, nextPaymentDue: '', nextContact: '', nextAction: '', notes: '' },
+  { id: 'c9', name: 'Scott', company: 'Groundwork Scaling', vertical: 'Groundwork', paymentType: 'Recurring', amount: 1500, termDays: 30, churnRisk: 'Low', adStatus: 'Active', adHealth: 'Great', outstanding: 1500, nextPaymentDue: '', nextContact: '', nextAction: '', notes: '' },
+  { id: 'c10', name: 'Jacob Ray', company: 'Toolbox Growth', vertical: 'Toolbox', paymentType: 'Recurring', amount: null, termDays: null, churnRisk: 'Low', adStatus: 'N/A', adHealth: 'N/A', outstanding: 0, nextPaymentDue: '', nextContact: '', nextAction: '', notes: '' },
 ]
 
 export const SEED_RELATIONSHIPS: Relationship[] = [
-  { id: '1', name: 'Cameron England', role: 'contact', channel: 'WhatsApp', whyContact: 'Keep in touch', freqDays: 14, lastContacted: new Date().toISOString().split('T')[0], notes: '' },
-  { id: '2', name: 'Jacob', role: 'contact', channel: 'Email', whyContact: 'Keep in touch', freqDays: 7, lastContacted: new Date().toISOString().split('T')[0], notes: '' },
+  { id: 'r1', name: 'Cameron England', role: 'Mentor', channel: 'Slack', whyContact: 'Monthly mentorship and licensing check-in', freqDays: 30, lastContacted: new Date().toISOString().slice(0, 10), notes: '' },
+  { id: 'r2', name: 'Jacob', role: 'Employee', channel: 'Slack', whyContact: 'Business performance and profit split review', freqDays: 14, lastContacted: new Date().toISOString().slice(0, 10), notes: '' },
 ]
 
 // Idempotent: creates tables if missing and seeds clients/relationships only

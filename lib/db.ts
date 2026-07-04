@@ -94,11 +94,11 @@ function rowToClient(r: any): CRMClient {
     company: r.company ?? undefined,
     vertical: r.vertical,
     paymentType: r.payment_type,
-    amount: num(r.amount),
-    term: numOrUndef(r.term),
+    amount: r.amount === null || r.amount === undefined ? null : num(r.amount),
+    termDays: numOrUndef(r.term_days),
     outstanding: num(r.outstanding),
     nextPaymentDue: r.next_payment_due,
-    nextContactDate: r.next_contact_date,
+    nextContact: r.next_contact,
     churnRisk: r.churn_risk,
     adStatus: r.ad_status,
     adHealth: r.ad_health ?? undefined,
@@ -119,12 +119,12 @@ export async function dbSetClients(clients: CRMClient[]): Promise<void> {
     await client.sql`DELETE FROM clients`
     for (const c of clients) {
       await client.sql`
-        INSERT INTO clients (id, name, company, vertical, payment_type, amount, term,
-                             outstanding, next_payment_due, next_contact_date, churn_risk,
+        INSERT INTO clients (id, name, company, vertical, payment_type, amount, term_days,
+                             outstanding, next_payment_due, next_contact, churn_risk,
                              ad_status, ad_health, next_action, notes)
         VALUES (${c.id}, ${c.name}, ${c.company ?? null}, ${c.vertical}, ${c.paymentType},
-                ${c.amount}, ${c.term ?? null}, ${c.outstanding}, ${c.nextPaymentDue},
-                ${c.nextContactDate}, ${c.churnRisk}, ${c.adStatus}, ${c.adHealth ?? null},
+                ${c.amount ?? null}, ${c.termDays ?? null}, ${c.outstanding}, ${c.nextPaymentDue},
+                ${c.nextContact}, ${c.churnRisk}, ${c.adStatus}, ${c.adHealth ?? null},
                 ${c.nextAction ?? ''}, ${c.notes ?? ''})`
     }
     await client.sql`COMMIT`
