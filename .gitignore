@@ -38,3 +38,6 @@ yarn-error.log*
 
 # Claude Code local (personal) settings
 .claude/settings.local.json
+
+# TS build cache
+*.tsbuildinfo
