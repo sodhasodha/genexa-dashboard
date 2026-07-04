@@ -100,7 +100,8 @@ export default function HomePage() {
   const loadMeetings = async () => {
     setMeetingsLoading(true)
     try {
-      const d = await fetch('/api/meetings').then((r) => r.json())
+      // AI-extracted action items for last-3-day meetings.
+      const d = await fetch('/api/meetings/brief').then((r) => r.json())
       if (Array.isArray(d.meetings)) setMeetings(d.meetings)
     } finally {
       setMeetingsLoading(false)
