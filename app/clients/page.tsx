@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useEffect, Fragment } from 'react'
-import NavBar from '@/components/NavBar'
 import Modal, { Field } from '@/components/Modal'
-import { getClients, setClients, getRelationships } from '@/lib/storage'
+import { getClients, setClients, getRelationships, setRelationships } from '@/lib/storage'
 import { CRMClient, Relationship } from '@/lib/types'
 
 const VERTICALS = ['All', 'Genexa', 'Consulting', 'Groundwork', 'Toolbox', 'Other']
@@ -12,9 +11,13 @@ const PAYMENT_TYPES: CRMClient['paymentType'][] = ['Payment Plan', 'Recurring', 
 const CHURN_RISKS: CRMClient['churnRisk'][] = ['Low', 'Medium', 'High']
 const AD_STATUSES: CRMClient['adStatus'][] = ['Active', 'Payment Error', 'Inactive', 'N/A']
 const AD_HEALTHS: NonNullable<CRMClient['adHealth']>[] = ['Great', 'Working on it', 'Poor', 'N/A']
+const REL_ROLES = ['Mentor', 'Employee', 'Investor', 'Partner', 'Other']
+const REL_CHANNELS = ['Slack', 'WhatsApp', 'Email', 'Phone', 'In Person']
 
 // MRR per client = amount / (termDays / 30). Clients with null amount are excluded.
 const mrrFor = (c: CRMClient) => (c.amount && c.termDays ? c.amount / (c.termDays / 30) : 0)
+
+type SortKey = 'name' | 'vertical' | 'amount' | 'outstanding' | 'churnRisk' | 'adStatus'
 
 export default function ClientsPage() {
   const [clients, setClientsState] = useState<CRMClient[]>([])
@@ -22,6 +25,16 @@ export default function ClientsPage() {
   const [selectedVertical, setSelectedVertical] = useState('All')
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [sortKey, setSortKey] = useState<SortKey>('name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+  }
 
   useEffect(() => {
     ;(async () => {
@@ -83,9 +96,93 @@ export default function ClientsPage() {
     await setClients(updated)
   }
 
+  // Best-effort: match clients to Whop memberships (by name token appearing in
+  // the member email) and sync their next-payment date from the renewal date.
+  const [whopStatus, setWhopStatus] = useState('')
+  const syncWhop = async () => {
+    setWhopStatus('Syncing…')
+    try {
+      const { renewals } = await fetch('/api/whop/renewals').then((r) => r.json())
+      if (!Array.isArray(renewals)) return setWhopStatus('No Whop data')
+      let matched = 0
+      const updated = clients.map((c) => {
+        const tokens = `${c.name} ${c.company || ''}`
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((t) => t.length >= 4 && !['and', 'the', 'dr'].includes(t))
+        const hit = renewals.find((r: any) => tokens.some((t) => r.email.toLowerCase().includes(t)))
+        if (hit) {
+          matched++
+          return { ...c, nextPaymentDue: hit.renewalDate }
+        }
+        return c
+      })
+      if (matched > 0) {
+        setClientsState(updated)
+        await setClients(updated)
+      }
+      setWhopStatus(matched > 0 ? `Synced ${matched} from Whop` : 'No client↔Whop matches')
+    } catch {
+      setWhopStatus('Whop sync failed')
+    }
+  }
+
+  // --- Relationship add / edit modal ---
+  const emptyRel = (): Relationship => ({
+    id: '',
+    name: '',
+    role: 'Mentor',
+    channel: 'Slack',
+    whyContact: '',
+    freqDays: 30,
+    lastContacted: new Date().toISOString().slice(0, 10),
+    notes: '',
+  })
+  const [relModalOpen, setRelModalOpen] = useState(false)
+  const [rDraft, setRDraft] = useState<Relationship>(emptyRel())
+  const [rEditing, setREditing] = useState(false)
+  const openAddRel = () => {
+    setRDraft({ ...emptyRel(), id: `rel-${Date.now()}` })
+    setREditing(false)
+    setRelModalOpen(true)
+  }
+  const openEditRel = (r: Relationship) => {
+    setRDraft({ ...r })
+    setREditing(true)
+    setRelModalOpen(true)
+  }
+  const saveRel = async () => {
+    if (!rDraft.name.trim()) return
+    const exists = relationships.some((r) => r.id === rDraft.id)
+    const updated = exists ? relationships.map((r) => (r.id === rDraft.id ? rDraft : r)) : [...relationships, rDraft]
+    setRelationshipsState(updated)
+    setRelModalOpen(false)
+    await setRelationships(updated)
+  }
+  const deleteRel = async (id: string) => {
+    const updated = relationships.filter((r) => r.id !== id)
+    setRelationshipsState(updated)
+    setRelModalOpen(false)
+    await setRelationships(updated)
+  }
+
   const filteredClients = selectedVertical === 'All'
     ? clients
     : clients.filter((c) => c.vertical === selectedVertical)
+
+  const sortedClients = [...filteredClients].sort((a, b) => {
+    let av: any = a[sortKey]
+    let bv: any = b[sortKey]
+    if (sortKey === 'churnRisk') {
+      const order = { Low: 0, Medium: 1, High: 2 } as Record<string, number>
+      av = order[a.churnRisk]
+      bv = order[b.churnRisk]
+    }
+    if (av == null) av = sortKey === 'amount' ? -1 : ''
+    if (bv == null) bv = sortKey === 'amount' ? -1 : ''
+    const cmp = typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv))
+    return sortDir === 'asc' ? cmp : -cmp
+  })
 
   const totalMRR = filteredClients.reduce((sum, c) => sum + mrrFor(c), 0)
   const totalOutstanding = filteredClients.reduce((sum, c) => sum + (c.outstanding || 0), 0)
@@ -105,75 +202,84 @@ export default function ClientsPage() {
     }
   }
 
-  if (loading) return <div>Loading...</div>
+  if (loading) return <div className="p-8 text-los-text-muted">Loading…</div>
+
+  const SortTh = ({ label, k, right }: { label: string; k: SortKey; right?: boolean }) => (
+    <th
+      onClick={() => toggleSort(k)}
+      className={`px-4 py-2.5 los-label cursor-pointer select-none hover:text-los-text-secondary ${right ? 'text-right' : 'text-left'}`}
+    >
+      {label}
+      <span className="text-los-accent ml-1">{sortKey === k ? (sortDir === 'asc' ? '↑' : '↓') : ''}</span>
+    </th>
+  )
 
   return (
-    <div className="min-h-screen bg-los-bg">
-      <NavBar />
+    <div className="px-6 py-5 max-w-[1400px] mx-auto">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-semibold text-los-text tracking-tight">Clients</h1>
+          {whopStatus && <span className="text-xs text-los-text-muted">{whopStatus}</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={syncWhop} className="los-btn los-btn-ghost">⟳ Sync Whop</button>
+          <button onClick={openAddClient} className="los-btn los-btn-primary">+ Add Contact</button>
+        </div>
+      </div>
 
-      <div className="mt-60px p-6" style={{ marginTop: '60px' }}>
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-los-text">Clients</h1>
-          <button onClick={openAddClient} className="los-btn los-btn-primary">
-            + Add Contact
+      {/* Summary Bar */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div className="los-card p-4">
+          <p className="los-label mb-1">Total MRR</p>
+          <p className="los-metric-number">${(totalMRR / 1000).toFixed(1)}k</p>
+        </div>
+        <div className="los-card p-4">
+          <p className="los-label mb-1">Outstanding</p>
+          <p className="los-metric-number text-los-red">${(totalOutstanding / 1000).toFixed(1)}k</p>
+        </div>
+        <div className="los-card p-4">
+          <p className="los-label mb-1">Active (Ad)</p>
+          <p className="los-metric-number">{clients.filter((c) => c.adStatus === 'Active').length}</p>
+        </div>
+        <div className="los-card p-4">
+          <p className="los-label mb-1">90-Day Forecast</p>
+          <p className="los-metric-number text-los-green">${(forecast90 / 1000).toFixed(1)}k</p>
+        </div>
+      </div>
+
+      {/* Vertical Filter */}
+      <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
+        {VERTICALS.map((vertical) => (
+          <button
+            key={vertical}
+            onClick={() => setSelectedVertical(vertical)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition ${
+              selectedVertical === vertical
+                ? 'bg-los-accent text-white'
+                : 'bg-los-surface text-los-text-muted hover:bg-los-surface-2'
+            }`}
+          >
+            {vertical}
           </button>
-        </div>
+        ))}
+      </div>
 
-        {/* Summary Bar */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          <div className="los-card p-4">
-            <p className="los-label mb-1">Total MRR</p>
-            <p className="los-metric-number text-los-text">${(totalMRR / 1000).toFixed(1)}k</p>
-          </div>
-          <div className="los-card p-4">
-            <p className="los-label mb-1">Outstanding</p>
-            <p className="los-metric-number text-los-red">${(totalOutstanding / 1000).toFixed(1)}k</p>
-          </div>
-          <div className="los-card p-4">
-            <p className="los-label mb-1">Active Clients</p>
-            <p className="los-metric-number text-los-text">{filteredClients.length}</p>
-          </div>
-          <div className="los-card p-4">
-            <p className="los-label mb-1">90-Day Forecast</p>
-            <p className="los-metric-number text-los-green text-base">
-              ${(forecast90 / 1000).toFixed(1)}k
-            </p>
-          </div>
-        </div>
-
-        {/* Vertical Filter */}
-        <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-          {VERTICALS.map((vertical) => (
-            <button
-              key={vertical}
-              onClick={() => setSelectedVertical(vertical)}
-              className={`px-4 py-2 rounded-full font-medium whitespace-nowrap transition ${
-                selectedVertical === vertical
-                  ? 'bg-los-accent text-white'
-                  : 'bg-los-surface text-los-text-muted hover:bg-los-surface-2'
-              }`}
-            >
-              {vertical}
-            </button>
-          ))}
-        </div>
-
-        {/* Clients Table */}
-        <div className="los-card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b border-los-border bg-los-surface-2">
-                <tr>
-                  <th className="px-6 py-3 text-left los-label">Name</th>
-                  <th className="px-6 py-3 text-left los-label">Vertical</th>
-                  <th className="px-6 py-3 text-left los-label">Amount</th>
-                  <th className="px-6 py-3 text-left los-label">Outstanding</th>
-                  <th className="px-6 py-3 text-left los-label">Churn Risk</th>
-                  <th className="px-6 py-3 text-left los-label">Ad Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredClients.map((client) => (
+      {/* Clients Table */}
+      <div className="los-card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead className="border-b border-los-border bg-los-surface-2">
+              <tr>
+                <SortTh label="Name" k="name" />
+                <SortTh label="Vertical" k="vertical" />
+                <SortTh label="Amount" k="amount" />
+                <SortTh label="Outstanding" k="outstanding" />
+                <SortTh label="Churn Risk" k="churnRisk" />
+                <SortTh label="Ad Status" k="adStatus" />
+              </tr>
+            </thead>
+            <tbody>
+              {sortedClients.map((client) => (
                   <Fragment key={client.id}>
                     <tr
                       onClick={() =>
@@ -181,18 +287,18 @@ export default function ClientsPage() {
                       }
                       className="border-b border-los-border hover:bg-los-surface-2 cursor-pointer transition"
                     >
-                      <td className="px-6 py-3 font-medium text-los-text">{client.name}</td>
-                      <td className="px-6 py-3 text-los-text-muted text-xs">{client.vertical}</td>
-                      <td className="px-6 py-3 font-mono text-los-text">
+                      <td className="px-4 py-2.5 font-medium text-los-text">{client.name}</td>
+                      <td className="px-4 py-2.5 text-los-text-muted text-xs">{client.vertical}</td>
+                      <td className="px-4 py-2.5 font-mono text-los-text">
                         {client.amount == null ? '—' : `$${(client.amount / 1000).toFixed(1)}k`}
                       </td>
-                      <td className="px-6 py-3 font-mono text-los-red">
+                      <td className="px-4 py-2.5 font-mono text-los-red">
                         ${(client.outstanding / 1000).toFixed(1)}k
                       </td>
-                      <td className={`px-6 py-3 font-medium ${getChurnRiskColor(client.churnRisk)}`}>
+                      <td className={`px-4 py-2.5 font-medium ${getChurnRiskColor(client.churnRisk)}`}>
                         {client.churnRisk}
                       </td>
-                      <td className={`px-6 py-3 text-xs font-medium ${
+                      <td className={`px-4 py-2.5 text-xs font-medium ${
                         client.adStatus === 'Active'
                           ? 'text-los-green'
                           : client.adStatus === 'Payment Error'
@@ -204,7 +310,7 @@ export default function ClientsPage() {
                     </tr>
                     {expandedClientId === client.id && (
                       <tr className="bg-los-surface-2 border-b border-los-border">
-                        <td colSpan={6} className="px-6 py-5">
+                        <td colSpan={6} className="px-4 py-4">
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             {[
                               ['Company', client.company || '—'],
@@ -241,48 +347,44 @@ export default function ClientsPage() {
                     )}
                   </Fragment>
                 ))}
-              </tbody>
-            </table>
-          </div>
+            </tbody>
+          </table>
         </div>
+      </div>
 
-        {/* Relationships Section */}
-        <div className="mt-8">
-          <h2 className="text-xl font-bold text-los-text mb-4">Relationships</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {relationships.map((rel) => {
-              const daysSinceContact = Math.floor(
-                (Date.now() - new Date(rel.lastContacted).getTime()) / (1000 * 60 * 60 * 24)
-              )
-              const daysUntilNextContact = rel.freqDays - daysSinceContact
-              const isOverdue = daysUntilNextContact < 0
-
-              return (
-                <div
-                  key={rel.id}
-                  className={`los-card p-4 ${isOverdue ? 'ring-2 ring-los-red' : ''}`}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h3 className="font-semibold text-los-text">{rel.name}</h3>
-                      <span className="text-xs bg-los-surface-2 text-los-text-muted px-2 py-1 rounded inline-block mt-1">
-                        {rel.role}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="text-xs text-los-text-muted space-y-1">
-                    <p>📱 {rel.channel}</p>
-                    <p>
-                      Next contact:{' '}
-                      <span className={isOverdue ? 'text-los-red font-semibold' : ''}>
-                        {isOverdue ? 'Overdue!' : `${Math.max(daysUntilNextContact, 0)} days`}
-                      </span>
-                    </p>
-                  </div>
+      {/* Relationships Section */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-los-text">Relationships</h2>
+          <button onClick={openAddRel} className="los-btn los-btn-ghost text-xs">+ Add</button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {relationships.map((rel) => {
+            const daysSince = Math.floor((Date.now() - new Date(rel.lastContacted).getTime()) / 86400000)
+            const daysUntil = rel.freqDays - daysSince
+            const isOverdue = daysUntil < 0
+            return (
+              <button
+                key={rel.id}
+                onClick={() => openEditRel(rel)}
+                className={`los-card p-3.5 text-left hover:border-los-border-hover transition ${isOverdue ? 'ring-1 ring-los-red' : ''}`}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <h3 className="font-semibold text-los-text text-sm">{rel.name}</h3>
+                  <span className="text-[10px] bg-los-surface-2 text-los-text-muted px-2 py-0.5 rounded">{rel.role}</span>
                 </div>
-              )
-            })}
-          </div>
+                <div className="text-xs text-los-text-muted space-y-1">
+                  <p>{rel.channel} · every {rel.freqDays}d</p>
+                  <p>
+                    Next contact:{' '}
+                    <span className={isOverdue ? 'text-los-red font-semibold' : 'text-los-text-secondary'}>
+                      {isOverdue ? 'Overdue' : `${Math.max(daysUntil, 0)} days`}
+                    </span>
+                  </p>
+                </div>
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -366,6 +468,49 @@ export default function ClientsPage() {
         </Field>
         <Field label="Notes">
           <textarea className="los-textarea" value={cDraft.notes} onChange={(e) => setCDraft({ ...cDraft, notes: e.target.value })} />
+        </Field>
+      </Modal>
+
+      <Modal
+        open={relModalOpen}
+        onClose={() => setRelModalOpen(false)}
+        title={rEditing ? 'Edit Relationship' : 'Add Relationship'}
+        footer={
+          <>
+            {rEditing && (
+              <button onClick={() => deleteRel(rDraft.id)} className="los-btn los-btn-ghost text-los-red mr-auto">Delete</button>
+            )}
+            <button onClick={() => setRelModalOpen(false)} className="los-btn los-btn-ghost">Cancel</button>
+            <button onClick={saveRel} className="los-btn los-btn-primary">Save</button>
+          </>
+        }
+      >
+        <Field label="Name">
+          <input className="los-input" autoFocus value={rDraft.name} onChange={(e) => setRDraft({ ...rDraft, name: e.target.value })} />
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Role">
+            <select className="los-select" value={rDraft.role} onChange={(e) => setRDraft({ ...rDraft, role: e.target.value })}>
+              {REL_ROLES.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </Field>
+          <Field label="Channel">
+            <select className="los-select" value={rDraft.channel} onChange={(e) => setRDraft({ ...rDraft, channel: e.target.value })}>
+              {REL_CHANNELS.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </Field>
+          <Field label="Contact every (days)">
+            <input type="number" className="los-input" value={rDraft.freqDays} onChange={(e) => setRDraft({ ...rDraft, freqDays: Number(e.target.value) })} />
+          </Field>
+          <Field label="Last contacted">
+            <input type="date" className="los-input" value={rDraft.lastContacted} onChange={(e) => setRDraft({ ...rDraft, lastContacted: e.target.value })} />
+          </Field>
+        </div>
+        <Field label="Why contact">
+          <input className="los-input" value={rDraft.whyContact} onChange={(e) => setRDraft({ ...rDraft, whyContact: e.target.value })} />
+        </Field>
+        <Field label="Notes">
+          <textarea className="los-textarea" value={rDraft.notes} onChange={(e) => setRDraft({ ...rDraft, notes: e.target.value })} />
         </Field>
       </Modal>
     </div>

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import NavBar from '@/components/NavBar'
 import Modal, { Field } from '@/components/Modal'
 import { getDocs, setDocs } from '@/lib/storage'
 import { Doc } from '@/lib/types'
@@ -54,12 +53,10 @@ export default function DocsPage() {
   if (loading) return <div className="p-8 text-los-text-muted">Loading…</div>
 
   return (
-    <div className="min-h-screen bg-los-bg">
-      <NavBar />
-
-      <div className="mt-60px p-6" style={{ marginTop: '60px' }}>
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-los-text">Docs</h1>
+    <div className="min-h-screen">
+      <div className="px-6 py-5 max-w-[1400px] mx-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-xl font-semibold text-los-text tracking-tight">Docs</h1>
           <button onClick={openAddDoc} className="los-btn los-btn-primary">
             + Add Doc
           </button>

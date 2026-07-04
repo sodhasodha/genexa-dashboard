@@ -1,9 +1,10 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import Sidebar from '@/components/Sidebar'
 
 export const metadata: Metadata = {
-  title: 'Life OS',
-  description: 'Personal operating system dashboard',
+  title: 'Genexa OS',
+  description: 'Genexa operations dashboard',
 }
 
 export default function RootLayout({
@@ -22,7 +23,10 @@ export default function RootLayout({
         />
       </head>
       <body>
-        {children}
+        <div className="flex min-h-screen">
+          <Sidebar />
+          <main className="flex-1 min-w-0">{children}</main>
+        </div>
       </body>
     </html>
   )

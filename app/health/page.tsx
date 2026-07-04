@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import NavBar from '@/components/NavBar'
 import { getDailyLog, getDailyHabits } from '@/lib/storage'
 
 export default function HealthPage() {
@@ -95,11 +94,9 @@ export default function HealthPage() {
   }
 
   return (
-    <div className="min-h-screen bg-los-bg text-los-text">
-      <NavBar />
-
-      <div className="mt-60px p-6" style={{ marginTop: '60px' }}>
-        <h1 className="text-2xl font-bold text-los-text mb-8">Health Hub</h1>
+    <div className="min-h-screen text-los-text">
+      <div className="px-6 py-5 max-w-[1400px] mx-auto">
+        <h1 className="text-xl font-semibold text-los-text tracking-tight mb-6">Health Hub</h1>
 
         {/* Yesterday's Summary Rings */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">

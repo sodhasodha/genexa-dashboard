@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import NavBar from '@/components/NavBar'
 import Modal, { Field } from '@/components/Modal'
 import { getTasks, setTasks, getProcessedSlackTs, addProcessedSlackTs } from '@/lib/storage'
 import { Task, TaskOperation } from '@/lib/types'
@@ -188,13 +187,11 @@ export default function TasksPage() {
   if (loading) return <div className="p-8 text-los-text-muted">Loading…</div>
 
   return (
-    <div className="min-h-screen bg-los-bg">
-      <NavBar />
-
-      <div className="mt-60px p-6 h-screen-minus-60" style={{ height: 'calc(100vh - 60px)' }}>
-        <div className="flex items-center justify-between mb-6">
+    <div className="min-h-screen">
+      <div className="px-6 py-5 flex flex-col" style={{ height: '100vh' }}>
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-los-text">Tasks</h1>
+            <h1 className="text-xl font-semibold text-los-text tracking-tight">Tasks</h1>
             {slackStatus && <span className="text-xs text-los-text-muted">{slackStatus}</span>}
           </div>
           <div className="flex items-center gap-3">
@@ -211,15 +208,18 @@ export default function TasksPage() {
         </div>
 
         {/* Kanban Board */}
-        <div className="grid grid-cols-5 gap-4 h-full overflow-x-auto">
+        <div className="grid grid-cols-5 gap-3 flex-1 min-h-0 overflow-x-auto">
           {COLUMNS.map((col) => (
             <div
               key={col.id}
               onDragOver={handleDragOver}
               onDrop={() => handleDrop(col.id)}
-              className="los-card p-4 flex flex-col min-w-[280px] bg-los-surface-2"
+              className="los-card p-3 flex flex-col min-w-[240px]"
             >
-              <h2 className="los-label mb-4">{col.label}</h2>
+              <h2 className="los-label mb-3 flex items-center justify-between">
+                {col.label}
+                <span className="text-los-text-muted">{tasksByColumn(col.id).length}</span>
+              </h2>
               <div className="space-y-3 flex-1 overflow-y-auto">
                 {tasksByColumn(col.id).map((task) => (
                   <div
@@ -227,7 +227,7 @@ export default function TasksPage() {
                     draggable
                     onDragStart={() => handleDragStart(task)}
                     onClick={() => openEdit(task)}
-                    className="los-card p-3 bg-white cursor-pointer hover:shadow-los-card-hover"
+                    className="rounded-lg p-2.5 bg-los-surface-2 border border-los-border cursor-pointer hover:border-los-border-hover transition"
                   >
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <p className="text-sm font-medium text-los-text flex-1">{task.name}</p>
@@ -243,10 +243,10 @@ export default function TasksPage() {
                     </div>
 
                     {task.priority !== 'normal' && (
-                      <span className={`text-xs font-semibold px-2 py-1 rounded ${
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
                         task.priority === 'hot'
-                          ? 'bg-red-100 text-los-red'
-                          : 'bg-amber-100 text-los-amber'
+                          ? 'bg-red-500/15 text-red-400'
+                          : 'bg-amber-500/15 text-amber-400'
                       }`}>
                         {task.priority.toUpperCase()}
                       </span>

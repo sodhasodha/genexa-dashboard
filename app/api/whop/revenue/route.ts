@@ -19,11 +19,14 @@ export async function GET() {
 
     const now = new Date()
     const startOfMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000
+    const DAYS = 30
+    const startOfWindow = Math.floor(Date.now() / 1000) - DAYS * 86400
 
     let mtdRevenue = 0
     let currency = 'usd'
     let page = 1
     let totalPages = 1
+    const daily: Record<string, number> = {} // 'YYYY-MM-DD' -> revenue
 
     // Paginate through payments, summing paid ones from this month.
     // Capped at 50 pages as a safety valve.
@@ -45,16 +48,27 @@ export async function GET() {
       for (const payment of data.data || []) {
         if (payment.status !== 'paid') continue
         const paidAt = payment.paid_at ?? payment.created_at
-        if (typeof paidAt === 'number' && paidAt >= startOfMonth) {
-          mtdRevenue += payment.final_amount ?? payment.total ?? 0
-          if (payment.currency) currency = payment.currency
+        if (typeof paidAt !== 'number') continue
+        const amount = payment.final_amount ?? payment.total ?? 0
+        if (payment.currency) currency = payment.currency
+        if (paidAt >= startOfMonth) mtdRevenue += amount
+        if (paidAt >= startOfWindow) {
+          const day = new Date(paidAt * 1000).toISOString().slice(0, 10)
+          daily[day] = (daily[day] || 0) + amount
         }
       }
 
       page += 1
     } while (page <= totalPages && page <= 50)
 
-    return NextResponse.json({ mtdRevenue, currency })
+    // Fill a continuous daily series for the last DAYS days (zero-fill gaps).
+    const series: { date: string; revenue: number }[] = []
+    for (let i = DAYS - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400 * 1000).toISOString().slice(0, 10)
+      series.push({ date: d, revenue: Math.round((daily[d] || 0) * 100) / 100 })
+    }
+
+    return NextResponse.json({ mtdRevenue, currency, series })
   } catch (error) {
     console.error('Whop revenue error:', error)
     return NextResponse.json(
