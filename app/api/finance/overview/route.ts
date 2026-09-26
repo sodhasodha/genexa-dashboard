@@ -7,6 +7,7 @@ import { buildReceivables, summariseReceivables } from '@/lib/receivables'
 import { buildExpenseRows, expenseDrivers } from '@/lib/expenseControls'
 import { runAllScenarios, Renewal } from '@/lib/scenarios'
 import { coldSmsPayout } from '@/lib/payStructure'
+import { genexaMrr, smsMrr, totalMrr } from '@/lib/mrr'
 
 const COMMAS_API_URL = 'https://www.fanbasis.com/public-api'
 const MONTHS = 13 // 12 full months + current
@@ -28,7 +29,7 @@ function monthList(): string[] {
   return out
 }
 
-type Sale = { ts: number; customer: string; amount: number; fee: number }
+type Sale = { ts: number; customer: string; amount: number; fee: number; product?: string }
 type Refund = { ts: number; amount: number }
 
 /* ---------------------------------- Whop ---------------------------------- */
@@ -63,7 +64,7 @@ async function fetchCommas(): Promise<{ sales: Sale[]; refunds: Refund[] }> {
     for (const t of txs) {
       const ts = new Date(t.transaction_date).getTime()
       if (!ts) continue
-      sales.push({ ts, customer: t.fan?.id || t.fan?.email || String(t.id), amount: Number(t.amount) || 0, fee: Number(t.fee_amount) || 0 })
+      sales.push({ ts, customer: t.fan?.id || t.fan?.email || String(t.id), amount: Number(t.amount) || 0, fee: Number(t.fee_amount) || 0, product: t.product?.title || t.service?.title || '' })
       for (const rf of t.refunds || []) {
         refunds.push({ ts: new Date(rf.created_at).getTime() || ts, amount: Number(rf.amount) || 0 })
       }
@@ -367,6 +368,10 @@ export async function GET() {
       .filter((m) => plans[m.plan]?.plan_type === 'renewal' && !m.cancel_at_period_end && m.status !== 'completed')
       .reduce((sum, m) => sum + ((Number(plans[m.plan].renewal_price) || 0) * 30) / (Number(plans[m.plan].billing_period) || 30), 0)
 
+    const gMrr = genexaMrr({ payments, memberships, plans, products, monday })
+    const sMrr = smsMrr(commas.sales)
+    const mrr = { genexa: gMrr, sms: sMrr, total: totalMrr(gMrr, sMrr) }
+
     return NextResponse.json({
       asOf: now.toISOString(),
       dayOfMonth: day,
@@ -394,6 +399,7 @@ export async function GET() {
         pace: paceSeries(dailyTotal),
         forecast: runAllScenarios(forecastInput, true),
       },
+      mrr,
       receivables: { items: receivables, summary: summariseReceivables(receivables) },
       expenses: { rows: expenseRows },
       drivers: {

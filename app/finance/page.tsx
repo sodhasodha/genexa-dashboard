@@ -211,6 +211,28 @@ function Card({ title, sub, children, className = '', tight = false }: { title: 
   )
 }
 
+// MRR now vs predicted MRR in 30 days, with the drivers behind the prediction.
+function MrrStrip({ current, predicted, currentSub, predictedSub }: { current: number; predicted: number; currentSub: string; predictedSub: string }) {
+  const delta = current > 0 ? ((predicted - current) / current) * 100 : null
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <div className="los-card p-4">
+        <p className="los-label">MRR</p>
+        <p className="los-metric-number mt-1" style={{ color: C.backend }}>{fmtCurrency(current)}</p>
+        <p className="text-[11px] text-los-text-muted mt-1 truncate" title={currentSub}>{currentSub}</p>
+      </div>
+      <div className="los-card p-4">
+        <div className="flex items-start justify-between gap-2">
+          <p className="los-label">Predicted MRR · 30d</p>
+          {delta !== null && isFinite(delta) && <TrendPill pct={delta} />}
+        </div>
+        <p className="los-metric-number mt-1">{fmtCurrency(predicted)}</p>
+        <p className="text-[11px] text-los-text-muted mt-1 truncate" title={predictedSub}>{predictedSub}</p>
+      </div>
+    </div>
+  )
+}
+
 // Cumulative this-month vs last-month, aligned to today's day of month.
 function PaceChart({ pace, color, name }: { pace: { current: number[]; previous: number[] }; color: string; name: string }) {
   const days = pace.current.length
@@ -347,6 +369,14 @@ export default function FinancePage() {
 
       {view?.kind === 'total' && (
         <>
+          {data.mrr && (
+            <MrrStrip
+              current={data.mrr.total.current}
+              predicted={data.mrr.total.predicted}
+              currentSub={`Genexa ${fmtK(data.mrr.total.genexa)} + your SMS share ${fmtK(data.mrr.total.smsShare)}`}
+              predictedSub={`Genexa ${fmtK(data.mrr.genexa.predicted)} + SMS share ${fmtK(data.mrr.total.smsSharePredicted)}`}
+            />
+          )}
           <KpiGrid
             rows={view.rows}
             period={period}
@@ -411,6 +441,14 @@ export default function FinancePage() {
 
       {view?.kind === 'genexa' && (
         <>
+          {data.mrr && (
+            <MrrStrip
+              current={data.mrr.genexa.current}
+              predicted={data.mrr.genexa.predicted}
+              currentSub={`${data.mrr.genexa.clients} recurring · Whop ${fmtK(data.mrr.genexa.whop)}${data.mrr.genexa.other ? ` (incl. ${fmtK(data.mrr.genexa.other)} other products)` : ''} + Monday ${fmtK(data.mrr.genexa.monday)}`}
+              predictedSub={`−${fmtK(data.mrr.genexa.lost)} churn/cancels · +${fmtK(data.mrr.genexa.newAvg)} new/mo (90d avg)`}
+            />
+          )}
           <KpiGrid
             rows={view.rows}
             period={period}
@@ -464,6 +502,14 @@ export default function FinancePage() {
 
       {view?.kind === 'sms' && (
         <>
+          {data.mrr && (
+            <MrrStrip
+              current={data.mrr.sms.current}
+              predicted={data.mrr.sms.predicted}
+              currentSub={`${data.mrr.sms.customers} active payers · ${data.mrr.sms.daily} daily, ${data.mrr.sms.weekly} weekly · billing run-rate, net of fees`}
+              predictedSub={`${data.mrr.sms.retention}% net retention · +${fmtK(data.mrr.sms.newAvg)} new & returning/mo (90d avg)`}
+            />
+          )}
           <KpiGrid
             rows={view.rows}
             period={period}

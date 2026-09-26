@@ -15,7 +15,7 @@ import { coldSmsPayout } from '@/lib/payStructure'
 export type ScenarioKey = 'conservative' | 'base' | 'upside'
 export type Renewal = { dateMs: number; amount: number; confidence: number; cycleDays: number | null }
 
-const FACTORS: Record<ScenarioKey, {
+export const FACTORS: Record<ScenarioKey, {
   prob: number // added to each renewal's confidence
   retention: number // chance a client renews each further cycle
   newCash: number
