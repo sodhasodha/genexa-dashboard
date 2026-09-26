@@ -25,6 +25,8 @@ export default function HomePage() {
   const [creditBalance, setCreditBalance] = useState(0)
   const [whopMTD, setWhopMTD] = useState<number | null>(null)
   const [revSeries, setRevSeries] = useState<number[]>([])
+  const [commasMTD, setCommasMTD] = useState<number | null>(null)
+  const [commasSeries, setCommasSeries] = useState<number[]>([])
   const [financeRange, setFinanceRange] = useState(30)
   const [financeSeries, setFinanceSeries] = useState<{ date: string; checking: number; credit: number; warChest: number }[]>([])
   const [warChest, setWarChest] = useState(0)
@@ -56,9 +58,10 @@ export default function HomePage() {
   const loadBalances = async () => {
     setFinanceLoading(true)
     try {
-      const [mercuryRes, whopRes] = await Promise.allSettled([
+      const [mercuryRes, whopRes, commasRes] = await Promise.allSettled([
         fetch('/api/mercury/accounts').then((r) => r.json()),
         fetch('/api/whop/revenue').then((r) => r.json()),
+        fetch('/api/commas/revenue').then((r) => r.json()),
       ])
       if (mercuryRes.status === 'fulfilled' && mercuryRes.value) {
         setCheckingBalance(mercuryRes.value.checkingBalance ?? 0)
@@ -67,6 +70,10 @@ export default function HomePage() {
       if (whopRes.status === 'fulfilled' && whopRes.value) {
         if (typeof whopRes.value.mtdRevenue === 'number') setWhopMTD(whopRes.value.mtdRevenue)
         if (Array.isArray(whopRes.value.series)) setRevSeries(whopRes.value.series.map((d: any) => d.revenue))
+      }
+      if (commasRes.status === 'fulfilled' && commasRes.value) {
+        if (typeof commasRes.value.mtdRevenue === 'number') setCommasMTD(commasRes.value.mtdRevenue)
+        if (Array.isArray(commasRes.value.series)) setCommasSeries(commasRes.value.series.map((d: any) => d.revenue))
       }
     } finally {
       setFinanceLoading(false)
@@ -180,6 +187,9 @@ export default function HomePage() {
   const revLast7 = revSeries.slice(-7).reduce((s, v) => s + v, 0)
   const revPrev7 = revSeries.slice(-14, -7).reduce((s, v) => s + v, 0)
   const revTrend = revPrev7 > 0 ? ((revLast7 - revPrev7) / revPrev7) * 100 : 0
+  const commasLast7 = commasSeries.slice(-7).reduce((s, v) => s + v, 0)
+  const commasPrev7 = commasSeries.slice(-14, -7).reduce((s, v) => s + v, 0)
+  const commasTrend = commasPrev7 > 0 ? ((commasLast7 - commasPrev7) / commasPrev7) * 100 : 0
 
   // Meeting Brief: last 3 days only, action items grouped by meeting.
   const cutoff = Date.now() - 3 * 86400000
@@ -205,7 +215,7 @@ export default function HomePage() {
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="los-card p-4">
           <p className="los-label">Checking</p>
           <p className="los-metric-number mt-1">{fmtCurrency(checkingBalance)}</p>
@@ -213,11 +223,19 @@ export default function HomePage() {
         </div>
         <div className="los-card p-4">
           <div className="flex items-start justify-between">
-            <p className="los-label">MTD Revenue</p>
+            <p className="los-label">MTD Revenue · Whop</p>
             {revPrev7 > 0 && <TrendPill pct={revTrend} />}
           </div>
           <p className="los-metric-number mt-1">{whopMTD === null ? '—' : fmtCurrency(whopMTD)}</p>
           <div className="mt-2 h-7">{revSeries.length > 1 && <Sparkline data={revSeries.slice(-14)} width={140} height={28} color="#22c55e" />}</div>
+        </div>
+        <div className="los-card p-4">
+          <div className="flex items-start justify-between">
+            <p className="los-label">MTD Revenue · Commas</p>
+            {commasPrev7 > 0 && <TrendPill pct={commasTrend} />}
+          </div>
+          <p className="los-metric-number mt-1">{commasMTD === null ? '—' : fmtCurrency(commasMTD)}</p>
+          <div className="mt-2 h-7">{commasSeries.length > 1 && <Sparkline data={commasSeries.slice(-14)} width={140} height={28} color="#f59e0b" />}</div>
         </div>
         <div className="los-card p-4">
           <div className="flex items-start justify-between">

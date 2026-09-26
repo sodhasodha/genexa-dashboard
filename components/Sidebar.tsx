@@ -14,12 +14,14 @@ const icons: Record<string, ReactNode> = {
   tasks: <Icon d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />,
   goals: <Icon d="M12 2v4m0 12v4M2 12h4m12 0h4M12 12l4-4" />,
   clients: <Icon d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm14 10v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />,
+  finance: <Icon d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />,
   health: <Icon d="M22 12h-4l-3 9L9 3l-3 9H2" />,
   docs: <Icon d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6" />,
 }
 
 const MAIN = [
   { href: '/home', label: 'Home', icon: 'home' },
+  { href: '/finance', label: 'Finance', icon: 'finance' },
   { href: '/tasks', label: 'Tasks', icon: 'tasks' },
   { href: '/goals', label: 'Goals', icon: 'goals' },
   { href: '/clients', label: 'Clients', icon: 'clients' },

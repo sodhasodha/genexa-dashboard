@@ -41,3 +41,5 @@ yarn-error.log*
 
 # TS build cache
 *.tsbuildinfo
+.vercel
+.env*

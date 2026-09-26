@@ -356,3 +356,126 @@ export function MultiLineChart({
     </div>
   )
 }
+
+/* ---------------------------- StackedForecast ----------------------------- */
+// Monthly stacked bars; bars flagged `forecast` render faded + dashed, and an
+// optional overlay line (e.g. net profit) runs through bar centres.
+type StackSeries = { key: string; name: string; color: string }
+export function StackedForecast({
+  data,
+  series,
+  line,
+  height = 200,
+  format = (v: number) => String(v),
+}: {
+  data: { label?: any; forecast?: boolean; [k: string]: any }[]
+  series: StackSeries[]
+  line?: StackSeries
+  height?: number
+  format?: (v: number) => string
+}) {
+  const { idx, onMove, clear } = useHover(data.length)
+  if (!data.length) return <Empty height={height} />
+
+  const padB = 18
+  const plotH = height - padB
+  const totals = data.map((d) => series.reduce((s, x) => s + Math.max(d[x.key] || 0, 0), 0))
+  const lineVals = line ? data.map((d) => d[line.key] || 0) : []
+  const max = Math.max(...totals, ...lineVals, 1)
+  const min = Math.min(0, ...lineVals)
+  const span = max - min || 1
+  const y = (v: number) => 4 + (1 - (v - min) / span) * (plotH - 8)
+  const gap = 6
+  const bw = (W - gap * (data.length - 1)) / data.length
+  const cx = (i: number) => i * (bw + gap) + bw / 2
+  const ticks = [max, min + span * 0.5, min]
+  const labelEvery = Math.ceil(data.length / 8)
+
+  return (
+    <div className="relative w-full" style={{ height }}>
+      <div className="absolute -top-6 right-0 flex items-center gap-3 flex-wrap justify-end">
+        {[...series, ...(line ? [line] : [])].map((s) => (
+          <span key={s.key} className="flex items-center gap-1.5 text-[11px] text-los-text-secondary">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
+            {s.name}
+          </span>
+        ))}
+      </div>
+      {ticks.map((t, i) => (
+        <span key={i} className="absolute left-0 text-[10px] text-los-text-muted font-mono -translate-y-1/2" style={{ top: (y(t) / height) * 100 + '%' }}>
+          {format(t)}
+        </span>
+      ))}
+      <svg width="100%" height={height} viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none" className="block">
+        {ticks.map((t, i) => (
+          <line key={i} x1={0} x2={W} y1={y(t)} y2={y(t)} stroke={GRID} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+        ))}
+        {data.map((d, i) => {
+          let base = 0
+          const faded = idx !== null && idx !== i
+          return (
+            <g key={i} opacity={d.forecast ? 0.35 : faded ? 0.55 : 0.9}>
+              {series.map((s) => {
+                const v = Math.max(d[s.key] || 0, 0)
+                const top = y(base + v)
+                const h = y(base) - top
+                base += v
+                return (
+                  <rect
+                    key={s.key}
+                    x={i * (bw + gap)}
+                    y={top}
+                    width={bw}
+                    height={Math.max(h, 0)}
+                    fill={s.color}
+                    stroke={d.forecast ? s.color : 'none'}
+                    strokeDasharray={d.forecast ? '4 3' : undefined}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )
+              })}
+            </g>
+          )
+        })}
+        {line && (
+          <polyline
+            points={data.map((d, i) => `${cx(i)},${y(d[line.key] || 0)}`).join(' ')}
+            fill="none"
+            stroke={line.color}
+            strokeWidth={2}
+            vectorEffect="non-scaling-stroke"
+            strokeLinejoin="round"
+          />
+        )}
+      </svg>
+      <div className="absolute bottom-0 left-0 right-0 text-[10px] text-los-text-muted">
+        {data.map((d, i) =>
+          i % labelEvery === 0 || i === data.length - 1 ? (
+            <span key={i} className="absolute -translate-x-1/2" style={{ left: `${((i + 0.5) / data.length) * 100}%` }}>
+              {d.label}
+            </span>
+          ) : null
+        )}
+      </div>
+      <div className="absolute inset-0" onMouseMove={onMove} onMouseLeave={clear} />
+      {idx !== null && (
+        <div
+          className="absolute -translate-x-1/2 -top-1 pointer-events-none rounded-md border border-los-border bg-los-surface-2 px-2 py-1 text-[11px] whitespace-nowrap shadow-lg z-10"
+          style={{ left: `${((idx + 0.5) / data.length) * 100}%` }}
+        >
+          <p className="text-los-text-muted mb-0.5">
+            {data[idx].label}
+            {data[idx].forecast ? ' · forecast' : ''}
+          </p>
+          {[...series, ...(line ? [line] : [])].map((s) => (
+            <p key={s.key} className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full" style={{ background: s.color }} />
+              <span className="text-los-text-secondary">{s.name}</span>
+              <span className="text-los-text font-mono ml-auto pl-2">{format(data[idx][s.key] || 0)}</span>
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
