@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { classifyTx, fetchMercuryTransactions, mercuryGet, txCategory, txName, txTime } from '@/lib/mercury'
+import { buildExpenseRows } from '@/lib/expenseControls'
 
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
@@ -201,6 +202,9 @@ export async function GET() {
       monthly,
       topMerchants,
       topCategories,
+      expenseRows: buildExpenseRows(txs, now),
+      // Card autopay runs on the 1st.
+      autopayDays: Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) - now.getTime()) / 86400000),
       last30Top: Object.entries(last30Merchants).map(([name, amount]) => ({ name, amount: r2(amount) })).sort((a, b) => b.amount - a.amount).slice(0, 5),
       recent,
       warnings,

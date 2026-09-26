@@ -80,3 +80,10 @@ CREATE TABLE IF NOT EXISTS daily_habits (
   deep_work   BOOLEAN NOT NULL DEFAULT false,
   eod_done    BOOLEAN NOT NULL DEFAULT false
 );
+
+-- Manual finance overrides (e.g. "expense:<merchantKey>" → "Cancel"). Created lazily by /api/finance/overrides.
+CREATE TABLE IF NOT EXISTS finance_overrides (
+  key     TEXT PRIMARY KEY,
+  value   TEXT   NOT NULL,
+  updated BIGINT NOT NULL DEFAULT 0
+);

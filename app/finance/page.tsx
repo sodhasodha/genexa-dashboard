@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { LineChart, MultiLineChart, StackedForecast, TrendPill } from '@/components/Charts'
 import MercuryLive from '@/components/MercuryLive'
-import { linearForecast, monthLabel, nextMonths, paceProjection } from '@/lib/forecast'
+import ExpectedMoney from '@/components/finance/ExpectedMoney'
+import ExpenseControls from '@/components/finance/ExpenseControls'
+import ForecastScenarios from '@/components/finance/ForecastScenarios'
+import PayStructure from '@/components/finance/PayStructure'
+import { ChipData, Chips } from '@/components/finance/Chip'
+import { monthLabel, paceProjection } from '@/lib/forecast'
 
 const fmtCurrency = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const fmtK = (n: number) => (Math.abs(n) >= 1000 ? `${n < 0 ? '-' : ''}$${(Math.abs(n) / 1000).toFixed(1)}k` : `$${n.toFixed(0)}`)
@@ -35,7 +40,16 @@ const PERIODS: { key: Period; label: string }[] = [
 ]
 
 type Row = { month: string; label?: any; forecast?: boolean; [k: string]: any }
-type Kpi = { label: string; key: string; kind: 'money' | 'pct' | 'count'; invert?: boolean; hint?: string; color?: string }
+type Kpi = {
+  label: string
+  key: string
+  kind: 'money' | 'pct' | 'count'
+  invert?: boolean
+  hint?: string
+  color?: string
+  watch?: 'revenue' | 'cost' | 'refunds' | 'margin' // anomaly rule to apply
+  fixed?: number // point-in-time value (e.g. cash) — not summed per period, no pace/trend
+}
 
 /* --------------------------------- helpers -------------------------------- */
 
@@ -71,27 +85,53 @@ function trimLeading(rows: Row[], keys: string[]): Row[] {
   return first === -1 ? rows.slice(-1) : rows.slice(first)
 }
 
-// Chart rows: history (current month at run-rate pace, flagged) + 3 forecast months.
-function withForecast(rows: Row[], keys: string[], day: number, dim: number, derive?: (r: Row) => Row) {
-  const hist = rows.map((r, i) => {
+// Chart rows: full months as actuals, then the current month + next 3 from the base scenario.
+function withScenario(rows: Row[], months: any[], map: (m: any) => Record<string, number>) {
+  const hist = rows.slice(0, -1).map((r) => ({ ...r, label: monthLabel(r.month) }))
+  const future = months.map((m) => ({ ...map(m), month: m.month, label: `${monthLabel(m.month)}${m.partial ? '*' : ''}`, forecast: true }))
+  return [...hist, ...future]
+}
+
+// Chart rows: history with the current month projected at run-rate pace (no forward months).
+function withPace(rows: Row[], keys: string[], day: number, dim: number) {
+  return rows.map((r, i) => {
     if (i < rows.length - 1) return { ...r, label: monthLabel(r.month) }
     const paced: Row = { ...r, label: `${monthLabel(r.month)}*`, forecast: true }
     for (const k of keys) paced[k] = paceProjection(r[k] || 0, day, dim)
-    return derive ? derive(paced) : paced
+    return paced
   })
-  const fc: Record<string, number[]> = {}
-  for (const k of keys) fc[k] = linearForecast(hist.map((r) => r[k] || 0), 3, 6, 0)
-  const future = nextMonths(rows[rows.length - 1].month).map((month, j) => {
-    const r: Row = { month, label: monthLabel(month), forecast: true }
-    for (const k of keys) r[k] = fc[k][j]
-    return derive ? derive(r) : r
-  })
-  return [...hist, ...future]
+}
+
+// Contextual anomaly chips for a KPI: this month's pace vs the prior 3-month average.
+function kpiAnomalies(k: Kpi, rows: Row[], value: number, day: number, dim: number, trend: number | null): ChipData[] {
+  if (!k.watch || day < 5 || rows.length < 2) return []
+  const hist = rows.slice(-4, -1).map((r) => r[k.key] || 0)
+  const avg3 = hist.reduce((s, v) => s + v, 0) / (hist.length || 1)
+  const pace = paceProjection(value, day, dim)
+  const pct = avg3 > 0 ? Math.round(((pace - avg3) / avg3) * 100) : null
+  if (k.watch === 'margin') return value < 0 ? [{ tone: 'red', text: 'Negative margin' }] : []
+  if (k.watch === 'refunds') {
+    if (value > 500 && (avg3 === 0 || value > avg3 * 2)) return [{ tone: 'red', text: 'Refund spike' }]
+    return []
+  }
+  if (pct === null) return []
+  if (k.watch === 'revenue') {
+    if (pct <= -40) return [{ tone: 'red', text: `Pace ${pct}% vs avg` }]
+    if (pct <= -20) return [{ tone: 'amber', text: `Pace ${pct}% vs avg` }]
+    // Positive chips only when clearly above normal AND also up on last month (avoid mixed signals).
+    if (pct >= 50 && (trend === null || trend > 0)) return [{ tone: 'green', text: `Well above normal · +${pct}%` }]
+    return []
+  }
+  // cost
+  if (pct >= 75) return [{ tone: 'red', text: `+${pct}% vs 3-mo avg` }]
+  if (pct >= 25) return [{ tone: 'amber', text: `+${pct}% vs 3-mo avg` }]
+  if (pct <= -30 && (trend === null || trend > 0)) return [{ tone: 'green', text: `${pct}% vs 3-mo avg` }]
+  return []
 }
 
 /* -------------------------------- components ------------------------------ */
 
-function KpiGrid({ kpis, rows, period, margin, day, dim, activeClients }: {
+function KpiGrid({ kpis, rows, period, margin, day, dim, activeClients, extraChips, variant = 'primary' }: {
   kpis: Kpi[]
   rows: Row[]
   period: Period
@@ -99,6 +139,8 @@ function KpiGrid({ kpis, rows, period, margin, day, dim, activeClients }: {
   day: number
   dim: number
   activeClients?: number
+  extraChips?: Record<string, ChipData[]>
+  variant?: 'primary' | 'secondary' // secondary = compact, lower-emphasis cards
 }) {
   const cur = aggregate(periodRows(rows, period), margin)
   const prevRows = priorRows(rows, period)
@@ -106,19 +148,33 @@ function KpiGrid({ kpis, rows, period, margin, day, dim, activeClients }: {
   const fmt = (k: Kpi, v: number) => (k.kind === 'money' ? fmtCurrency(v) : k.kind === 'pct' ? fmtPct(v) : String(Math.round(v)))
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+    <div className={`grid gap-3 ${variant === 'secondary' ? 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-6' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-5'}`}>
       {kpis.map((k) => {
-        let value = cur[k.key] ?? 0
+        let value = k.fixed ?? cur[k.key] ?? 0
         // Live client count comes from a different source than the monthly history — don't compare them.
         const live = k.key === 'clients' && activeClients !== undefined && (period === 'mtd' || period === 'ytd')
         if (live) value = activeClients
         // This month: compare month-end pace against last month's full total.
-        const paced = period === 'mtd' && k.kind === 'money' ? paceProjection(value, day, dim) : null
+        const paced = period === 'mtd' && k.kind === 'money' && k.fixed === undefined ? paceProjection(value, day, dim) : null
         const compare = paced ?? value
-        const base = live ? undefined : prev?.[k.key]
+        const base = live || k.fixed !== undefined ? undefined : prev?.[k.key]
         let trend: number | null = null
         if (base !== undefined && base !== null && k.kind !== 'pct' && Math.abs(base) > 0) trend = ((compare - base) / Math.abs(base)) * 100
         if (trend !== null && k.invert) trend = -trend
+        const chips = [...(period === 'mtd' ? kpiAnomalies(k, rows, value, day, dim, trend) : []), ...(extraChips?.[k.key] || [])]
+        const sub = `${paced !== null ? `Pace ${fmtK(paced)}` : k.hint || ''}${prev && base !== undefined && k.kind !== 'pct' ? ` · prev ${k.kind === 'money' ? fmtK(base) : Math.round(base)}` : ''}`
+        if (variant === 'secondary')
+          return (
+            <div key={k.key} className="los-card px-3 py-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <p className="los-label truncate">{k.label}</p>
+                {trend !== null && isFinite(trend) && <TrendPill pct={trend} />}
+              </div>
+              <p className="font-mono font-semibold text-lg text-los-text mt-0.5" style={k.color ? { color: k.color } : undefined}>{fmt(k, value)}</p>
+              {chips.length > 0 && <Chips chips={chips} />}
+              <p className="text-[10px] text-los-text-muted mt-0.5 truncate">{sub || '\u00a0'}</p>
+            </div>
+          )
         return (
           <div key={k.key} className="los-card p-4">
             <div className="flex items-start justify-between gap-2">
@@ -126,6 +182,11 @@ function KpiGrid({ kpis, rows, period, margin, day, dim, activeClients }: {
               {trend !== null && isFinite(trend) && <TrendPill pct={trend} />}
             </div>
             <p className="los-metric-number mt-1" style={k.color ? { color: k.color } : undefined}>{fmt(k, value)}</p>
+            {chips.length > 0 && (
+              <div className="mt-1">
+                <Chips chips={chips} />
+              </div>
+            )}
             <p className="text-[11px] text-los-text-muted mt-1 truncate">
               {paced !== null ? `Pace ${fmtK(paced)}` : k.hint || ' '}
               {prev && base !== undefined && k.kind !== 'pct' ? ` · prev ${k.kind === 'money' ? fmtK(base) : Math.round(base)}` : ''}
@@ -137,10 +198,11 @@ function KpiGrid({ kpis, rows, period, margin, day, dim, activeClients }: {
   )
 }
 
-function Card({ title, sub, children, className = '' }: { title: string; sub?: string; children: React.ReactNode; className?: string }) {
+function Card({ title, sub, children, className = '', tight = false }: { title: string; sub?: string; children: React.ReactNode; className?: string; tight?: boolean }) {
   return (
     <div className={`los-card p-4 flex flex-col ${className}`}>
-      <div className="mb-8">
+      {/* charts render their legend above the plot, so they need the extra gap */}
+      <div className={tight ? 'mb-4' : 'mb-8'}>
         <h2 className="text-sm font-semibold text-los-text">{title}</h2>
         {sub && <p className="text-[11px] text-los-text-muted">{sub}</p>}
       </div>
@@ -171,37 +233,6 @@ function PaceChart({ pace, color, name }: { pace: { current: number[]; previous:
         <span className="text-los-text font-mono">{fmtK(lastFull)}</span>.
       </p>
     </>
-  )
-}
-
-function ForecastTable({ rows, cols }: { rows: Row[]; cols: { key: string; label: string; kind?: 'pct' }[] }) {
-  const future = rows.filter((r) => r.forecast)
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-los-text-muted text-left">
-            <th className="font-medium py-1.5 pr-3">Month</th>
-            {cols.map((c) => (
-              <th key={c.key} className="font-medium py-1.5 px-2 text-right">{c.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {future.map((r) => (
-            <tr key={r.month} className="border-t border-los-border">
-              <td className="py-1.5 pr-3 text-los-text-secondary">{r.label}</td>
-              {cols.map((c) => (
-                <td key={c.key} className="py-1.5 px-2 text-right font-mono text-los-text">
-                  {c.kind === 'pct' ? fmtPct(r[c.key] || 0) : fmtCurrency(r[c.key] || 0)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="text-[10px] text-los-text-muted mt-2">* current month at run-rate pace. Forecast = linear trend over last 6 months.</p>
-    </div>
   )
 }
 
@@ -241,41 +272,31 @@ export default function FinancePage() {
   const view = useMemo(() => {
     if (!data?.genexa || tab === 'mercury') return null
     const profitMargin = (s: Record<string, number>) => (s.netRev > 0 ? (s.netProfit / s.netRev) * 100 : 0)
-    const deriveProfit = (r: Row) => {
-      r.netProfit = (r.netRev || 0) - (r.expenses || 0)
-      r.netMargin = r.netRev > 0 ? (r.netProfit / r.netRev) * 100 : 0
-      return r
-    }
 
     if (tab === 'genexa') {
       const rows = trimLeading(data.genexa.monthly, ['gross', 'expenses'])
-      const chart = withForecast(rows, ['newCash', 'backend', 'refunds', 'expenses'], day, dim, (r) => {
-        r.netRev = (r.newCash || 0) + (r.backend || 0) - (r.refunds || 0)
-        return deriveProfit(r)
-      })
+      const chart = withScenario(rows, data.genexa.forecast.base.months, (m) => ({ newCash: m.newCash, backend: m.backend, netProfit: m.profit }))
       return { kind: 'genexa' as const, rows, chart, margin: profitMargin }
     }
     if (tab === 'sms') {
-      const rows = trimLeading(data.sms.monthly, ['gross'])
-      const chart = withForecast(rows, ['newCash', 'backend', 'refunds', 'fees'], day, dim, (r) => {
-        r.netRev = (r.newCash || 0) + (r.backend || 0) - (r.refunds || 0) - (r.fees || 0)
-        return r
-      })
-      const takeRows = trimLeading(data.sms.take, ['payouts'])
-      const takeChart = withForecast(takeRows, ['payouts'], day, dim)
-      const margin = (s: Record<string, number>) => (s.gross > 0 ? (s.netRev / s.gross) * 100 : 0)
-      return { kind: 'sms' as const, rows, chart, takeRows, takeChart, margin }
+      const rows = trimLeading(data.sms.monthly, ['gross', 'revenue'])
+      const chart = withPace(rows, ['newCash', 'backend', 'netProfit'], day, dim)
+      const margin = (s: Record<string, number>) => (s.revenue > 0 ? (s.netProfit / s.revenue) * 100 : 0)
+      return { kind: 'sms' as const, rows, chart, margin }
     }
     const rows = trimLeading(data.total.monthly, ['netRev', 'expenses'])
-    const chart = withForecast(rows, ['newCash', 'backend', 'refunds', 'smsPayouts', 'expenses'], day, dim, (r) => {
-      r.genexaNetRev = (r.newCash || 0) + (r.backend || 0) - (r.refunds || 0)
-      r.netRev = r.genexaNetRev + (r.smsPayouts || 0)
-      return deriveProfit(r)
-    })
+    const chart = withScenario(rows, data.total.forecast.base.months, (m) => ({ newCash: m.newCash, backend: m.backend, smsPayouts: m.smsPayouts, netProfit: m.profit }))
     return { kind: 'total' as const, rows, chart, margin: profitMargin }
   }, [data, tab, day, dim])
 
-  const histLabel = (rows: Row[]) => rows.map((r) => ({ ...r, label: monthLabel(r.month) }))
+  // Anomaly chips that come from other sections (receivables, sheet status).
+  const arItems: any[] = data?.receivables?.items || []
+  const failed = arItems.filter((i) => i.business !== 'Cold SMS' && i.flags.includes('Payment failed')).length
+  const overdueGx = arItems.filter((i) => i.business !== 'Cold SMS' && (i.status === 'Overdue' || i.status === 'At risk')).length
+  const backendChips: ChipData[] = [
+    ...(failed ? [{ tone: 'red' as const, text: `Payment failed${failed > 1 ? ` ×${failed}` : ''}` }] : []),
+    ...(overdueGx > failed ? [{ tone: 'red' as const, text: 'Backend payment missing' }] : []),
+  ]
 
   return (
     <div className="px-4 sm:px-6 py-5 max-w-[1400px] mx-auto flex flex-col gap-4">
@@ -283,7 +304,7 @@ export default function FinancePage() {
         <div>
           <h1 className="text-xl font-semibold text-los-text tracking-tight">Finance</h1>
           <p className="text-xs text-los-text-muted mt-0.5">
-            Whop · Mercury · Commas{data?.asOf ? ` · updated ${new Date(data.asOf).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : ''}
+            Whop · Mercury · Commas · Monday · Cold SMS sheet{data?.asOf ? ` · updated ${new Date(data.asOf).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : ''}
           </p>
         </div>
         <button onClick={load} disabled={loading} className="los-btn los-btn-ghost">
@@ -332,22 +353,34 @@ export default function FinancePage() {
             margin={view.margin}
             day={day}
             dim={dim}
-            activeClients={data.genexa.activeClients + data.sms.activeClients}
             kpis={[
-              { label: 'Net Revenue', key: 'netRev', kind: 'money', hint: 'Genexa net + SMS payouts' },
-              { label: 'Net Profit', key: 'netProfit', kind: 'money', color: C.backend },
-              { label: 'Expenses', key: 'expenses', kind: 'money', invert: true },
-              { label: 'Net Margin', key: 'netMargin', kind: 'pct', color: C.margin },
-              { label: 'Active Clients', key: 'clients', kind: 'count', hint: 'Genexa + SMS' },
-              { label: 'New Cash', key: 'newCash', kind: 'money', hint: 'Genexa first payments' },
-              { label: 'Backend Revenue', key: 'backend', kind: 'money', hint: 'Genexa repeat payments' },
-              { label: 'Refunds', key: 'refunds', kind: 'money', invert: true },
+              { label: 'Net Revenue', key: 'netRev', kind: 'money', hint: 'Genexa net + SMS payouts', watch: 'revenue' },
+              { label: 'Net Profit', key: 'netProfit', kind: 'money', color: C.backend, watch: 'revenue' },
+              { label: 'Net Margin', key: 'netMargin', kind: 'pct', color: C.margin, watch: 'margin' },
+              { label: 'Net Cash Position', key: 'cash', kind: 'money', color: C.newCash, fixed: data.drivers.netPosition, hint: 'Mercury cash − card owed (live)' },
               { label: 'SMS Payouts', key: 'smsPayouts', kind: 'money', color: C.sms },
-              { label: 'Genexa Net Rev', key: 'genexaNetRev', kind: 'money' },
+            ]}
+          />
+          <KpiGrid
+            variant="secondary"
+            rows={view.rows}
+            period={period}
+            margin={view.margin}
+            day={day}
+            dim={dim}
+            activeClients={data.genexa.activeClients + data.sms.activeClients}
+            extraChips={{ backend: backendChips }}
+            kpis={[
+              { label: 'New Cash', key: 'newCash', kind: 'money', hint: 'Genexa first payments', watch: 'revenue' },
+              { label: 'Backend', key: 'backend', kind: 'money', hint: 'Genexa repeat payments', watch: 'revenue' },
+              { label: 'Refunds', key: 'refunds', kind: 'money', invert: true, watch: 'refunds' },
+              { label: 'Genexa Net Rev', key: 'genexaNetRev', kind: 'money', watch: 'revenue' },
+              { label: 'Active Clients', key: 'clients', kind: 'count', hint: 'Genexa + SMS' },
+              { label: 'Expenses', key: 'expenses', kind: 'money', invert: true, watch: 'cost' },
             ]}
           />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-            <Card title="Income trajectory & forecast" sub="Monthly income by source · line = net profit" className="lg:col-span-2">
+            <Card title="Revenue & profit" sub="Monthly income by source · line = net profit · faded = base forecast" className="lg:col-span-2">
               <StackedForecast
                 data={view.chart}
                 series={[
@@ -356,32 +389,23 @@ export default function FinancePage() {
                   { key: 'smsPayouts', name: 'SMS payouts', color: C.sms },
                 ]}
                 line={{ key: 'netProfit', name: 'Net profit', color: C.profit }}
-                height={220}
+                height={260}
                 format={fmtK}
               />
             </Card>
-            <Card title="Forecast" sub="Next 3 months">
-              <ForecastTable rows={view.chart} cols={[{ key: 'netRev', label: 'Net rev' }, { key: 'expenses', label: 'Exp' }, { key: 'netProfit', label: 'Profit' }]} />
-              <RunRate chart={view.chart} />
+            <Card title="Forecast" sub="Known renewals, recurring costs and cash" tight>
+              <ForecastScenarios scenarios={data.total.forecast} drivers={data.drivers} />
             </Card>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <Card title="Net revenue vs expenses" sub="Monthly actuals (current month to date)">
-              <MultiLineChart
-                data={histLabel(view.rows)}
-                series={[
-                  { key: 'netRev', name: 'Net rev', color: C.newCash },
-                  { key: 'expenses', name: 'Expenses', color: C.expenses },
-                  { key: 'netProfit', name: 'Net profit', color: C.backend },
-                ]}
-                format={fmtK}
-              />
-            </Card>
+          <Card title="Expected money" sub="Next 30 days · Whop renewals, failed charges, Monday invoices, SMS payout" tight>
+            <ExpectedMoney items={arItems} />
+          </Card>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
             <Card title="This month vs last" sub="Cumulative net revenue by day">
               <PaceChart pace={data.total.pace} color={C.newCash} name="Net revenue" />
             </Card>
+            <MarginClients rows={view.rows} />
           </div>
-          <MarginClients rows={view.rows} />
         </>
       )}
 
@@ -394,19 +418,20 @@ export default function FinancePage() {
             day={day}
             dim={dim}
             activeClients={data.genexa.activeClients}
+            extraChips={{ backend: backendChips }}
             kpis={[
-              { label: 'New Cash', key: 'newCash', kind: 'money', hint: 'First payments' },
-              { label: 'Backend Revenue', key: 'backend', kind: 'money', hint: 'Repeat payments' },
-              { label: 'Refunds', key: 'refunds', kind: 'money', invert: true },
-              { label: 'Net Revenue', key: 'netRev', kind: 'money' },
-              { label: 'Expenses', key: 'expenses', kind: 'money', invert: true },
-              { label: 'Net Profit', key: 'netProfit', kind: 'money', color: C.backend },
-              { label: 'Net Margin', key: 'netMargin', kind: 'pct', color: C.margin },
+              { label: 'New Cash', key: 'newCash', kind: 'money', hint: 'First payments', watch: 'revenue' },
+              { label: 'Backend Revenue', key: 'backend', kind: 'money', hint: 'Repeat payments', watch: 'revenue' },
+              { label: 'Refunds', key: 'refunds', kind: 'money', invert: true, watch: 'refunds' },
+              { label: 'Net Revenue', key: 'netRev', kind: 'money', watch: 'revenue' },
+              { label: 'Expenses', key: 'expenses', kind: 'money', invert: true, watch: 'cost' },
+              { label: 'Net Profit', key: 'netProfit', kind: 'money', color: C.backend, watch: 'revenue' },
+              { label: 'Net Margin', key: 'netMargin', kind: 'pct', color: C.margin, watch: 'margin' },
               { label: 'Active Clients', key: 'clients', kind: 'count', hint: data.genexa.clientsDetail },
             ]}
           />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-            <Card title="Revenue trajectory & forecast" sub="New cash vs backend · line = net profit" className="lg:col-span-2">
+            <Card title="Revenue & profit" sub="New cash vs backend · line = net profit · faded = base forecast" className="lg:col-span-2">
               <StackedForecast
                 data={view.chart}
                 series={[
@@ -414,115 +439,78 @@ export default function FinancePage() {
                   { key: 'backend', name: 'Backend', color: C.backend },
                 ]}
                 line={{ key: 'netProfit', name: 'Net profit', color: C.profit }}
-                height={220}
+                height={260}
                 format={fmtK}
               />
             </Card>
-            <Card title="Forecast" sub="Next 3 months">
-              <ForecastTable rows={view.chart} cols={[{ key: 'netRev', label: 'Net rev' }, { key: 'expenses', label: 'Exp' }, { key: 'netProfit', label: 'Profit' }]} />
-              <RunRate chart={view.chart} />
+            <Card title="Forecast" sub="Genexa only · excludes SMS payouts" tight>
+              <ForecastScenarios scenarios={data.genexa.forecast} drivers={data.drivers} cashNote="Ending cash here excludes SMS payouts." />
             </Card>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <Card title="Net revenue vs expenses" sub="Monthly actuals (current month to date)">
-              <MultiLineChart
-                data={histLabel(view.rows)}
-                series={[
-                  { key: 'netRev', name: 'Net rev', color: C.newCash },
-                  { key: 'expenses', name: 'Expenses', color: C.expenses },
-                  { key: 'netProfit', name: 'Net profit', color: C.backend },
-                ]}
-                format={fmtK}
-              />
-            </Card>
+          <Card title="Expected money" sub="Next 30 days · Whop renewals, failed charges, Monday invoices" tight>
+            <ExpectedMoney items={arItems} filter={(i) => i.business === 'Genexa'} />
+          </Card>
+          <Card title="Expenses by category" sub="Mercury business spend · excludes transfers, owner draws, personal" tight>
+            <ExpenseControls rows={data.expenses.rows} />
+          </Card>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
             <Card title="This month vs last" sub="Cumulative Whop net revenue by day">
               <PaceChart pace={data.genexa.pace} color={C.newCash} name="Revenue" />
             </Card>
+            <MarginClients rows={view.rows} clientsSub="Unique Whop payers, trailing 90 days" />
           </div>
-          <MarginClients rows={view.rows} clientsSub="Unique Whop payers, trailing 90 days" />
-          <Card title="Expenses by category" sub="Mercury business spend · excludes transfers, owner draws, personal">
-            <ExpenseTable rows={data.genexa.expenseBreakdown} />
-          </Card>
         </>
       )}
 
       {view?.kind === 'sms' && (
         <>
-          <p className="los-label -mb-1">Whole business · Commas</p>
           <KpiGrid
             rows={view.rows}
             period={period}
             margin={view.margin}
             day={day}
             dim={dim}
+            extraChips={{
+              revenue: view.rows[view.rows.length - 1].source === 'sheet' || period !== 'mtd' ? [] : [{ tone: 'muted', text: 'Sheet pending · Commas est.' }],
+              expenses: view.rows[view.rows.length - 1].source === 'sheet' || period !== 'mtd' ? [] : [{ tone: 'muted', text: 'Est. from 3-mo avg' }],
+            }}
             kpis={[
-              { label: 'New Cash', key: 'newCash', kind: 'money', hint: 'First payments' },
-              { label: 'Backend Revenue', key: 'backend', kind: 'money', hint: 'Repeat payments' },
-              { label: 'Refunds', key: 'refunds', kind: 'money', invert: true },
-              { label: 'Processor Fees', key: 'fees', kind: 'money', invert: true },
-              { label: 'Net Revenue', key: 'netRev', kind: 'money', hint: 'After refunds & fees' },
-              { label: 'Net Margin', key: 'netMargin', kind: 'pct', color: C.margin, hint: 'Net rev / gross' },
+              { label: 'Revenue', key: 'revenue', kind: 'money', hint: "Jacob's sheet (Commas until updated)", watch: 'revenue' },
+              { label: 'Expenses', key: 'expenses', kind: 'money', invert: true, hint: "Jacob's sheet", watch: 'cost' },
+              { label: 'Net Profit', key: 'netProfit', kind: 'money', color: C.backend, watch: 'revenue' },
+              { label: 'Net Margin', key: 'netMargin', kind: 'pct', color: C.margin, watch: 'margin' },
               { label: 'Active Clients', key: 'clients', kind: 'count', hint: 'Paid in last 30 days' },
+              { label: 'New Cash', key: 'newCash', kind: 'money', hint: 'Commas first payments', watch: 'revenue' },
+              { label: 'Backend Revenue', key: 'backend', kind: 'money', hint: 'Commas repeat payments', watch: 'revenue' },
+              { label: 'Refunds', key: 'refunds', kind: 'money', invert: true, watch: 'refunds' },
+              { label: 'Processor Fees', key: 'fees', kind: 'money', invert: true, watch: 'cost' },
             ]}
           />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-            <Card title="Business revenue trajectory & forecast" sub="New cash vs backend · line = net revenue" className="lg:col-span-2">
+            <Card title="Revenue & profit" sub="Bars = Commas sales · line = net profit (sheet) · * current month at pace" className="lg:col-span-2">
               <StackedForecast
                 data={view.chart}
                 series={[
                   { key: 'newCash', name: 'New cash', color: C.newCash },
                   { key: 'backend', name: 'Backend', color: C.backend },
                 ]}
-                line={{ key: 'netRev', name: 'Net rev', color: C.profit }}
-                height={220}
+                line={{ key: 'netProfit', name: 'Net profit', color: C.profit }}
+                height={260}
                 format={fmtK}
               />
             </Card>
-            <Card title="This month vs last" sub="Cumulative gross sales by day">
+            <Card title="This month vs last" sub="Cumulative Commas sales by day">
               <PaceChart pace={data.sms.pace} color={C.sms} name="Sales" />
             </Card>
           </div>
-          <MarginClients rows={view.rows} clientsSub="Unique paying customers, trailing 30 days" />
-
-          <p className="los-label -mb-1 mt-2">Your take · Mercury payouts (Ray Media / FanBasis)</p>
-          <KpiGrid
-            rows={view.takeRows}
-            period={period}
-            margin={(s) => (s.bizNet > 0 ? (s.payouts / s.bizNet) * 100 : 0)}
-            day={day}
-            dim={dim}
-            kpis={[
-              { label: 'Your Payouts', key: 'payouts', kind: 'money', color: C.sms },
-              { label: 'Share of Net Rev', key: 'netMargin', kind: 'pct', hint: 'Payouts / business net rev' },
-            ]}
-          />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-            <Card title="Payouts trajectory & forecast" className="lg:col-span-2">
-              <StackedForecast data={view.takeChart} series={[{ key: 'payouts', name: 'Payouts', color: C.sms }]} height={200} format={fmtK} />
-            </Card>
-            <Card title="Forecast" sub="Next 3 months">
-              <ForecastTable rows={view.takeChart} cols={[{ key: 'payouts', label: 'Payouts' }]} />
-            </Card>
+          <Card title="Pay structure" sub="36% of Cold SMS revenue is split progressively between Aryan and Rishil" tight>
+            <PayStructure reconcile={data.sms.reconcile} sheetUpdatedTo={data.sms.sheetUpdatedTo} />
+          </Card>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <MarginClients rows={view.rows} clientsSub="Unique paying customers, trailing 30 days" />
           </div>
         </>
       )}
-    </div>
-  )
-}
-
-function RunRate({ chart }: { chart: Row[] }) {
-  const cur = chart.find((r) => r.forecast)
-  if (!cur) return null
-  return (
-    <div className="grid grid-cols-2 gap-2 mt-4">
-      <div className="rounded-lg bg-los-surface-2 px-3 py-2.5">
-        <p className="los-label mb-1">Annual run-rate</p>
-        <p className="font-mono font-semibold text-sm text-los-text">{fmtK((cur.netRev || 0) * 12)}</p>
-      </div>
-      <div className="rounded-lg bg-los-surface-2 px-3 py-2.5">
-        <p className="los-label mb-1">Profit run-rate</p>
-        <p className="font-mono font-semibold text-sm" style={{ color: C.backend }}>{fmtK((cur.netProfit || 0) * 12)}</p>
-      </div>
     </div>
   )
 }
@@ -530,7 +518,7 @@ function RunRate({ chart }: { chart: Row[] }) {
 function MarginClients({ rows, clientsSub = 'Paying clients at month end' }: { rows: Row[]; clientsSub?: string }) {
   const lbl: Row[] = rows.map((r) => ({ ...r, label: monthLabel(r.month) }))
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+    <>
       <div className="los-card p-4">
         <h2 className="text-sm font-semibold text-los-text">Net margin</h2>
         <p className="text-[11px] text-los-text-muted mb-4">Monthly · clamped to ±100%</p>
@@ -541,37 +529,6 @@ function MarginClients({ rows, clientsSub = 'Paying clients at month end' }: { r
         <p className="text-[11px] text-los-text-muted mb-4">{clientsSub}</p>
         <LineChart data={lbl.map((r) => ({ label: r.label, value: r.clients || 0 }))} height={150} format={(v) => String(Math.round(v))} color={C.clients} />
       </div>
-    </div>
-  )
-}
-
-function ExpenseTable({ rows }: { rows: { category: string; current: number; avg3: number }[] }) {
-  if (!rows?.length) return <p className="text-xs text-los-text-muted">No expenses found</p>
-  const max = Math.max(...rows.map((r) => Math.max(r.current, r.avg3)), 1)
-  return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr className="text-los-text-muted text-left">
-          <th className="font-medium py-1.5 pr-3">Category</th>
-          <th className="font-medium py-1.5 px-2 text-right">This month</th>
-          <th className="font-medium py-1.5 px-2 text-right">3-mo avg</th>
-          <th className="font-medium py-1.5 pl-3 w-1/3 hidden sm:table-cell"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr key={r.category} className="border-t border-los-border">
-            <td className="py-1.5 pr-3 text-los-text-secondary">{r.category}</td>
-            <td className="py-1.5 px-2 text-right font-mono text-los-text">{fmtCurrency(r.current)}</td>
-            <td className="py-1.5 px-2 text-right font-mono text-los-text-muted">{fmtCurrency(r.avg3)}</td>
-            <td className="py-1.5 pl-3 hidden sm:table-cell">
-              <div className="h-1.5 rounded-full bg-los-surface-2 overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${(Math.max(r.current, 0) / max) * 100}%`, background: C.expenses }} />
-              </div>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    </>
   )
 }
