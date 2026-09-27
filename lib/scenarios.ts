@@ -7,7 +7,7 @@ import { coldSmsPayout } from '@/lib/payStructure'
 //         + recovery of overdue/failed payments
 //         + new cash (3-mo average × scenario factor)
 //         − refunds (6-mo refund rate × scenario factor)
-//         + Cold SMS payout (pay structure on 3-mo avg SMS revenue × scenario factor)   [total view only]
+//         + Cold SMS payout (pay structure on 3-mo avg SMS revenue × scenario factor − avg expenses)   [total view only]
 // Expenses = recurring fixed (payroll, software…) + ad spend + variable spend (3-mo averages)
 // Ending cash = today's net position (cash − card owed; card autopays are financing, not
 //               expense) + projected profit − average owner draws/personal spend.
@@ -51,6 +51,7 @@ export type ForecastInput = {
   newCashAvg: number
   refundRate: number // refunds / gross
   smsRevenueAvg: number
+  smsExpensesAvg: number
   expenses: { recurringFixed: number; ads: number; variable: number }
   drawsAvg: number
   netPosition: number
@@ -87,7 +88,8 @@ export function runScenario(key: ScenarioKey, input: ForecastInput, includeSms: 
   // Overdue money: recovered this month if there's time left, else next month.
   backendByMonth[remainingFrac > 0.15 ? 0 : 1] += input.overdue * f.recovery
 
-  const smsMonthly = includeSms ? coldSmsPayout(input.smsRevenueAvg * f.sms).aryan : 0
+  const smsRev = input.smsRevenueAvg * f.sms
+  const smsMonthly = includeSms ? coldSmsPayout({ revenue: smsRev, profit: smsRev - input.smsExpensesAvg }).aryan : 0
   const monthlyExp = input.expenses.recurringFixed * f.fixed + input.expenses.ads * f.ads + input.expenses.variable * f.variable
 
   const out: ForecastMonth[] = []

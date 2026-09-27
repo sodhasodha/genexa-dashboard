@@ -549,7 +549,7 @@ export default function FinancePage() {
               <PaceChart pace={data.sms.pace} color={C.sms} name="Sales" />
             </Card>
           </div>
-          <Card title="Pay structure" sub="36% of Cold SMS revenue is split progressively between Aryan and Rishil" tight>
+          <Card title="Pay structure" sub="Our share of Cold SMS profit (60% from Sep 2026, 50% before; Jacob keeps the rest) is split progressively between Aryan and Rishil" tight>
             <PayStructure reconcile={data.sms.reconcile} sheetUpdatedTo={data.sms.sheetUpdatedTo} />
           </Card>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">

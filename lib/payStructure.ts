@@ -1,6 +1,8 @@
 // Cold SMS pay structure — progressive (marginal) split of the distributable pool.
 //
-// 1. "Our side" receives POOL_SHARE (36%) of total Cold SMS revenue. That is the pool.
+// 1. "Our side" receives a share of Cold SMS profit (revenue − expenses); Jacob keeps the rest.
+//    That is the pool. Before Sep 2026: 50/50. From Sep 2026: 60% us / 40% Jacob.
+//    See POOL_RULES — past months keep the rule they were paid on.
 // 2. The pool is split between Aryan and Rishil using bands on ARYAN'S INCOME,
 //    exactly like tax brackets: each band's rate only applies to the pool money
 //    that moves Aryan through that band. Crossing a threshold NEVER changes the
@@ -8,14 +10,23 @@
 // 3. Bands are applied per calendar month (Aryan's income resets to $0 each month),
 //    which is what reconciles with the payouts actually received in Mercury.
 //
-// Worked example — revenue $40,000:
-//   pool = 36% × 40,000 = $14,400
+// Worked example — profit $24,000 at 60%:
+//   pool = 60% × 24,000 = $14,400
 //   Band 1 (Aryan $0→$8k at 80%):   pool needed = 8,000 / 0.80 = $10,000 → Aryan 8,000, Rishil 2,000
 //   Band 2 (Aryan $8k→$12k at 30%): pool left 4,400; to fill band needs 4,000 / 0.30 = 13,333 → uses all 4,400
 //                                    → Aryan 1,320, Rishil 3,080
 //   Total: Aryan $9,320, Rishil $5,080 (sum = pool $14,400)
 
-export const POOL_SHARE = 0.36
+// Pool rule by effective month (YYYY-MM), newest last.
+export type PoolRule = { from: string; share: number; basis: 'revenue' | 'profit' }
+export const POOL_RULES: PoolRule[] = [
+  { from: '0000-00', share: 0.5, basis: 'profit' },
+  { from: '2026-09', share: 0.6, basis: 'profit' },
+]
+// Rule for a given month; no month → the current rule (used for forecasts and MRR).
+export const poolRule = (month?: string): PoolRule =>
+  (month ? [...POOL_RULES].reverse().find((p) => month >= p.from) : POOL_RULES[POOL_RULES.length - 1])!
+export const poolRuleLabel = (r: PoolRule) => `${Math.round(r.share * 100)}% of ${r.basis}`
 
 export type Band = { from: number; to: number | null; aryan: number; rishil: number }
 
@@ -31,6 +42,8 @@ export type BandSlice = { band: Band; poolUsed: number; aryan: number; rishil: n
 
 export type SplitResult = {
   revenue: number
+  profit: number
+  rule: PoolRule
   pool: number
   aryan: number
   rishil: number
@@ -45,7 +58,7 @@ export type SplitResult = {
 
 // Split a pool progressively. `startingIncome` lets you continue from income Aryan
 // has already earned this month (defaults to 0).
-export function splitPool(pool: number, startingIncome = 0): Omit<SplitResult, 'revenue' | 'aryanPctOfRevenue' | 'rishilPctOfRevenue'> {
+export function splitPool(pool: number, startingIncome = 0): Omit<SplitResult, 'revenue' | 'profit' | 'rule' | 'aryanPctOfRevenue' | 'rishilPctOfRevenue'> {
   let remaining = Math.max(pool, 0)
   let income = Math.max(startingIncome, 0)
   let aryan = 0
@@ -88,13 +101,16 @@ export function splitPool(pool: number, startingIncome = 0): Omit<SplitResult, '
   }
 }
 
-// Revenue → pool → progressive split.
-export function coldSmsPayout(revenue: number): SplitResult {
-  const pool = Math.max(revenue, 0) * POOL_SHARE
+// Revenue/profit → pool → progressive split. `month` picks the pool rule in force that month.
+export function coldSmsPayout({ revenue, profit }: { revenue: number; profit: number }, month?: string): SplitResult {
+  const rule = poolRule(month)
+  const pool = Math.max(rule.basis === 'profit' ? profit : revenue, 0) * rule.share
   const s = splitPool(pool)
   return {
     ...s,
     revenue,
+    profit,
+    rule,
     aryanPctOfRevenue: revenue > 0 ? (s.aryan / revenue) * 100 : 0,
     rishilPctOfRevenue: revenue > 0 ? (s.rishil / revenue) * 100 : 0,
   }

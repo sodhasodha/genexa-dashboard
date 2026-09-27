@@ -1,11 +1,14 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { BANDS, POOL_SHARE, bandLabel, bandRange, coldSmsPayout } from '@/lib/payStructure'
+import { BANDS, bandLabel, bandRange, coldSmsPayout, poolRule, poolRuleLabel } from '@/lib/payStructure'
 import { monthLabel } from '@/lib/forecast'
 import { Chip } from '@/components/finance/Chip'
 
-type Reconcile = { month: string; sheet: number | null; commas: number; canonical: number; source: string; calcAryan: number; received: number }
+type Reconcile = { month: string; sheet: number | null; commas: number; canonical: number; profit: number; source: string; calcAryan: number; received: number }
+
+// Payout for a month under the pool rule in force that month.
+const payoutFor = (r: Reconcile) => coldSmsPayout({ revenue: r.canonical, profit: r.profit }, r.month)
 
 const fmtCurrency = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const fmtPct = (n: number) => `${n.toFixed(1)}%`
@@ -16,12 +19,12 @@ type Reason = 'matched' | 'prior-month accrual' | 'timing difference' | 'sheet n
 // mismatch is usually timing, not an error. `rows` must be sorted oldest → newest.
 function varianceReason(rows: Reconcile[], i: number): Reason {
   const r = rows[i]
-  const calc = coldSmsPayout(r.canonical).aryan
+  const calc = payoutFor(r).aryan
   const v = r.received - calc
   if (Math.abs(v) < Math.max(250, calc * 0.1)) return 'matched'
   const isCurrent = i === rows.length - 1 && r.source !== 'sheet'
   if (isCurrent) return v > 0 ? 'prior-month accrual' : 'sheet not updated'
-  const varOf = (j: number) => (rows[j] ? rows[j].received - coldSmsPayout(rows[j].canonical).aryan : 0)
+  const varOf = (j: number) => (rows[j] ? rows[j].received - payoutFor(rows[j]).aryan : 0)
   // A neighbouring month off by roughly the opposite amount → money landed in the other month.
   for (const j of [i - 1, i + 1]) {
     const n = varOf(j)
@@ -43,16 +46,18 @@ function Stat({ label, value, sub, color }: { label: string; value: string; sub?
   )
 }
 
-// Cold SMS pay structure: 36% pool split progressively between Aryan and Rishil (see lib/payStructure.ts).
+// Cold SMS pay structure: pool = our share of profit (60% from Sep 2026, 50% before) split progressively between Aryan and Rishil (see lib/payStructure.ts).
 export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile: Reconcile[]; sheetUpdatedTo: string | null }) {
   const months = [...reconcile].reverse()
   const [month, setMonth] = useState(months[0]?.month || '')
   const [calcInput, setCalcInput] = useState('')
   const [reconOpen, setReconOpen] = useState(false)
   const row = reconcile.find((r) => r.month === month) || months[0]
-  const split = useMemo(() => coldSmsPayout(row?.canonical || 0), [row])
+  const split = useMemo(() => (row ? payoutFor(row) : coldSmsPayout({ revenue: 0, profit: 0 })), [row])
   const calcRevenue = Number(calcInput.replace(/[^0-9.]/g, '')) || 0
-  const calc = useMemo(() => coldSmsPayout(calcRevenue), [calcRevenue])
+  // Calculator uses the current rule; its input is whatever that rule is based on (profit now).
+  const rule = poolRule()
+  const calc = useMemo(() => coldSmsPayout({ revenue: calcRevenue, profit: calcRevenue }), [calcRevenue])
 
   if (!row) return <p className="text-xs text-los-text-muted">No Cold SMS revenue yet.</p>
 
@@ -64,8 +69,8 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
 
   // Collapsed reconciliation summary: closed months only (current month is still accruing).
   const closed = sorted.map((r, i) => ({ r, i })).filter(({ r }) => r.source === 'sheet')
-  const totalVar = closed.reduce((sum, { r }) => sum + r.received - coldSmsPayout(r.canonical).aryan, 0)
-  const totalCalc = closed.reduce((sum, { r }) => sum + coldSmsPayout(r.canonical).aryan, 0)
+  const totalVar = closed.reduce((sum, { r }) => sum + r.received - payoutFor(r).aryan, 0)
+  const totalCalc = closed.reduce((sum, { r }) => sum + payoutFor(r).aryan, 0)
   const reasons = closed.map(({ i }) => varianceReason(sorted, i)).filter((x) => x !== 'matched')
   const reasonSummary = Object.entries(reasons.reduce((m: Record<string, number>, x) => ((m[x] = (m[x] || 0) + 1), m), {}))
     .sort((a, b) => b[1] - a[1])
@@ -97,7 +102,7 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
         <div className="lg:col-span-2 flex flex-col gap-3">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <Stat label="Cold SMS revenue" value={fmtCurrency(row.canonical)} sub={row.source === 'sheet' ? 'Sheet' : 'Commas · est.'} />
-            <Stat label="36% payout pool" value={fmtCurrency(split.pool)} sub={`${POOL_SHARE * 100}% of revenue`} />
+            <Stat label="Payout pool" value={fmtCurrency(split.pool)} sub={`${poolRuleLabel(split.rule)}${split.rule.basis === 'profit' ? ` (${fmtCurrency(row.profit)})` : ''}`} />
             <Stat label="Aryan payout" value={fmtCurrency(split.aryan)} color="#f59e0b" sub="Calculated" />
             <Stat label="Rishil payout" value={fmtCurrency(split.rishil)} />
             <Stat label="Current split" value={bandLabel(band)} sub={`Aryan / Rishil · ${bandRange(band)}`} />
@@ -170,18 +175,18 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
                 inputMode="decimal"
                 value={calcInput}
                 onChange={(e) => setCalcInput(e.target.value)}
-                placeholder="Monthly Cold SMS revenue"
+                placeholder={`Monthly Cold SMS ${rule.basis}`}
                 className="bg-transparent w-full py-1.5 text-xs text-los-text font-mono outline-none placeholder:text-los-text-muted placeholder:font-sans"
               />
             </div>
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
               {[
-                ['Total revenue', fmtCurrency(calc.revenue)],
-                ['36% pool', fmtCurrency(calc.pool)],
+                [rule.basis === 'profit' ? 'Cold SMS profit' : 'Total revenue', fmtCurrency(calcRevenue)],
+                [`Pool · ${poolRuleLabel(rule)}`, fmtCurrency(calc.pool)],
                 ['Aryan payout', fmtCurrency(calc.aryan)],
                 ['Rishil payout', fmtCurrency(calc.rishil)],
-                ['Aryan % of revenue', fmtPct(calc.aryanPctOfRevenue)],
-                ['Rishil % of revenue', fmtPct(calc.rishilPctOfRevenue)],
+                [`Aryan % of ${rule.basis}`, fmtPct(calcRevenue > 0 ? (calc.aryan / calcRevenue) * 100 : 0)],
+                [`Rishil % of ${rule.basis}`, fmtPct(calcRevenue > 0 ? (calc.rishil / calcRevenue) * 100 : 0)],
                 ['Aryan band', `${bandLabel(BANDS[calc.bandIndex])} · ${bandRange(BANDS[calc.bandIndex])}`],
               ].map(([k, v]) => (
                 <div key={k} className="contents">
@@ -210,13 +215,15 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
         </button>
         {reconOpen && (
       <div className="overflow-x-auto px-3 pb-3">
-        <table className="w-full text-xs min-w-[680px]">
+        <table className="w-full text-xs min-w-[820px]">
           <thead>
             <tr className="text-los-text-muted text-left">
               <th className="font-medium py-1.5 pr-3">Month</th>
               <th className="font-medium py-1.5 px-2 text-right">Sheet</th>
               <th className="font-medium py-1.5 px-2 text-right">Commas net</th>
               <th className="font-medium py-1.5 px-2 text-right">Used</th>
+              <th className="font-medium py-1.5 px-2 text-right">Profit</th>
+              <th className="font-medium py-1.5 px-2 text-right">Pool rule</th>
               <th className="font-medium py-1.5 px-2 text-right">Aryan (calc)</th>
               <th className="font-medium py-1.5 px-2 text-right">Received</th>
               <th className="font-medium py-1.5 px-2 text-right">Variance</th>
@@ -225,7 +232,7 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
           </thead>
           <tbody>
             {months.map((r) => {
-              const calcA = coldSmsPayout(r.canonical).aryan
+              const calcA = payoutFor(r).aryan
               const why = varianceReason(sorted, sorted.findIndex((x) => x.month === r.month))
               const srcDiff = r.sheet ? ((r.commas - r.sheet) / r.sheet) * 100 : null
               return (
@@ -234,6 +241,8 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
                   <td className="py-1.5 px-2 text-right font-mono text-los-text-muted">{r.sheet === null ? '—' : fmtCurrency(r.sheet)}</td>
                   <td className="py-1.5 px-2 text-right font-mono text-los-text-muted">{fmtCurrency(r.commas)}</td>
                   <td className="py-1.5 px-2 text-right font-mono text-los-text">{fmtCurrency(r.canonical)}</td>
+                  <td className="py-1.5 px-2 text-right font-mono text-los-text-muted">{fmtCurrency(r.profit)}</td>
+                  <td className="py-1.5 px-2 text-right text-los-text-muted whitespace-nowrap">{poolRuleLabel(poolRule(r.month))}</td>
                   <td className="py-1.5 px-2 text-right font-mono text-los-text">{fmtCurrency(calcA)}</td>
                   <td className="py-1.5 px-2 text-right font-mono text-los-text">{fmtCurrency(r.received)}</td>
                   <td className={`py-1.5 px-2 text-right font-mono ${why === 'matched' ? 'text-los-text-muted' : 'text-los-amber'}`}>{fmtSigned(r.received - calcA)}</td>

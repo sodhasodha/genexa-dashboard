@@ -13,7 +13,7 @@ import { FACTORS } from '@/lib/scenarios'
 // Cold SMS MRR = each Commas customer's billing run-rate (daily / weekly / monthly), net of fees,
 //              excluding setup fees, trials and one-off charges — see smsStreams.
 //          Predicted = MRR × net MRR retention (avg of last 3 periods) + average new MRR per 30 days.
-// Everything  = Genexa MRR + Aryan's share of Cold SMS MRR (pay structure) — same basis as the total view.
+// Everything  = Genexa MRR + Aryan's share of Cold SMS MRR (pay structure on MRR − avg SMS expenses) — same basis as the total view.
 
 const DAY = 86400000
 const HORIZON = 30 * DAY
@@ -180,9 +180,10 @@ export function smsMrr(sales: Sale[], now = Date.now()) {
   }
 }
 
-export function totalMrr(g: { current: number; predicted: number }, s: { current: number; predicted: number }) {
-  const smsNow = coldSmsPayout(s.current).aryan
-  const smsNext = coldSmsPayout(s.predicted).aryan
+// smsExpenses = Cold SMS monthly running costs (the pool is a share of profit).
+export function totalMrr(g: { current: number; predicted: number }, s: { current: number; predicted: number }, smsExpenses: number) {
+  const smsNow = coldSmsPayout({ revenue: s.current, profit: s.current - smsExpenses }).aryan
+  const smsNext = coldSmsPayout({ revenue: s.predicted, profit: s.predicted - smsExpenses }).aryan
   return {
     current: r0(g.current + smsNow),
     predicted: r0(g.predicted + smsNext),

@@ -243,7 +243,7 @@ export async function GET() {
     }
     const takeMonthly = months.map((month, i) => {
       const received = r2(payoutByMonth[month] || 0)
-      const calc = coldSmsPayout(smsMonthly[i].revenue)
+      const calc = coldSmsPayout({ revenue: smsMonthly[i].revenue, profit: smsMonthly[i].netProfit }, month)
       return { month, payouts: received, calcAryan: r2(calc.aryan), calcRishil: r2(calc.rishil), pool: r2(calc.pool) }
     })
     // Reconciliation rows for months where either source has data.
@@ -256,6 +256,7 @@ export async function GET() {
           sheet: m.sheetRevenue,
           commas: m.commasNet,
           canonical: m.revenue,
+          profit: m.netProfit,
           source: m.source,
           calcAryan: t.calcAryan,
           received: t.payouts,
@@ -290,7 +291,8 @@ export async function GET() {
     /* ---------------------------- Expected money --------------------------- */
     const curSms = smsMonthly[smsMonthly.length - 1]
     const smsProjectedRev = (curSms.commasNet / day) * dim
-    const smsExpected = Math.max(0, coldSmsPayout(smsProjectedRev).aryan)
+    const smsProjectedExp = sheetBy[curMonth]?.expenses ?? sheetExpAvg
+    const smsExpected = Math.max(0, coldSmsPayout({ revenue: smsProjectedRev, profit: smsProjectedRev - smsProjectedExp }, curMonth).aryan)
     const receivables = buildReceivables({
       payments,
       memberships,
@@ -353,6 +355,7 @@ export async function GET() {
       newCashAvg: avg(full3.map((m) => m.newCash)),
       refundRate: gross6 > 0 ? full6.reduce((sum, m) => sum + m.refunds, 0) / gross6 : 0,
       smsRevenueAvg: avg(smsMonthly.slice(-4, -1).map((m) => m.revenue)),
+      smsExpensesAvg: avg(smsMonthly.slice(-4, -1).map((m) => m.expenses)),
       expenses: drivers,
       drawsAvg: avg(months.slice(-4, -1).map((mk) => drawsByMonth[mk] || 0)),
       netPosition,
@@ -370,7 +373,7 @@ export async function GET() {
 
     const gMrr = genexaMrr({ payments, memberships, plans, products, monday })
     const sMrr = smsMrr(commas.sales)
-    const mrr = { genexa: gMrr, sms: sMrr, total: totalMrr(gMrr, sMrr) }
+    const mrr = { genexa: gMrr, sms: sMrr, total: totalMrr(gMrr, sMrr, sheetExpAvg) }
 
     return NextResponse.json({
       asOf: now.toISOString(),
