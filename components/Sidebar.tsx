@@ -73,6 +73,7 @@ export default function Sidebar() {
   const [open, setOpen] = useState(false)
   const isActive = (href: string) => pathname === href || (href === '/home' && pathname === '/')
 
+  if (pathname === '/login') return null
   return (
     <>
       {/* Desktop sidebar */}

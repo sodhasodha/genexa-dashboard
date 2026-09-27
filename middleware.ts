@@ -1,19 +1,28 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { AUTH_COOKIE, isPublicPath, isValidSession } from '@/lib/auth'
 
-export function middleware(_request: NextRequest) {
-  // Auth disabled - allow all routes
-  return NextResponse.next()
+// Password-protect every page and API route except the public ones in lib/auth.ts
+// (Genexa Clients + its API, and the login flow).
+export async function middleware(request: NextRequest) {
+  const { pathname, search } = request.nextUrl
+  if (isPublicPath(pathname)) return NextResponse.next()
+  if (await isValidSession(request.cookies.get(AUTH_COOKIE)?.value)) return NextResponse.next()
+
+  if (pathname.startsWith('/api/')) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const url = request.nextUrl.clone()
+  url.pathname = '/login'
+  url.search = `?next=${encodeURIComponent(pathname + search)}`
+  return NextResponse.redirect(url)
 }
 
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
+     * Match all request paths except:
+     * - _next/static, _next/image (build assets)
+     * - favicon / apple-touch-icon (public files)
      */
-    '/((?!_next/static|_next/image|favicon.ico).*)',
+    '/((?!_next/static|_next/image|favicon.ico|favicon.svg|favicon.png|apple-touch-icon.png).*)',
   ],
 }
