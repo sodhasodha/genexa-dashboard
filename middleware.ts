@@ -7,6 +7,9 @@ import { AUTH_COOKIE, isPublicPath, isValidSession } from '@/lib/auth'
 export async function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl
   if (isPublicPath(pathname)) return NextResponse.next()
+  // Vercel cron (vercel.json) authenticates with CRON_SECRET.
+  const cron = process.env.CRON_SECRET
+  if (cron && pathname === '/api/toolbox/sync' && request.headers.get('authorization') === `Bearer ${cron}`) return NextResponse.next()
   if (await isValidSession(request.cookies.get(AUTH_COOKIE)?.value)) return NextResponse.next()
 
   if (pathname.startsWith('/api/')) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

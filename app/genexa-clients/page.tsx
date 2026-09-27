@@ -319,7 +319,7 @@ export default function GenexaClientsPage() {
                       {open === c.businessId && (
                         <tr className="bg-los-surface-3">
                           <td colSpan={COLUMNS.length + 3} className="px-4">
-                            <div className="sticky left-4 max-w-[calc(100vw-4rem)] lg:max-w-[1300px]">
+                            <div className="sticky left-4 w-[calc(100vw-4.5rem)] md:w-[calc(100vw-14rem-5.5rem)] max-w-[1300px]">
                               <Detail c={c} />
                             </div>
                           </td>

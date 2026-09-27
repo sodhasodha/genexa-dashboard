@@ -8,8 +8,8 @@ import { buildExpenseRows, expenseDrivers } from '@/lib/expenseControls'
 import { runAllScenarios, Renewal } from '@/lib/scenarios'
 import { coldSmsPayout } from '@/lib/payStructure'
 import { genexaMrr, smsMrr, totalMrr } from '@/lib/mrr'
+import { fetchCommasTransactions } from '@/lib/commas'
 
-const COMMAS_API_URL = 'https://www.fanbasis.com/public-api'
 const MONTHS = 13 // 12 full months + current
 
 export const dynamic = 'force-dynamic'
@@ -48,31 +48,11 @@ function whopSales(payments: any[]): { sales: Sale[]; refunds: Refund[] } {
 
 /* --------------------------------- Commas --------------------------------- */
 async function fetchCommas(): Promise<{ sales: Sale[]; refunds: Refund[] }> {
-  const apiKey = process.env.COMMAS_API_KEY
-  if (!apiKey) throw new Error('Commas API key not configured')
-  const sales: Sale[] = []
-  const refunds: Refund[] = []
-  let page = 1
-  let more = true
-  while (more && page <= 50) {
-    const res = await fetch(`${COMMAS_API_URL}/checkout-sessions/transactions?per_page=100&page=${page}`, {
-      headers: { 'x-api-key': apiKey, Accept: 'application/json' },
-    })
-    if (!res.ok) throw new Error(`Commas API error: ${res.statusText}`)
-    const data = (await res.json()).data || {}
-    const txs = data.transactions || []
-    for (const t of txs) {
-      const ts = new Date(t.transaction_date).getTime()
-      if (!ts) continue
-      sales.push({ ts, customer: t.fan?.id || t.fan?.email || String(t.id), amount: Number(t.amount) || 0, fee: Number(t.fee_amount) || 0, product: t.product?.title || t.service?.title || '' })
-      for (const rf of t.refunds || []) {
-        refunds.push({ ts: new Date(rf.created_at).getTime() || ts, amount: Number(rf.amount) || 0 })
-      }
-    }
-    more = !!data.pagination?.has_more && txs.length > 0
-    page += 1
+  const txs = await fetchCommasTransactions()
+  return {
+    sales: txs.map((t) => ({ ts: t.ts, customer: t.customerId, amount: t.amount, fee: t.fee, product: t.product })),
+    refunds: txs.flatMap((t) => t.refunds),
   }
-  return { sales, refunds }
 }
 
 /* ------------------------------- Aggregation ------------------------------ */

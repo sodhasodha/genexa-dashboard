@@ -110,7 +110,7 @@ export function genexaMrr(input: { payments: any[]; memberships: any[]; plans: R
 // One-off charges that aren't part of a recurring plan (setup fees, trials, flat one-off invoices).
 const ONE_OFF = /setup|trial|one[\s-]?(time|off)|^\$?[\d,.]+$/i
 
-type Stream = { customer: string; mrr: number; first: number; cadence: number }
+export type Stream = { customer: string; mrr: number; first: number; cadence: number }
 
 // Each customer's MRR at time `at`, from their own billing cadence (daily / weekly / monthly):
 //  - cadence  = median gap between billing days (last 60d); single payment → from the plan name, default weekly.
@@ -118,7 +118,7 @@ type Stream = { customer: string; mrr: number; first: number; cadence: number }
 //  - new customers → what they've paid ÷ the days it covers (so a daily payer who started
 //    3 days ago counts at a full month of daily billing, a new weekly payer at 4.3 weeks).
 //  - lapsed customers (no payment for 2 cycles + 2 days, min 7) drop out; returning ones restart as new.
-function smsStreams(sales: Sale[], at: number): Stream[] {
+export function smsStreams(sales: Sale[], at: number): Stream[] {
   const by: Record<string, Sale[]> = {}
   for (const s of sales) if (s.ts <= at && !ONE_OFF.test((s.product || '').trim())) (by[s.customer] ||= []).push(s)
   const out: Stream[] = []
