@@ -16,6 +16,7 @@ const icons: Record<string, ReactNode> = {
   clients: <Icon d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm14 10v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />,
   finance: <Icon d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />,
   health: <Icon d="M22 12h-4l-3 9L9 3l-3 9H2" />,
+  clinics: <Icon d="M3 21h18M5 21V7l7-4 7 4v14M10 12h4m-2-2v4" />,
   docs: <Icon d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6" />,
 }
 
@@ -25,6 +26,7 @@ const MAIN = [
   { href: '/tasks', label: 'Tasks', icon: 'tasks' },
   { href: '/goals', label: 'Goals', icon: 'goals' },
   { href: '/clients', label: 'Clients', icon: 'clients' },
+  { href: '/genexa-clients', label: 'Genexa Clients', icon: 'clinics' },
   { href: '/health', label: 'Health', icon: 'health' },
 ]
 const BOTTOM = [{ href: '/docs', label: 'Docs', icon: 'docs' }]
