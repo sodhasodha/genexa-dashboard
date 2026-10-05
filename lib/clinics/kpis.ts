@@ -85,13 +85,28 @@ const rated = (key: KpiKey, value: number, display: string, note?: string, targe
 // Hours since the end of a YYYY-MM-DD day (0 if it's today).
 const hoursSince = (date: string | null, now: number) => (date ? Math.max(0, now - (Date.parse(`${date}T00:00:00Z`) + DAY)) / HOUR : null)
 
+// Duplicate guard: two clinics returning identical spend AND impressions for the same window are
+// reading the same source. Both are marked as a data error and left out of totals.
+export const DUPLICATE_ERROR = 'Data error: duplicate source'
+export function flagDuplicates(clinics: ClinicConfig[], raws: ClinicRaw[]): void {
+  const groups = new Map<string, number[]>()
+  raws.forEach((r, i) => {
+    if (r.error || !r.bound || r.impressions <= 0) return
+    const key = `${r.spend.toFixed(2)}|${r.impressions}`
+    groups.set(key, [...(groups.get(key) || []), i])
+  })
+  for (const idx of groups.values())
+    if (idx.length > 1)
+      for (const i of idx) raws[i].dataError = `${DUPLICATE_ERROR} — same spend and impressions as ${idx.filter((j) => j !== i).map((j) => clinics[j].name).join(', ')}`
+}
+
 /* --------------------------------- report ---------------------------------- */
 export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBookings | null, window: Window): ClinicReport {
   const now = window.end.getTime()
   const days = window.days
   const notes: string[] = []
   const k = {} as Record<KpiKey, Kpi>
-  const err = raw.error ? `Cortana: ${raw.error}` : !raw.bound ? 'Not bound — no ad account binding in lib/clinics/bindings.ts' : null
+  const err = raw.error ? `Cortana: ${raw.error}` : raw.dataError ? raw.dataError : !raw.bound ? 'Not bound — no ad account binding in lib/clinics/bindings.ts' : null
 
   // Bookings can't be fewer than confirmed — if they are, unconfirmed bookings aren't being logged.
   const bookings = Math.max(raw.booked, raw.confirmed)
@@ -109,7 +124,7 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
   const staleSpend = !err && (hSpend === null || hSpend > STALE_HOURS)
 
   if (err) {
-    for (const key of Object.keys(LABELS) as KpiKey[]) if (key !== 'pickupRate') k[key] = raw.bound ? grey(key, err) : kpi(key, null, 'Not bound', 'grey', err)
+    for (const key of Object.keys(LABELS) as KpiKey[]) if (key !== 'pickupRate') k[key] = kpi(key, null, raw.dataError ? 'Data error' : raw.bound ? '—' : 'Not bound', 'grey', err)
   } else {
     // 1. CTR / click → lead
     k.ctr = raw.impressions > 0 ? rated('ctr', (raw.linkClicks / raw.impressions) * 100, pct((raw.linkClicks / raw.impressions) * 100)) : grey('ctr', 'No ad impressions in window')
@@ -228,7 +243,7 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
     name: clinic.name,
     pod: clinic.pod,
     businessId: clinic.businessId,
-    live: raw.bound && (!!raw.error || raw.spend > 0 || raw.leads > 0 || !!raw.lastLeadDate || !!raw.lastSpendDate),
+    live: raw.bound && (!!raw.error || !!raw.dataError || raw.spend > 0 || raw.leads > 0 || !!raw.lastLeadDate || !!raw.lastSpendDate),
     kpis: k,
     atKpi,
     coreGreen,
@@ -254,7 +269,7 @@ const DIAGNOSIS: Partial<Record<KpiKey, string>> = {
   confirmedPerWeek: 'not enough confirmed appointments',
 }
 function biggestProblem(k: Record<KpiKey, Kpi>, err: string | null): string {
-  if (err) return err.startsWith('Not bound') ? err : `No data — ${err}`
+  if (err) return /^(Not bound|Data error)/.test(err) ? err : `No data — ${err}`
   const order = Object.keys(DIAGNOSIS) as KpiKey[]
   const bad = order.map((key) => k[key]).filter((x) => x.status === 'red' || x.status === 'amber')
   if (!bad.length) {
@@ -270,7 +285,7 @@ function biggestProblem(k: Record<KpiKey, Kpi>, err: string | null): string {
 
 export function summarise(all: ClinicReport[]): ClinicsSummary {
   const reports = all.filter((r) => r.live)
-  const ok = reports.filter((r) => !r.raw.error)
+  const ok = reports.filter((r) => !r.raw.error && !r.raw.dataError)
   const spend = ok.reduce((s, r) => s + r.raw.spend, 0)
   const leads = ok.reduce((s, r) => s + r.raw.leads, 0)
   // ROAS only over clinics that track purchases (untracked revenue isn't zero revenue).

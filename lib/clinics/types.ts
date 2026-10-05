@@ -10,6 +10,7 @@ export type DayPoint = { date: string; spend: number; leads: number; revenue: nu
 // Raw per-clinic numbers for a window, as returned by a ClinicSource.
 export type ClinicRaw = {
   error?: string // source failed / not connected → every KPI from it is grey
+  dataError?: string // numbers can't be trusted (e.g. duplicate source) → shown as an error, left out of totals
   bound: boolean // has an explicit ad-account binding (lib/clinics/bindings.ts); false → no numbers at all
   spend: number
   impressions: number

@@ -4,7 +4,7 @@ import { cortanaSource, unboundRaw } from '@/lib/clinics/cortana'
 import { fetchSlackBookings } from '@/lib/clinics/slack'
 import { MOCK_ROSTER, mockSlackBookings, mockSource } from '@/lib/clinics/mock'
 import { fetchRoster } from '@/lib/clinics/roster'
-import { buildReport, makeWindow, summarise } from '@/lib/clinics/kpis'
+import { buildReport, flagDuplicates, makeWindow, summarise } from '@/lib/clinics/kpis'
 import type { ClinicRaw, ClinicSource, ClinicsResponse, SlackBookings, WindowKey } from '@/lib/clinics/types'
 
 export const dynamic = 'force-dynamic'
@@ -20,8 +20,10 @@ async function build(windowKey: WindowKey, mock: boolean): Promise<ClinicsRespon
     mock ? Promise.resolve(mockSlackBookings()) : fetchSlackBookings(window, CLINICS).catch(() => ({}) as Record<string, SlackBookings>),
   ])
 
+  flagDuplicates(CLINICS, raws)
   const clinics = CLINICS.map((c, i) => buildReport(c, raws[i], slack[c.name] ?? null, window)).sort((a, b) => b.worst - a.worst)
   const failed = raws.filter((r) => r.error).length
+  const dupes = raws.filter((r) => r.dataError).length
   const slackStates = Object.values(slack)
   return {
     window: windowKey,
@@ -31,7 +33,7 @@ async function build(windowKey: WindowKey, mock: boolean): Promise<ClinicsRespon
     generatedAt: new Date().toISOString(),
     mock,
     sources: {
-      cortana: mock ? 'mock' : failed === 0 ? 'live' : failed === CLINICS.length ? 'error' : `live · ${failed} failed`,
+      cortana: mock ? 'mock' : failed === 0 ? (dupes ? `live · ${dupes} data errors` : 'live') : failed === CLINICS.length ? 'error' : `live · ${failed} failed`,
       slack: mock
         ? 'mock'
         : slackStates.length && slackStates.every((p) => p.connected)

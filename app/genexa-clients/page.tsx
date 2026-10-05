@@ -311,7 +311,7 @@ export default function GenexaClientsPage() {
                         </td>
                         <td className="py-2 px-2 align-top text-los-text-secondary whitespace-nowrap">{c.pod}</td>
                         <td className="py-2 px-2 align-top whitespace-nowrap">
-                          {c.raw.error ? <Chip tone="muted">No data</Chip> : c.atKpi ? <Chip tone="green">At KPI</Chip> : <Chip tone="red">Off KPI</Chip>}
+                          {c.raw.dataError ? <Chip tone="red" title={c.raw.dataError}>Data error: duplicate source</Chip> : c.raw.error ? <Chip tone="muted">No data</Chip> : c.atKpi ? <Chip tone="green">At KPI</Chip> : <Chip tone="red">Off KPI</Chip>}
                           <p className="text-[10px] text-los-text-muted mt-0.5">{c.coreGreen}/5 core</p>
                         </td>
                         {COLUMNS.map((key) => (
