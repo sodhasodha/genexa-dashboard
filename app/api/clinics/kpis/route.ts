@@ -8,6 +8,7 @@ import { buildReport, flagDuplicates, makeWindow, prevWindow, summarise, windowL
 import type { ClinicRaw, ClinicSource, ClinicsResponse, SlackBookings, WindowKey } from '@/lib/clinics/types'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60 // a cold load makes ~80 throttled Cortana calls
 
 const WINDOWS: WindowKey[] = ['7d', '30d', 'mtd']
 

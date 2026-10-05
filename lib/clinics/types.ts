@@ -38,6 +38,7 @@ export type ClinicRaw = {
   metaConnected: boolean // Cortana returned ad data for a bound campaign in this or the prior period
   syncedAt: string | null // when the dashboard last pulled this clinic from Cortana (ISO)
   lastEventAt: string | null // newest CRM event Cortana holds for the clinic (ISO)
+  dailySpendShare: number // <1 → daily spend / last spend are pro-rated from a shared ad account
   excludedCampaigns: number // paid campaigns Cortana lists for the clinic that aren't in its binding
 }
 

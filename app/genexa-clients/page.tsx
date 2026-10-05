@@ -99,7 +99,7 @@ function Health({ c }: { c: ClinicReport }) {
   const h = c.health
   return (
     <div className="flex flex-col gap-0.5 text-[10px] text-los-text-secondary">
-      <Dot ok={h.meta} label="Meta" title={h.meta ? 'Cortana returned ad data for a bound campaign' : 'No ad data from Cortana for any bound campaign in this or the prior period'} />
+      <Dot ok={h.meta} label="Meta" title={h.meta ? 'Cortana returned ad data for a bound campaign' : 'No ad data from Cortana for any bound campaign in the last 60 days'} />
       <Dot ok={h.crm} label="GHL" title={h.crm ? `Last CRM event in Cortana: ${new Date(h.lastEventAt!).toLocaleString('en-US')}` : 'No CRM events in Cortana in the last 9 weeks'} />
       <Dot ok={h.revenue} label="Revenue" title={h.revenue ? 'Closes are being logged in Cortana' : 'No closes logged in Cortana in the last 9 weeks — revenue not tracked'} />
       <span className="text-los-text-muted whitespace-nowrap">Synced {clock(h.syncedAt)}</span>

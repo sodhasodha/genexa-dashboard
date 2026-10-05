@@ -142,6 +142,8 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
   if (leadNote && !err) notes.push(`Leads from Meta platform count — Cortana logged no lead events`)
   if (raw.excludedCampaigns > 0 && !err)
     notes.push(`${raw.excludedCampaigns} non-Genexa campaign${raw.excludedCampaigns > 1 ? 's' : ''} in Cortana for this clinic left out (not in its binding)`)
+  if (raw.dailySpendShare > 0 && raw.dailySpendShare < 0.995 && !err)
+    notes.push(`Daily spend trend and last-spend date are pro-rated — ${Math.round(raw.dailySpendShare * 100)}% of this ad account's 60-day spend is Genexa`)
   if (raw.excludedEvents > 0 && !err) notes.push(`${raw.excludedEvents} CRM event${raw.excludedEvents > 1 ? 's' : ''} on non-Genexa campaigns not counted`)
   if (raw.testContacts.length > 0 && !err) notes.push(`${raw.testContacts.length} test contact${raw.testContacts.length > 1 ? 's' : ''} excluded`)
 

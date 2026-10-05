@@ -13,13 +13,14 @@ import type { AccountState, AccountStatus, ClinicRaw, ClinicSource, DayPoint, Wi
 //  2. conversions/entries for a ~9-week lookback → every CRM event with its contact and attributed
 //     campaign id. The funnel (leads, booked, confirmed, shown, sold, revenue) is counted from these
 //     as unique contacts, so test contacts and events on non-bound campaigns can be dropped.
-//  3. attribution for a 60-day lookback → daily spend series (sparkline, last spend). Cortana only
-//     returns dailySummary when a filter is set, so this call filters to the funnel events.
+//  3. attribution?groupBy=campaign for a 60-day lookback → daily spend series (sparkline, last spend)
+//     and which campaigns exist. Cortana only returns dailySummary when a filter is set, so this
+//     call filters to the funnel events.
 //  Campaign rows from every business are pooled by campaign id, then handed to clinics by the explicit
 //  binding in bindings.ts — a business's own row set is never trusted to be "its" campaigns.
 //  Each call is cached 15 min (windows end on a 15-min boundary, so keys are stable); failures
 //  aren't cached. The REST API ignores campaign filters and dailySummary spend is business-wide,
-//  so daily spend is pro-rated by the clinic's share of that business's window spend.
+//  so daily spend is pro-rated by the clinic's share of that business's 60-day spend.
 
 const DAY = 86400000
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10)
@@ -135,6 +136,7 @@ export const unboundRaw = (): ClinicRaw => ({
   metaConnected: false,
   syncedAt: null,
   lastEventAt: null,
+  dailySpendShare: 1,
   excludedCampaigns: 0,
 })
 
@@ -162,7 +164,7 @@ function accountStatuses(accounts: string[], owned: Campaign[], seen: Campaign[]
     if (snap?.status === 101) [state, detail] = ['closed', asOf]
     else if (snap?.status === 2 && spend === 0) [state, detail] = ['disabled', asOf]
     else if (snap?.status === 3) [state, detail] = ['payment_issue', `Unsettled balance — ${asOf}. ${usd(spend)} spent in window`]
-    else if (!camps.length) [state, detail] = ['no_active_campaigns', 'No Genexa campaign delivered or logged an event in this or the prior period']
+    else if (!camps.length) [state, detail] = ['no_active_campaigns', 'No Genexa campaign delivered or logged an event in the last 60 days']
     else if (!camps.some((c) => c.status === 'ACTIVE')) [state, detail] = ['campaign_paused', camps.map((c) => `${c.name}: ${c.status ?? 'unknown'}`).join('; ')]
     else if (spend === 0) [state, detail] = ['not_delivering', 'Campaign is switched on but spent $0 in window — check billing / delivery']
     else [state, detail] = ['active', `${usd(spend)} spent in window`]
@@ -251,6 +253,7 @@ function buildRaw(
     metaConnected: seen.length > 0,
     syncedAt: win[id].fetchedAt ? new Date(win[id].fetchedAt).toISOString() : null,
     lastEventAt: all.length ? new Date(Math.max(...all.map((e) => e.at))).toISOString() : null,
+    dailySpendShare: spendShare.share,
     excludedCampaigns: win[id].rows.filter((r) => r.platformEntityId && !ownedIds.has(String(r.platformEntityId)) && num(r.spent) > 0).length,
   }
 }
@@ -280,23 +283,25 @@ export const cortanaSource: ClinicSource = {
     const [win, prevWin, hist, entries] = await Promise.all([
       load((id) => attribution(id, range(window)), none),
       load((id) => attribution(id, range(prev)), none),
-      load((id) => attribution(id, { ...lookback, groupBy: 'source', eventTypes: Object.values(EV).join(SEP) }), none),
+      load((id) => attribution(id, { ...lookback, groupBy: 'campaign', eventTypes: Object.values(EV).join(SEP) }), none),
       load((id) => cachedEntries(id, entriesFrom), [] as Entry[]),
     ])
     const rowsOf = (w: Record<string, Attribution>) => Object.fromEntries(Object.entries(w).map(([id, a]) => [id, a.rows]))
     const pool = poolCampaigns(rowsOf(win))
     const prevPool = poolCampaigns(rowsOf(prevWin))
-    // Share of the surfacing business's spend that is this clinic's, over both periods.
+    const histPool = poolCampaigns(rowsOf(hist))
+    // Share of the surfacing business's spend that is this clinic's, over the 60-day lookback.
     const shareOf = (id: string) => {
-      const owned = [...ownedCampaigns(id, pool), ...ownedCampaigns(id, prevPool)]
+      const owned = ownedCampaigns(id, histPool)
       const source = [...owned].sort((a, b) => b.spend - a.spend)[0]?.business ?? id
-      const total = [...win[source].rows, ...prevWin[source].rows].reduce((s, r) => s + num(r.spent), 0)
+      const total = hist[source].rows.reduce((s, r) => s + num(r.spent), 0)
       return { source, share: total > 0 ? Math.min(1, owned.reduce((s, c) => s + c.spend, 0) / total) : 0 }
     }
-    // Campaigns seen in either period, this window's version first.
+    // Campaigns seen in the window, the prior period or the lookback — the window's version first.
     const seenOf = (id: string) => {
-      const cur = ownedCampaigns(id, pool)
-      return [...cur, ...ownedCampaigns(id, prevPool).filter((c) => !cur.some((x) => x.id === c.id))]
+      const out = ownedCampaigns(id, pool)
+      for (const p of [prevPool, histPool]) out.push(...ownedCampaigns(id, p).filter((c) => !out.some((x) => x.id === c.id)))
+      return out
     }
     const build = (w: Window, rows: Record<string, Attribution>, p: Map<string, Campaign>) =>
       clinics.map((c) =>
