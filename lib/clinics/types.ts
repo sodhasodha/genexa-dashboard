@@ -10,6 +10,7 @@ export type DayPoint = { date: string; spend: number; leads: number; revenue: nu
 // Raw per-clinic numbers for a window, as returned by a ClinicSource.
 export type ClinicRaw = {
   error?: string // source failed / not connected → every KPI from it is grey
+  bound: boolean // has an explicit ad-account binding (lib/clinics/bindings.ts); false → no numbers at all
   spend: number
   impressions: number
   linkClicks: number
@@ -25,13 +26,13 @@ export type ClinicRaw = {
   daily: DayPoint[] // one point per day in the window
   lastLeadDate: string | null // last day with a lead (60-day lookback)
   lastSpendDate: string | null // last day with spend (60-day lookback)
-  excludedCampaigns: number // paid campaigns dropped by the clinic's campaign filter
+  excludedCampaigns: number // paid campaigns Cortana lists for the clinic that aren't in its binding
 }
 
 // Anything that can supply raw clinic numbers (Cortana today, mock for testing).
 export interface ClinicSource {
   name: string
-  fetchClinic(clinic: ClinicConfig, window: Window): Promise<ClinicRaw>
+  fetchAll(clinics: ClinicConfig[], window: Window): Promise<ClinicRaw[]>
 }
 
 // Per-clinic booking notifications from the pod appointment-notis channels in Slack.
@@ -61,6 +62,8 @@ export type ClinicReport = {
   name: string
   pod: string
   businessId: string
+  // Live = bound and has spend, leads or any activity in the 60-day lookback.
+  live: boolean
   kpis: Record<KpiKey, Kpi>
   atKpi: boolean
   coreGreen: number
@@ -75,7 +78,8 @@ export type ClinicReport = {
 
 export type ClinicsSummary = {
   atKpi: number
-  total: number
+  total: number // live clinics
+  roster: number // every clinic on the roster, live or not
   spend: number
   leads: number
   confirmed: number

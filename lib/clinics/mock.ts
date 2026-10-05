@@ -41,13 +41,17 @@ const wobble = (i: number, d: number) => 0.75 + 0.5 * ((Math.sin(i * 12.9898 + d
 
 export const mockSource: ClinicSource = {
   name: 'mock',
-  async fetchClinic(clinic: ClinicConfig, window: Window): Promise<ClinicRaw> {
+  fetchAll: (clinics: ClinicConfig[], window: Window) => Promise.all(clinics.map((c) => mockClinic(c, window))),
+}
+
+async function mockClinic(clinic: ClinicConfig, window: Window): Promise<ClinicRaw> {
+  {
     const i = Math.max(0, MOCK_ROSTER.findIndex((c) => c.businessId === clinic.businessId))
     const s = SCENARIOS[i % SCENARIOS.length]
     const o = s.opts || {}
     const empty = { lead: false, booked: false, confirmed: false, shown: false, purchase: false }
     if (o.error)
-      return { error: o.error, spend: 0, impressions: 0, linkClicks: 0, leads: 0, leadsFrom: 'cortana', booked: 0, confirmed: 0, shown: 0, purchases: 0, revenue: 0, tracked: empty, daily: [], lastLeadDate: null, lastSpendDate: null, excludedCampaigns: 0 }
+      return { error: o.error, bound: true, spend: 0, impressions: 0, linkClicks: 0, leads: 0, leadsFrom: 'cortana', booked: 0, confirmed: 0, shown: 0, purchases: 0, revenue: 0, tracked: empty, daily: [], lastLeadDate: null, lastSpendDate: null, excludedCampaigns: 0 }
 
     const daily: DayPoint[] = []
     const nDays = Math.ceil(window.days)
@@ -75,6 +79,7 @@ export const mockSource: ClinicSource = {
     const lastWith = (f: (d: DayPoint) => boolean) => [...daily].reverse().find(f)?.date ?? null
 
     return {
+      bound: true,
       spend,
       impressions,
       linkClicks,
@@ -91,7 +96,7 @@ export const mockSource: ClinicSource = {
       lastSpendDate: lastWith((d) => d.spend > 0),
       excludedCampaigns: 0,
     }
-  },
+  }
 }
 
 export function mockSlackBookings(): Record<string, SlackBookings> {

@@ -216,7 +216,8 @@ export default function GenexaClientsPage() {
     } catch {}
   }
 
-  const clinics = useMemo(() => (data ? sortClinics(data.clinics, sort) : []), [data, sort])
+  const clinics = useMemo(() => (data ? sortClinics(data.clinics.filter((c) => c.live), sort) : []), [data, sort])
+  const notLive = useMemo(() => (data ? data.clinics.filter((c) => !c.live).sort((a, b) => a.name.localeCompare(b.name)) : []), [data])
   const clickSort = (key: SortKey) => setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }))
   const arrow = (key: SortKey) => (sort.key === key ? (sort.dir === 1 ? ' ↓' : ' ↑') : '')
   const s = data?.summary
@@ -269,6 +270,7 @@ export default function GenexaClientsPage() {
             <Stat label="Blended ROAS" value={s.roas === null ? '—' : `${s.roas.toFixed(1)}x`} sub="Clinics tracking purchases" color={s.roas === null ? undefined : s.roas >= 3 ? '#22c55e' : s.roas >= 2.4 ? '#f59e0b' : '#ef4444'} />
           </div>
 
+          <p className="los-label">Live · {clinics.length} clinics</p>
           <div className="los-card p-0 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-xs min-w-[1500px]">
@@ -331,6 +333,29 @@ export default function GenexaClientsPage() {
               </table>
             </div>
           </div>
+          {notLive.length > 0 && (
+            <>
+              <p className="los-label">Not launched / no ad account bound · {notLive.length}</p>
+              <div className="los-card p-0 overflow-hidden">
+                <table className="w-full text-xs">
+                  <tbody>
+                    {notLive.map((c) => (
+                      <tr key={c.businessId} className="border-t first:border-t-0 border-los-border">
+                        <td className="py-2 pl-4 pr-2 text-los-text font-medium">{c.name}</td>
+                        <td className="py-2 px-2 text-los-text-secondary whitespace-nowrap">{c.pod}</td>
+                        <td className="py-2 px-2 whitespace-nowrap">
+                          <Chip tone="muted">{c.raw.bound ? 'Not launched' : 'Not bound'}</Chip>
+                        </td>
+                        <td className="py-2 px-2 pr-4 text-los-text-muted">
+                          {c.raw.bound ? 'Bound, but no spend, leads or CRM activity in the last 60 days' : 'No ad account binding — add it in lib/clinics/bindings.ts'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
           <p className="text-[10px] text-los-text-muted">
             Tap a clinic for its funnel, daily trend and biggest problem. * = value has a note (hover). Grey = source not connected or event not tracked, never zero. Slack
             booking posts cross-check confirmations; pickups aren&apos;t posted in Slack. Last lead / last spend are day-level. Data refreshes every 15 min. Targets live in

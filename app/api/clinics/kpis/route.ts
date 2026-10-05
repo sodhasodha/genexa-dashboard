@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidateTag } from 'next/cache'
-import { cortanaSource } from '@/lib/clinics/cortana'
+import { cortanaSource, unboundRaw } from '@/lib/clinics/cortana'
 import { fetchSlackBookings } from '@/lib/clinics/slack'
 import { MOCK_ROSTER, mockSlackBookings, mockSource } from '@/lib/clinics/mock'
 import { fetchRoster } from '@/lib/clinics/roster'
@@ -16,30 +16,7 @@ async function build(windowKey: WindowKey, mock: boolean): Promise<ClinicsRespon
   const source: ClinicSource = mock ? mockSource : cortanaSource
   const CLINICS = mock ? MOCK_ROSTER : await fetchRoster()
   const [raws, slack] = await Promise.all([
-    Promise.all(
-      CLINICS.map((c) =>
-        source.fetchClinic(c, window).catch(
-          (e): ClinicRaw => ({
-            error: (e as Error).message,
-            spend: 0,
-            impressions: 0,
-            linkClicks: 0,
-            leads: 0,
-            leadsFrom: 'cortana',
-            booked: 0,
-            confirmed: 0,
-            shown: 0,
-            purchases: 0,
-            revenue: 0,
-            tracked: { lead: false, booked: false, confirmed: false, shown: false, purchase: false },
-            daily: [],
-            lastLeadDate: null,
-            lastSpendDate: null,
-            excludedCampaigns: 0,
-          })
-        )
-      )
-    ),
+    source.fetchAll(CLINICS, window).catch((e) => CLINICS.map((): ClinicRaw => ({ ...unboundRaw(), bound: true, error: (e as Error).message }))),
     mock ? Promise.resolve(mockSlackBookings()) : fetchSlackBookings(window, CLINICS).catch(() => ({}) as Record<string, SlackBookings>),
   ])
 

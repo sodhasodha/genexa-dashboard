@@ -91,7 +91,7 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
   const days = window.days
   const notes: string[] = []
   const k = {} as Record<KpiKey, Kpi>
-  const err = raw.error ? `Cortana: ${raw.error}` : null
+  const err = raw.error ? `Cortana: ${raw.error}` : !raw.bound ? 'Not bound — no ad account binding in lib/clinics/bindings.ts' : null
 
   // Bookings can't be fewer than confirmed — if they are, unconfirmed bookings aren't being logged.
   const bookings = Math.max(raw.booked, raw.confirmed)
@@ -109,7 +109,7 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
   const staleSpend = !err && (hSpend === null || hSpend > STALE_HOURS)
 
   if (err) {
-    for (const key of Object.keys(LABELS) as KpiKey[]) if (key !== 'pickupRate') k[key] = grey(key, err)
+    for (const key of Object.keys(LABELS) as KpiKey[]) if (key !== 'pickupRate') k[key] = raw.bound ? grey(key, err) : kpi(key, null, 'Not bound', 'grey', err)
   } else {
     // 1. CTR / click → lead
     k.ctr = raw.impressions > 0 ? rated('ctr', (raw.linkClicks / raw.impressions) * 100, pct((raw.linkClicks / raw.impressions) * 100)) : grey('ctr', 'No ad impressions in window')
@@ -228,6 +228,7 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
     name: clinic.name,
     pod: clinic.pod,
     businessId: clinic.businessId,
+    live: raw.bound && (!!raw.error || raw.spend > 0 || raw.leads > 0 || !!raw.lastLeadDate || !!raw.lastSpendDate),
     kpis: k,
     atKpi,
     coreGreen,
@@ -253,7 +254,7 @@ const DIAGNOSIS: Partial<Record<KpiKey, string>> = {
   confirmedPerWeek: 'not enough confirmed appointments',
 }
 function biggestProblem(k: Record<KpiKey, Kpi>, err: string | null): string {
-  if (err) return `No data — ${err}`
+  if (err) return err.startsWith('Not bound') ? err : `No data — ${err}`
   const order = Object.keys(DIAGNOSIS) as KpiKey[]
   const bad = order.map((key) => k[key]).filter((x) => x.status === 'red' || x.status === 'amber')
   if (!bad.length) {
@@ -267,7 +268,8 @@ function biggestProblem(k: Record<KpiKey, Kpi>, err: string | null): string {
   return `${top.label} ${vs} — ${DIAGNOSIS[top.key]}`
 }
 
-export function summarise(reports: ClinicReport[]): ClinicsSummary {
+export function summarise(all: ClinicReport[]): ClinicsSummary {
+  const reports = all.filter((r) => r.live)
   const ok = reports.filter((r) => !r.raw.error)
   const spend = ok.reduce((s, r) => s + r.raw.spend, 0)
   const leads = ok.reduce((s, r) => s + r.raw.leads, 0)
@@ -278,6 +280,7 @@ export function summarise(reports: ClinicReport[]): ClinicsSummary {
   return {
     atKpi: reports.filter((r) => r.atKpi).length,
     total: reports.length,
+    roster: all.length,
     spend,
     leads,
     confirmed: ok.reduce((s, r) => s + Math.max(r.raw.confirmed, r.raw.shown), 0),
