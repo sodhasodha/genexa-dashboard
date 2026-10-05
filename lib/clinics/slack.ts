@@ -1,5 +1,5 @@
 import { unstable_cache } from 'next/cache'
-import { BOOKING_CHANNELS, CACHE_SECONDS, CLINICS } from '@/lib/clinics/config'
+import { BOOKING_CHANNELS, CACHE_SECONDS, type ClinicConfig } from '@/lib/clinics/config'
 import type { SlackBookings, Window } from '@/lib/clinics/types'
 
 // Per-clinic bookings from the pod appointment-notification channels (server-side only).
@@ -44,7 +44,7 @@ const history = unstable_cache(fetchHistory, ['slack-booking-history-v1'], { rev
 
 // Clinic name → Slack booking counts for the window. A clinic is "connected" when its own pod's
 // channel was readable; events are matched from every readable channel.
-export async function fetchSlackBookings(window: Window): Promise<Record<string, SlackBookings>> {
+export async function fetchSlackBookings(window: Window, clinics: ClinicConfig[]): Promise<Record<string, SlackBookings>> {
   const oldest = Math.floor(window.start.getTime() / 1000)
   const latest = Math.floor(window.end.getTime() / 1000)
   const errors: Record<string, string> = {}
@@ -63,13 +63,13 @@ export async function fetchSlackBookings(window: Window): Promise<Record<string,
   )
 
   const out: Record<string, SlackBookings> = {}
-  for (const c of CLINICS) {
+  for (const c of clinics) {
     const mine = events.filter((e) => c.slackClient?.test(e.client))
     // De-dupe re-posts of the same booking; a contact booked then confirmed counts once in each.
     const uniq = (t: BookingEvent['type']) => new Set(mine.filter((e) => e.type === t).map((e) => `${e.contact}|${e.when}`)).size
     const contacts = (t?: BookingEvent['type']) => new Set(mine.filter((e) => !t || e.type === t).map((e) => e.contact)).size
     const pod = c.bookingPod ?? c.pod
-    const err = !BOOKING_CHANNELS[pod] ? `no Slack booking channel configured for ${pod}` : errors[pod]
+    const err = !c.slackClient ? 'no Slack client pattern configured' : !BOOKING_CHANNELS[pod] ? `no Slack booking channel configured for ${pod}` : errors[pod]
     out[c.name] = {
       connected: !err,
       error: err,

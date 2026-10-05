@@ -1,4 +1,5 @@
-import { CLINICS, type ClinicConfig } from '@/lib/clinics/config'
+import { CLINIC_META, type ClinicConfig } from '@/lib/clinics/config'
+import { toClinic } from '@/lib/clinics/roster'
 import type { ClinicRaw, ClinicSource, DayPoint, SlackBookings, Window } from '@/lib/clinics/types'
 
 // Mock data for /api/clinics/kpis?mock=1 — one scenario per clinic so every status rule is exercised.
@@ -6,6 +7,9 @@ import type { ClinicRaw, ClinicSource, DayPoint, SlackBookings, Window } from '@
 
 const DAY = 86400000
 const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+
+// Offline roster: the clinics we hold extras for.
+export const MOCK_ROSTER: ClinicConfig[] = Object.keys(CLINIC_META).map((id) => toClinic({ id, name: id }))
 
 type Scenario = {
   perDaySpend: number
@@ -38,7 +42,7 @@ const wobble = (i: number, d: number) => 0.75 + 0.5 * ((Math.sin(i * 12.9898 + d
 export const mockSource: ClinicSource = {
   name: 'mock',
   async fetchClinic(clinic: ClinicConfig, window: Window): Promise<ClinicRaw> {
-    const i = Math.max(0, CLINICS.findIndex((c) => c.businessId === clinic.businessId))
+    const i = Math.max(0, MOCK_ROSTER.findIndex((c) => c.businessId === clinic.businessId))
     const s = SCENARIOS[i % SCENARIOS.length]
     const o = s.opts || {}
     const empty = { lead: false, booked: false, confirmed: false, shown: false, purchase: false }
@@ -85,13 +89,13 @@ export const mockSource: ClinicSource = {
       daily,
       lastLeadDate: lastWith((d) => d.leads > 0),
       lastSpendDate: lastWith((d) => d.spend > 0),
-      excludedCampaigns: clinic.campaignFilter ? 7 : 0,
+      excludedCampaigns: 0,
     }
   },
 }
 
 export function mockSlackBookings(): Record<string, SlackBookings> {
   const out: Record<string, SlackBookings> = {}
-  CLINICS.forEach((c, i) => (out[c.name] = { connected: true, booked: 6 + i, confirmed: 4 + (i % 3), allBookings: 6 + i, confirmedPatients: 4 + (i % 3) }))
+  MOCK_ROSTER.forEach((c, i) => (out[c.name] = { connected: true, booked: 6 + i, confirmed: 4 + (i % 3), allBookings: 6 + i, confirmedPatients: 4 + (i % 3) }))
   return out
 }

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidateTag } from 'next/cache'
-import { CLINICS } from '@/lib/clinics/config'
 import { cortanaSource } from '@/lib/clinics/cortana'
 import { fetchSlackBookings } from '@/lib/clinics/slack'
-import { mockSlackBookings, mockSource } from '@/lib/clinics/mock'
+import { MOCK_ROSTER, mockSlackBookings, mockSource } from '@/lib/clinics/mock'
+import { fetchRoster } from '@/lib/clinics/roster'
 import { buildReport, makeWindow, summarise } from '@/lib/clinics/kpis'
 import type { ClinicRaw, ClinicSource, ClinicsResponse, SlackBookings, WindowKey } from '@/lib/clinics/types'
 
@@ -14,6 +14,7 @@ const WINDOWS: WindowKey[] = ['7d', '30d', 'mtd']
 async function build(windowKey: WindowKey, mock: boolean): Promise<ClinicsResponse> {
   const window = makeWindow(windowKey)
   const source: ClinicSource = mock ? mockSource : cortanaSource
+  const CLINICS = mock ? MOCK_ROSTER : await fetchRoster()
   const [raws, slack] = await Promise.all([
     Promise.all(
       CLINICS.map((c) =>
@@ -39,7 +40,7 @@ async function build(windowKey: WindowKey, mock: boolean): Promise<ClinicsRespon
         )
       )
     ),
-    mock ? Promise.resolve(mockSlackBookings()) : fetchSlackBookings(window).catch(() => ({}) as Record<string, SlackBookings>),
+    mock ? Promise.resolve(mockSlackBookings()) : fetchSlackBookings(window, CLINICS).catch(() => ({}) as Record<string, SlackBookings>),
   ])
 
   const clinics = CLINICS.map((c, i) => buildReport(c, raws[i], slack[c.name] ?? null, window)).sort((a, b) => b.worst - a.worst)

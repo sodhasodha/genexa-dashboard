@@ -1,39 +1,47 @@
-// Genexa Clients — clinic list, pods, EOD channels and KPI targets.
+// Genexa Clients — roster exclusions, pods, EOD channels and KPI targets.
 // Change targets here; every status on the Genexa Clients tab reads from TARGETS.
 
 export type ClinicConfig = {
   name: string
   businessId: string // Cortana business id
   pod: string
-  // Only paid campaigns whose name matches count toward spend / clicks / Meta leads.
-  // Use when the clinic's ad account also runs non-Genexa campaigns. Organic / unattributed
-  // CRM leads are always kept (the CRM sub-account is ours).
-  campaignFilter?: RegExp
   // Matches the "Client:" line in Slack booking notifications.
   slackClient?: RegExp
   // Pod channel the clinic's booking notifications post in, if not its own pod.
   bookingPod?: string
 }
 
-// Pods mirror the Monday CLIENTS board groups.
-export const CLINICS: ClinicConfig[] = [
-  { name: 'Beyond Stem Cells', businessId: '14d26997-dca9-456e-b379-ad7d28504c1f', pod: 'Pod 2', slackClient: /beyond stem/i },
-  {
+// The roster is every Cortana business except these (see lib/clinics/roster.ts), so a new
+// Cortana business shows up on the tab without a code change.
+export const EXCLUDED_BUSINESSES: Record<string, string> = {
+  '53f99ff4-efdd-4458-8fc0-19946fd28f17': 'Example (demo)',
+  '893e8bff-93f9-41b2-b85b-0e98b5bafb7d': 'Genexa Scaling (us)',
+  '74eddd7b-f64d-45e0-b5ae-906969bb32d1': 'CC Medical (churned)',
+  '1e384b1e-903c-47ed-9ee5-402826d62792': 'Dr Paul and Dr Marc (churned)',
+}
+
+export const DEFAULT_POD = 'Unassigned'
+
+// Optional per-clinic extras, keyed by Cortana business id. Pods mirror the Monday CLIENTS board groups.
+// A business with no entry here still appears, under its Cortana name and DEFAULT_POD.
+export const CLINIC_META: Record<string, Partial<Omit<ClinicConfig, 'businessId'>>> = {
+  '14d26997-dca9-456e-b379-ad7d28504c1f': { name: 'Beyond Stem Cells', pod: 'Pod 2', slackClient: /beyond stem/i },
+  'e62c2cb3-da61-4a41-a4cb-506ead4b830e': {
     name: 'Interventional Pain Consultants (Russell)',
-    businessId: 'e62c2cb3-da61-4a41-a4cb-506ead4b830e',
     pod: 'Pod 1',
-    slackClient: /^interventional pain consultants(?!\s*-?\s*georgia)/i,
+    slackClient: /^interventional pain consultants(?!\s*-?\s*(georgia|cleveland))/i,
   },
-  { name: 'IPC Georgia', businessId: 'c2e266c2-1371-49a7-9033-0a05db2624f2', pod: 'Pod 2', slackClient: /georgia/i },
-  { name: 'Multivita IV', businessId: 'd919c593-216f-4c50-9906-2c98bfc60388', pod: 'Pod TBC', slackClient: /multivita/i, bookingPod: 'Pod 1' },
-  { name: 'Pivotal Health Florida', businessId: 'ace397d2-aca1-4fa5-836a-17277a21fabc', pod: 'Pod 1', slackClient: /pivotal/i },
-  { name: 'Pure Health Medical', businessId: '87db4b2c-ecbb-4e4d-960b-943b96c0b67a', pod: 'Pod 1', slackClient: /pure health/i },
-  // Ad account also runs GVTY / Staplerz / "Low Intent" campaigns that aren't ours.
-  { name: 'Regen Rx', businessId: '79a6bd5c-5a20-4b97-ad6e-4c8c57d089e1', pod: 'Pod 1', campaignFilter: /genexa/i, slackClient: /regen\s*rx/i },
-  { name: 'Regenestem', businessId: '3ecf24a3-41e3-43b6-a84f-fee28a98b096', pod: 'Pod 1', slackClient: /regenestem/i },
-  { name: 'Terry L Franklin MD', businessId: '04cd16a9-2a8b-45c1-a6e5-b2bfb73e2471', pod: 'Pod 2', slackClient: /franklin/i },
-  { name: 'Vitale Health', businessId: '621f3634-8a10-4576-8f15-b7909c5148f6', pod: 'Pod 2', slackClient: /vitale/i },
-]
+  '1cea99f9-0fee-414c-8321-14a3a48b4ff4': { name: 'IPC Cleveland', slackClient: /cleveland/i },
+  'c2e266c2-1371-49a7-9033-0a05db2624f2': { name: 'IPC Georgia', pod: 'Pod 2', slackClient: /georgia/i },
+  'd919c593-216f-4c50-9906-2c98bfc60388': { pod: 'Pod TBC', slackClient: /multivita/i, bookingPod: 'Pod 1' },
+  'ace397d2-aca1-4fa5-836a-17277a21fabc': { pod: 'Pod 1', slackClient: /pivotal/i },
+  '87db4b2c-ecbb-4e4d-960b-943b96c0b67a': { pod: 'Pod 1', slackClient: /pure health/i },
+  '79a6bd5c-5a20-4b97-ad6e-4c8c57d089e1': { pod: 'Pod 1', slackClient: /regen\s*rx/i },
+  '3ecf24a3-41e3-43b6-a84f-fee28a98b096': { pod: 'Pod 1', slackClient: /regenestem/i },
+  '01ccb044-6ae0-4ced-81a3-fbafd75cbc60': { slackClient: /reviv/i },
+  '04cd16a9-2a8b-45c1-a6e5-b2bfb73e2471': { pod: 'Pod 2', slackClient: /franklin/i },
+  '621f3634-8a10-4576-8f15-b7909c5148f6': { name: 'Vitale Health', pod: 'Pod 2', slackClient: /vitale/i },
+}
 
 // Appointment-notification channels per pod (channel ids aren't secrets; the token is SLACK_BOT_TOKEN).
 // The dashboard bot (@genexa_dashboard) must be a member of each channel.

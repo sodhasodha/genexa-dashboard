@@ -1,4 +1,5 @@
 import { unstable_cache } from 'next/cache'
+import { cortanaGet } from '@/lib/clinics/client'
 import { CACHE_SECONDS, type ClinicConfig } from '@/lib/clinics/config'
 import type { ClinicRaw, ClinicSource, DayPoint, Window } from '@/lib/clinics/types'
 
@@ -16,7 +17,6 @@ import type { ClinicRaw, ClinicSource, DayPoint, Window } from '@/lib/clinics/ty
 //  and dailySummary spend is account-wide, so daily spend is pro-rated by the filtered share of
 //  window spend (leads / revenue are CRM-level and stay unscoped).
 
-const CORTANA_API_URL = 'https://app.usecortana.ai/api/v1'
 const DAY = 86400000
 const LOOKBACK_DAYS = 60
 const SEP = '|||' // Cortana's multi-value separator
@@ -32,18 +32,7 @@ const EV = {
 const ROW_FIELDS = ['dimension', 'spent', 'impressions', 'inlineLinkClicks', 'metaPlatformLeads', 'totalRevenue', 'conversions'] as const
 
 async function fetchAttribution(businessId: string, qs: string) {
-  const apiKey = process.env.CORTANA_API_KEY
-  if (!apiKey) throw new Error('CORTANA_API_KEY not set')
-  const res = await fetch(`${CORTANA_API_URL}/businesses/${businessId}/attribution?${qs}`, {
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    cache: 'no-store',
-  })
-  if (!res.ok) {
-    if (res.status === 429) throw new Error('Cortana rate limit hit — refresh in a minute')
-    const text = await res.text().catch(() => '')
-    throw new Error(`Cortana ${res.status}${text ? `: ${text.slice(0, 120)}` : ''}`)
-  }
-  const json = await res.json()
+  const json = await cortanaGet(`businesses/${businessId}/attribution?${qs}`)
   // Keep only what the KPIs use so cache entries stay small.
   return {
     rows: ((json?.data?.data || []) as any[]).map((r) => Object.fromEntries(ROW_FIELDS.map((f) => [f, r[f] ?? null]))),
@@ -54,7 +43,6 @@ async function fetchAttribution(businessId: string, qs: string) {
 const cachedAttribution = unstable_cache(fetchAttribution, ['cortana-attribution-v1'], { revalidate: CACHE_SECONDS, tags: ['clinic-kpis'] })
 const attribution = (businessId: string, params: Record<string, string>) => cachedAttribution(businessId, new URLSearchParams(params).toString())
 
-const isPaid = (r: any) => (r.spent || 0) > 0 || (r.impressions || 0) > 0
 const unique = (rows: any[], ev: string) => rows.reduce((s, r) => s + (r.conversions?.[ev]?.uniqueCount ?? r.conversions?.[ev]?.count ?? 0), 0)
 const revenueOf = (rows: any[]) =>
   rows.reduce((s, r) => s + (r.conversions?.[EV.purchase]?.revenue ?? 0), 0) || rows.reduce((s, r) => s + (r.totalRevenue || 0), 0)
@@ -72,17 +60,9 @@ export const cortanaSource: ClinicSource = {
       attribution(clinic.businessId, { ...lookback, groupBy: 'source', eventTypes: Object.values(EV).join(SEP) }),
     ])
 
-    // Campaign filter: drop paid rows that don't match; keep organic / unattributed rows.
-    let rows = win.rows
-    let excluded = 0
-    let spendShare = 1
-    if (clinic.campaignFilter) {
-      const f = clinic.campaignFilter
-      rows = win.rows.filter((r) => !isPaid(r) || f.test(r.dimension || ''))
-      excluded = win.rows.length - rows.length
-      const total = win.rows.reduce((s, r) => s + (r.spent || 0), 0)
-      spendShare = total > 0 ? rows.reduce((s, r) => s + (r.spent || 0), 0) / total : 0
-    }
+    const rows = win.rows
+    const excluded = 0
+    const spendShare = 1
 
     const sum = (k: string) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0)
     const cortanaLeads = unique(rows, EV.lead)
