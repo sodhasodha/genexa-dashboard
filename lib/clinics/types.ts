@@ -88,7 +88,10 @@ export type ClinicsSummary = {
   leads: number
   confirmed: number
   cpl: number | null
+  revenue: number | null // null = no live clinic tracks closes
+  revenueTracked: number // live clinics with closes logged in Cortana
   roas: number | null
+  roasHidden: string | null // why blended ROAS isn't shown
 }
 
 export type ClinicsResponse = {

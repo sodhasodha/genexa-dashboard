@@ -267,7 +267,7 @@ export default function GenexaClientsPage() {
             <Stat label="Total leads" value={String(s.leads)} />
             <Stat label="Confirmed appts" value={String(s.confirmed)} sub={`${(s.confirmed / (data.days / 7)).toFixed(1)}/wk across book`} />
             <Stat label="Blended CPL" value={s.cpl === null ? '—' : `$${s.cpl.toFixed(2)}`} sub="Target ≤$25" color={s.cpl === null ? undefined : s.cpl <= 25 ? '#22c55e' : s.cpl <= 30 ? '#f59e0b' : '#ef4444'} />
-            <Stat label="Blended ROAS" value={s.roas === null ? '—' : `${s.roas.toFixed(1)}x`} sub="Clinics tracking purchases" color={s.roas === null ? undefined : s.roas >= 3 ? '#22c55e' : s.roas >= 2.4 ? '#f59e0b' : '#ef4444'} />
+            <Stat label="Blended ROAS" value={s.roasHidden ? 'Hidden' : s.roas === null ? '—' : `${s.roas.toFixed(1)}x`} sub={s.roasHidden ?? `${s.revenueTracked} clinics tracking closes`} color={s.roas === null ? undefined : s.roas >= 3 ? '#22c55e' : s.roas >= 2.4 ? '#f59e0b' : '#ef4444'} />
           </div>
 
           <p className="los-label">Live · {clinics.length} clinics</p>

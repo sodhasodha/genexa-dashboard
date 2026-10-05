@@ -79,6 +79,8 @@ const kpi = (key: KpiKey, value: number | null, display: string, status: Status,
   note,
 })
 const grey = (key: KpiKey, note: string) => kpi(key, null, '—', 'grey', note)
+// Not tracked ≠ zero: the event has never been logged for this clinic.
+const untracked = (key: KpiKey, note: string) => kpi(key, null, 'Not tracked', 'grey', note)
 const rated = (key: KpiKey, value: number, display: string, note?: string, target?: number) =>
   kpi(key, value, display, statusFor(value, TARGETS[key] as Target, target), note)
 
@@ -160,7 +162,7 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
     }
 
     // 5. Close rate — purchases / shows, or / confirmed when shows are under-logged.
-    if (!raw.tracked.purchase) k.closeRate = grey('closeRate', 'Purchase event not tracked in Cortana')
+    if (!raw.tracked.purchase) k.closeRate = untracked('closeRate', 'No closes logged in Cortana for this clinic in the last 9 weeks')
     else if (raw.shown > 0 && raw.shown >= raw.purchases) k.closeRate = rated('closeRate', (raw.purchases / raw.shown) * 100, pct((raw.purchases / raw.shown) * 100))
     else if (confirmedFloor > 0) {
       const v = (raw.purchases / confirmedFloor) * 100
@@ -187,18 +189,18 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
           ? kpi('costPerConfirmed', null, 'None', 'red', `${money(raw.spend)} spent, 0 confirmed`)
           : grey('costPerConfirmed', 'No confirmed appointments tracked')
     k.leadToSale = !raw.tracked.purchase
-      ? grey('leadToSale', 'Purchase event not tracked in Cortana')
+      ? untracked('leadToSale', 'No closes logged in Cortana for this clinic in the last 9 weeks')
       : raw.leads === 0
         ? grey('leadToSale', 'No leads in window')
         : rated('leadToSale', (raw.purchases / raw.leads) * 100, pct((raw.purchases / raw.leads) * 100))
     k.roas = !raw.tracked.purchase
-      ? grey('roas', 'Purchase event not tracked in Cortana')
+      ? untracked('roas', 'No closes logged in Cortana for this clinic in the last 9 weeks')
       : raw.spend === 0
         ? grey('roas', 'No spend in window')
         : rated('roas', raw.revenue / raw.spend, mult(raw.revenue / raw.spend), raw.revenue / raw.spend >= (TARGETS.roas.good ?? Infinity) ? 'Strong (≥4x)' : undefined)
     const goal = (TARGETS.revenue.target * days) / AVG_MONTH_DAYS
     k.revenue = !raw.tracked.purchase
-      ? grey('revenue', 'Purchase event not tracked in Cortana')
+      ? untracked('revenue', 'No closes logged in Cortana for this clinic in the last 9 weeks')
       : rated('revenue', raw.revenue, money(raw.revenue), `Goal ${money(goal)} for this window`, goal)
     k.hoursSinceLead = hLead === null ? kpi('hoursSinceLead', null, '60d+', 'red', 'No leads in 60 days') : rated('hoursSinceLead', hLead, hLead === 0 ? 'Today' : hours(hLead))
     if (hLead !== null && hLead > STALE_HOURS) k.hoursSinceLead.status = 'red'
@@ -288,10 +290,12 @@ export function summarise(all: ClinicReport[]): ClinicsSummary {
   const ok = reports.filter((r) => !r.raw.error && !r.raw.dataError)
   const spend = ok.reduce((s, r) => s + r.raw.spend, 0)
   const leads = ok.reduce((s, r) => s + r.raw.leads, 0)
-  // ROAS only over clinics that track purchases (untracked revenue isn't zero revenue).
+  // Revenue is closes logged in Cortana against our leads — never Meta pixel purchases.
+  // Blended ROAS covers only clinics that track closes, and is hidden until at least half of live clinics do.
   const tracking = ok.filter((r) => r.raw.tracked.purchase)
   const revenue = tracking.reduce((s, r) => s + r.raw.revenue, 0)
   const trackedSpend = tracking.reduce((s, r) => s + r.raw.spend, 0)
+  const roasShown = tracking.length > 0 && tracking.length * 2 >= reports.length
   return {
     atKpi: reports.filter((r) => r.atKpi).length,
     total: reports.length,
@@ -300,6 +304,9 @@ export function summarise(all: ClinicReport[]): ClinicsSummary {
     leads,
     confirmed: ok.reduce((s, r) => s + Math.max(r.raw.confirmed, r.raw.shown), 0),
     cpl: leads > 0 ? spend / leads : null,
-    roas: trackedSpend > 0 ? revenue / trackedSpend : null,
+    revenue: tracking.length ? revenue : null,
+    revenueTracked: tracking.length,
+    roas: roasShown && trackedSpend > 0 ? revenue / trackedSpend : null,
+    roasHidden: roasShown ? null : `Hidden — ${tracking.length} of ${reports.length} live clinics track closes (needs half)`,
   }
 }
