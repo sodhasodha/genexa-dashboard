@@ -36,7 +36,8 @@ export type ClinicRaw = {
 // Anything that can supply raw clinic numbers (Cortana today, mock for testing).
 export interface ClinicSource {
   name: string
-  fetchAll(clinics: ClinicConfig[], window: Window): Promise<ClinicRaw[]>
+  // Raw numbers for the window and for the prior period (same order as `clinics`).
+  fetchAll(clinics: ClinicConfig[], window: Window, prev: Window): Promise<{ cur: ClinicRaw[]; prev: ClinicRaw[] }>
 }
 
 // Per-clinic booking notifications from the pod appointment-notis channels in Slack.
@@ -58,9 +59,15 @@ export type Kpi = {
   targetLabel: string
   status: Status
   note?: string
+  error?: boolean // impossible value (e.g. a rate over 100%) — shown as a data error, not a number
 }
 
-export type FunnelStep = { label: string; value: number | null; pct: number | null } // pct = vs previous step
+// pct = value ÷ the step named in `of` (booked ÷ leads, confirmed ÷ booked, showed ÷ booked, sold ÷ showed).
+// pct is null when the denominator is missing; error = over 100%.
+export type FunnelStep = { label: string; value: number | null; pct: number | null; of?: string; error?: boolean }
+
+// The same headline numbers for the prior period (null = not available).
+export type Prior = { spend: number; leads: number; confirmed: number; cpl: number | null; revenue: number | null }
 
 export type ClinicReport = {
   name: string
@@ -78,6 +85,7 @@ export type ClinicReport = {
   notes: string[]
   slack: SlackBookings | null
   raw: ClinicRaw
+  prev: Prior | null
 }
 
 export type ClinicsSummary = {
@@ -92,6 +100,7 @@ export type ClinicsSummary = {
   revenueTracked: number // live clinics with closes logged in Cortana
   roas: number | null
   roasHidden: string | null // why blended ROAS isn't shown
+  prev: Prior
 }
 
 export type ClinicsResponse = {
@@ -99,6 +108,8 @@ export type ClinicsResponse = {
   start: string
   end: string
   days: number
+  label: string // e.g. "MTD · 1–5 Oct" — printed on every card
+  prevLabel: string // the prior period the trends compare against
   generatedAt: string
   mock: boolean
   sources: { cortana: string; slack: string }

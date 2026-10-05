@@ -41,7 +41,10 @@ const wobble = (i: number, d: number) => 0.75 + 0.5 * ((Math.sin(i * 12.9898 + d
 
 export const mockSource: ClinicSource = {
   name: 'mock',
-  fetchAll: (clinics: ClinicConfig[], window: Window) => Promise.all(clinics.map((c) => mockClinic(c, window))),
+  fetchAll: async (clinics: ClinicConfig[], window: Window, prev: Window) => ({
+    cur: await Promise.all(clinics.map((c) => mockClinic(c, window))),
+    prev: await Promise.all(clinics.map((c) => mockClinic(c, prev))),
+  }),
 }
 
 async function mockClinic(clinic: ClinicConfig, window: Window): Promise<ClinicRaw> {

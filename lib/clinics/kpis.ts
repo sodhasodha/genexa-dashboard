@@ -1,5 +1,5 @@
 import { AMBER_BAND, CORE_GREEN_MIN, CORE_KPIS, STALE_HOURS, TARGETS, Target, type ClinicConfig } from '@/lib/clinics/config'
-import type { ClinicRaw, ClinicReport, ClinicsSummary, FunnelStep, Kpi, KpiKey, SlackBookings, Status, Window, WindowKey } from '@/lib/clinics/types'
+import type { ClinicRaw, ClinicReport, ClinicsSummary, FunnelStep, Kpi, KpiKey, Prior, SlackBookings, Status, Window, WindowKey } from '@/lib/clinics/types'
 
 const DAY = 86400000
 const HOUR = 3600000
@@ -12,6 +12,23 @@ export function makeWindow(key: WindowKey, at = new Date()): Window {
   const start =
     key === 'mtd' ? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)) : new Date(now.getTime() - (key === '30d' ? 30 : 7) * DAY)
   return { key, start, end, days: Math.max(1, (end.getTime() - start.getTime()) / DAY) }
+}
+
+// The prior period trends compare against: the same length immediately before, or for MTD the
+// same number of days from the 1st of last month.
+export function prevWindow(w: Window): Window {
+  const len = w.end.getTime() - w.start.getTime()
+  if (w.key !== 'mtd') return { key: w.key, start: new Date(w.start.getTime() - len), end: w.start, days: w.days }
+  const start = new Date(Date.UTC(w.start.getUTCFullYear(), w.start.getUTCMonth() - 1, 1))
+  return { key: w.key, start, end: new Date(Math.min(start.getTime() + len, w.start.getTime())), days: w.days }
+}
+const dayLabel = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+const NAMES: Record<WindowKey, string> = { mtd: 'MTD', '7d': 'Last 7 days', '30d': 'Last 30 days' }
+// Dates are UTC; the last day runs up to the data's refresh time.
+export function windowLabel(w: Window, named = true): string {
+  const last = new Date(Math.max(w.start.getTime(), w.end.getTime() - 1))
+  const range = dayLabel(w.start) === dayLabel(last) ? dayLabel(last) : `${dayLabel(w.start)} – ${dayLabel(last)}`
+  return named ? `${NAMES[w.key]} · ${range}` : range
 }
 
 /* -------------------------------- formatting ------------------------------- */
@@ -103,22 +120,41 @@ export function flagDuplicates(clinics: ClinicConfig[], raws: ClinicRaw[]): void
 }
 
 /* --------------------------------- report ---------------------------------- */
-export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBookings | null, window: Window): ClinicReport {
+const confirmedOf = (r: ClinicRaw) => Math.max(r.confirmed, r.shown)
+const usable = (r: ClinicRaw | null | undefined): r is ClinicRaw => !!r && r.bound && !r.error && !r.dataError
+const prior = (rs: ClinicRaw[]): Prior => {
+  const spend = rs.reduce((s, r) => s + r.spend, 0)
+  const leads = rs.reduce((s, r) => s + r.leads, 0)
+  const tracking = rs.filter((r) => r.tracked.purchase)
+  return { spend, leads, confirmed: rs.reduce((s, r) => s + confirmedOf(r), 0), cpl: leads > 0 ? spend / leads : null, revenue: tracking.length ? tracking.reduce((s, r) => s + r.revenue, 0) : null }
+}
+
+export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBookings | null, window: Window, prevRaw?: ClinicRaw | null): ClinicReport {
   const now = window.end.getTime()
   const days = window.days
   const notes: string[] = []
   const k = {} as Record<KpiKey, Kpi>
   const err = raw.error ? `Cortana: ${raw.error}` : raw.dataError ? raw.dataError : !raw.bound ? 'Not bound — no ad account binding in lib/clinics/bindings.ts' : null
 
-  // Bookings can't be fewer than confirmed — if they are, unconfirmed bookings aren't being logged.
-  const bookings = Math.max(raw.booked, raw.confirmed)
-  if (raw.confirmed > raw.booked && raw.booked >= 0 && !err) notes.push('Unconfirmed bookings under-logged — using confirmed as the booking count')
-  // Confirmed can't be fewer than shows either.
-  const confirmedFloor = Math.max(raw.confirmed, raw.shown)
+  // Confirmed can't be fewer than shows — if it is, confirmations aren't being logged.
+  const confirmedFloor = confirmedOf(raw)
   const leadNote = raw.leadsFrom === 'meta' ? 'Meta platform leads (Cortana has none)' : undefined
   if (leadNote && !err) notes.push(`Leads from Meta platform count — Cortana logged no lead events`)
   if (raw.excludedCampaigns > 0 && !err)
-    notes.push(`${raw.excludedCampaigns} non-Genexa campaign row${raw.excludedCampaigns > 1 ? 's' : ''} excluded by campaign filter (daily spend trend pro-rated)`)
+    notes.push(`${raw.excludedCampaigns} non-Genexa campaign${raw.excludedCampaigns > 1 ? 's' : ''} in Cortana for this clinic left out (not in its binding)`)
+  if (raw.excludedEvents > 0 && !err) notes.push(`${raw.excludedEvents} CRM event${raw.excludedEvents > 1 ? 's' : ''} on non-Genexa campaigns not counted`)
+  if (raw.testContacts.length > 0 && !err) notes.push(`${raw.testContacts.length} test contact${raw.testContacts.length > 1 ? 's' : ''} excluded`)
+
+  // A funnel rate = numerator ÷ its proper denominator. Missing denominator → "Not tracked";
+  // over 100% is impossible within a cohort → data error, never a number.
+  const rate = (key: KpiKey, n: number, den: number, denTracked: boolean, denName: string, note?: string): Kpi => {
+    if (!denTracked) return untracked(key, `${denName} not tracked in Cortana`)
+    if (den === 0) return grey(key, `No ${denName.toLowerCase()} in window`)
+    const v = (n / den) * 100
+    if (v > 100) return { ...kpi(key, null, 'Data error', 'grey', `${n} ÷ ${den} ${denName.toLowerCase()} = ${Math.round(v)}% — over 100%, events mis-logged or from an earlier cohort`), error: true }
+    return rated(key, v, pct(v), note)
+  }
+  const leadsTracked = raw.tracked.lead || raw.leadsFrom === 'meta'
 
   const hLead = err ? null : hoursSince(raw.lastLeadDate, now)
   const hSpend = err ? null : hoursSince(raw.lastSpendDate, now)
@@ -130,44 +166,44 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
   } else {
     // 1. CTR / click → lead
     k.ctr = raw.impressions > 0 ? rated('ctr', (raw.linkClicks / raw.impressions) * 100, pct((raw.linkClicks / raw.impressions) * 100)) : grey('ctr', 'No ad impressions in window')
-    k.clickToLead =
-      raw.linkClicks > 0 ? rated('clickToLead', (raw.leads / raw.linkClicks) * 100, pct((raw.leads / raw.linkClicks) * 100), leadNote) : grey('clickToLead', 'No link clicks in window')
+    k.clickToLead = raw.linkClicks > 0 ? rate('clickToLead', raw.leads, raw.linkClicks, true, 'Link clicks', leadNote) : grey('clickToLead', 'No link clicks in window')
 
     // 2. CPL
-    if (!raw.tracked.lead && raw.leadsFrom === 'cortana') k.cpl = grey('cpl', 'Lead event not tracked in Cortana')
+    if (!leadsTracked) k.cpl = untracked('cpl', 'Lead event not tracked in Cortana')
     else if (raw.leads > 0 && raw.spend === 0) k.cpl = grey('cpl', `No paid spend — ${raw.leads} organic / carry-over lead${raw.leads > 1 ? 's' : ''}`)
     else if (raw.leads > 0) k.cpl = rated('cpl', raw.spend / raw.leads, money2(raw.spend / raw.leads), leadNote)
     else if (raw.spend > 0) k.cpl = kpi('cpl', null, 'No leads', 'red', `${money(raw.spend)} spent, 0 leads`)
     else k.cpl = kpi('cpl', null, 'No leads', 'red', 'No spend and no leads in window')
     if (staleLead && k.cpl.status !== 'red') k.cpl = { ...k.cpl, status: 'red', note: `No leads for ${hLead === null ? '60d+' : hours(hLead)}` }
 
-    // 3. Booking rate
-    if (!raw.tracked.booked && !raw.tracked.confirmed) k.bookingRate = grey('bookingRate', 'Booking events not tracked in Cortana')
-    else if (raw.leads === 0) k.bookingRate = grey('bookingRate', 'No leads in window')
-    else k.bookingRate = rated('bookingRate', (bookings / raw.leads) * 100, pct((bookings / raw.leads) * 100), bookings > raw.leads ? 'Includes bookings from leads before this window' : undefined)
+    // 3. Booking rate — booked ÷ leads
+    k.bookingRate = !raw.tracked.booked && !raw.tracked.confirmed ? untracked('bookingRate', 'Booking events not tracked in Cortana') : rate('bookingRate', raw.booked, raw.leads, leadsTracked, 'Leads')
 
-    // 4. Confirmation rate — Cortana, falling back to Slack booking posts when confirmations aren't logged.
-    const slackRate = slack?.connected && slack.allBookings > 0 ? (slack.confirmedPatients / slack.allBookings) * 100 : null
+    // 4. Confirmation rate — confirmed ÷ booked; Slack booking posts when confirmations aren't logged.
+    const slackRate = slack?.connected && slack.allBookings > 0 ? Math.min(100, (slack.confirmedPatients / slack.allBookings) * 100) : null
     if (raw.confirmed === 0 && raw.shown > 0) {
       notes.push('Confirmations not being logged in Cortana (shows exist, 0 confirmed)')
       k.confirmationRate =
         slackRate !== null
           ? rated('confirmationRate', slackRate, pct(slackRate), `From Slack booking posts (${slack!.confirmedPatients}/${slack!.allBookings}) — confirmations not being logged in Cortana`)
-          : grey('confirmationRate', `Confirmations not being logged; Slack ${slack?.connected ? 'has no booking posts' : `not connected${slack?.error ? ` — ${slack.error}` : ''}`}`)
-    } else if (!raw.tracked.confirmed && bookings === 0) k.confirmationRate = grey('confirmationRate', 'Confirmed event not tracked in Cortana')
-    else if (bookings === 0) k.confirmationRate = grey('confirmationRate', 'No bookings in window')
-    else {
-      const v = (raw.confirmed / bookings) * 100
-      k.confirmationRate = rated('confirmationRate', v, pct(v), slackRate !== null ? `Slack cross-check: ${slack!.confirmedPatients}/${slack!.allBookings} confirmed (${pct(slackRate)})` : undefined)
-    }
+          : untracked('confirmationRate', `Confirmations not being logged; Slack ${slack?.connected ? 'has no booking posts' : `not connected${slack?.error ? ` — ${slack.error}` : ''}`}`)
+    } else if (!raw.tracked.confirmed && raw.booked === 0) k.confirmationRate = untracked('confirmationRate', 'Confirmed event not tracked in Cortana')
+    else
+      k.confirmationRate = rate(
+        'confirmationRate',
+        raw.confirmed,
+        raw.booked,
+        true,
+        'Bookings',
+        slackRate !== null ? `Slack cross-check: ${slack!.confirmedPatients}/${slack!.allBookings} confirmed (${pct(slackRate)})` : undefined
+      )
 
-    // 5. Close rate — purchases / shows, or / confirmed when shows are under-logged.
-    if (!raw.tracked.purchase) k.closeRate = untracked('closeRate', 'No closes logged in Cortana for this clinic in the last 9 weeks')
-    else if (raw.shown > 0 && raw.shown >= raw.purchases) k.closeRate = rated('closeRate', (raw.purchases / raw.shown) * 100, pct((raw.purchases / raw.shown) * 100))
-    else if (confirmedFloor > 0) {
-      const v = (raw.purchases / confirmedFloor) * 100
-      k.closeRate = rated('closeRate', v, `${pct(v)} vs conf.`, 'vs confirmed — shows under-logged')
-    } else k.closeRate = grey('closeRate', raw.purchases > 0 ? 'Sales logged with no shows or confirmed appointments' : 'No shows or confirmed appointments in window')
+    // 5. Close rate — closes ÷ shows. No fallback denominator.
+    k.closeRate = !raw.tracked.purchase
+      ? untracked('closeRate', 'No closes logged in Cortana for this clinic in the last 9 weeks')
+      : raw.shown === 0 && raw.purchases > 0
+        ? untracked('closeRate', `${raw.purchases} close${raw.purchases > 1 ? 's' : ''} logged but no shows logged in window`)
+        : rate('closeRate', raw.purchases, raw.shown, raw.tracked.shown, 'Shows')
 
     // 6. Spend / day — also red when nothing spent in the last 24h.
     const perDay = raw.spend / days
@@ -178,7 +214,7 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
     const perWeek = confirmedFloor / (days / 7)
     k.confirmedPerWeek =
       !raw.tracked.confirmed && !raw.tracked.shown
-        ? grey('confirmedPerWeek', 'Confirmed event not tracked in Cortana')
+        ? untracked('confirmedPerWeek', 'Confirmed event not tracked in Cortana')
         : rated('confirmedPerWeek', perWeek, perWeek.toFixed(1), raw.confirmed < raw.shown ? 'Floor from shows (confirmations under-logged)' : undefined)
     k.costPerConfirmed =
       raw.spend === 0
@@ -188,11 +224,7 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
         : raw.spend > 0
           ? kpi('costPerConfirmed', null, 'None', 'red', `${money(raw.spend)} spent, 0 confirmed`)
           : grey('costPerConfirmed', 'No confirmed appointments tracked')
-    k.leadToSale = !raw.tracked.purchase
-      ? untracked('leadToSale', 'No closes logged in Cortana for this clinic in the last 9 weeks')
-      : raw.leads === 0
-        ? grey('leadToSale', 'No leads in window')
-        : rated('leadToSale', (raw.purchases / raw.leads) * 100, pct((raw.purchases / raw.leads) * 100))
+    k.leadToSale = !raw.tracked.purchase ? untracked('leadToSale', 'No closes logged in Cortana for this clinic in the last 9 weeks') : rate('leadToSale', raw.purchases, raw.leads, leadsTracked, 'Leads')
     k.roas = !raw.tracked.purchase
       ? untracked('roas', 'No closes logged in Cortana for this clinic in the last 9 weeks')
       : raw.spend === 0
@@ -223,22 +255,21 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
   const count = (s: Status) => all.filter((x) => x.status === s).length
   const coreRed = CORE_KPIS.filter((c) => k[c].status === 'red').length
 
-  const step = (label: string, value: number | null, prev: number | null): FunnelStep => ({
-    label,
-    value,
-    pct: value !== null && prev ? (value / prev) * 100 : null,
-  })
-  const leadsV = err ? null : raw.leads
-  const bookedV = err || (!raw.tracked.booked && !raw.tracked.confirmed) ? null : bookings
-  const confV = err || (!raw.tracked.confirmed && !raw.tracked.shown) ? null : confirmedFloor
+  const step = (label: string, value: number | null, den: number | null, of?: string): FunnelStep => {
+    const p = value !== null && den ? (value / den) * 100 : null
+    return { label, value, of, pct: p !== null && p > 100 ? null : p, error: p !== null && p > 100 }
+  }
+  const leadsV = err || !leadsTracked ? null : raw.leads
+  const bookedV = err || (!raw.tracked.booked && !raw.tracked.confirmed) ? null : raw.booked
+  const confV = err || (!raw.tracked.confirmed && !raw.tracked.shown) ? null : raw.confirmed
   const shownV = err || !raw.tracked.shown ? null : raw.shown
   const soldV = err || !raw.tracked.purchase ? null : raw.purchases
   const funnel = [
     step('Leads', leadsV, null),
-    step('Booked', bookedV, leadsV),
-    step('Confirmed', confV, bookedV),
-    step('Showed', shownV, confV),
-    step('Sold', soldV, shownV ?? confV),
+    step('Booked', bookedV, leadsV, 'leads'),
+    step('Confirmed', confV, bookedV, 'booked'),
+    step('Showed', shownV, bookedV, 'booked'),
+    step('Sold', soldV, shownV, 'showed'),
   ]
 
   return {
@@ -256,6 +287,7 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
     notes,
     slack,
     raw,
+    prev: usable(raw) && usable(prevRaw) ? prior([prevRaw]) : null,
   }
 }
 
@@ -296,6 +328,14 @@ export function summarise(all: ClinicReport[]): ClinicsSummary {
   const revenue = tracking.reduce((s, r) => s + r.raw.revenue, 0)
   const trackedSpend = tracking.reduce((s, r) => s + r.raw.spend, 0)
   const roasShown = tracking.length > 0 && tracking.length * 2 >= reports.length
+  const prevTotals: Prior = {
+    spend: ok.reduce((s, r) => s + (r.prev?.spend ?? 0), 0),
+    leads: ok.reduce((s, r) => s + (r.prev?.leads ?? 0), 0),
+    confirmed: ok.reduce((s, r) => s + (r.prev?.confirmed ?? 0), 0),
+    cpl: null,
+    revenue: tracking.length ? tracking.reduce((s, r) => s + (r.prev?.revenue ?? 0), 0) : null,
+  }
+  prevTotals.cpl = prevTotals.leads > 0 ? prevTotals.spend / prevTotals.leads : null
   return {
     atKpi: reports.filter((r) => r.atKpi).length,
     total: reports.length,
@@ -307,6 +347,7 @@ export function summarise(all: ClinicReport[]): ClinicsSummary {
     revenue: tracking.length ? revenue : null,
     revenueTracked: tracking.length,
     roas: roasShown && trackedSpend > 0 ? revenue / trackedSpend : null,
+    prev: prevTotals,
     roasHidden: roasShown ? null : `Hidden — ${tracking.length} of ${reports.length} live clinics track closes (needs half)`,
   }
 }

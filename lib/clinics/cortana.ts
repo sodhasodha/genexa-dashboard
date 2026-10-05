@@ -52,7 +52,7 @@ const attribution = (businessId: string, params: Record<string, string>) => cach
 
 // One CRM conversion event. Contact details are reduced to an id + test flag before caching.
 export type Entry = { ev: string; value: number; at: number; campaignId: string | null; campaign: string | null; contact: string; test: boolean }
-const ENTRY_LOOKBACK_DAYS = 63
+const ENTRY_LOOKBACK_DAYS = 63 // covers the window and its prior period (30d + 30d, or MTD + last month)
 const ENTRY_PAGE = 100 // Cortana's max
 const ENTRY_MAX_PAGES = 40
 
@@ -140,7 +140,8 @@ function buildRaw(
   win: Record<string, Attribution>,
   hist: Record<string, Attribution>,
   entries: Record<string, Entry[]>,
-  pool: Map<string, Campaign>
+  pool: Map<string, Campaign>,
+  spendShare: { source: string; share: number }
 ): ClinicRaw {
   const id = clinic.businessId
   const binding = BINDINGS[id]
@@ -173,10 +174,7 @@ function buildRaw(
     }
     if (e.ev === EV.purchase) day(isoDay(e.at)).revenue += e.value
   }
-  const source = [...owned].sort((a, b) => b.spend - a.spend)[0]?.business ?? id
-  const sourceSpend = win[source].rows.reduce((s, r) => s + num(r.spent), 0)
-  const spendShare = sourceSpend > 0 ? Math.min(1, sum('spend') / sourceSpend) : 0
-  for (const d of hist[source].daily) day(d.date).spend = num(d.spend) * spendShare
+  for (const d of hist[spendShare.source].daily) day(d.date).spend = num(d.spend) * spendShare.share
   const allDays = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date))
   // One point per window day, zero-filled.
   const daily: DayPoint[] = []
@@ -219,8 +217,8 @@ function buildRaw(
 
 export const cortanaSource: ClinicSource = {
   name: 'cortana',
-  async fetchAll(clinics: ClinicConfig[], window: Window): Promise<ClinicRaw[]> {
-    const range = { startDate: window.start.toISOString(), endDate: window.end.toISOString() }
+  async fetchAll(clinics: ClinicConfig[], window: Window, prev: Window) {
+    const range = (w: Window) => ({ startDate: w.start.toISOString(), endDate: w.end.toISOString(), groupBy: 'campaign' })
     const lookback = { startDate: new Date(window.end.getTime() - LOOKBACK_DAYS * DAY).toISOString(), endDate: window.end.toISOString() }
     const failed: Record<string, string> = {}
     const none: Attribution = { rows: [], daily: [], totals: {} }
@@ -239,12 +237,24 @@ export const cortanaSource: ClinicSource = {
       ) as Record<string, T>
     // Entries start on a day boundary so the cache key is stable through the day.
     const entriesFrom = new Date(Math.floor(window.end.getTime() / DAY) * DAY - ENTRY_LOOKBACK_DAYS * DAY).toISOString()
-    const [win, hist, entries] = await Promise.all([
-      load((id) => attribution(id, { ...range, groupBy: 'campaign' }), none),
+    const [win, prevWin, hist, entries] = await Promise.all([
+      load((id) => attribution(id, range(window)), none),
+      load((id) => attribution(id, range(prev)), none),
       load((id) => attribution(id, { ...lookback, groupBy: 'source', eventTypes: Object.values(EV).join(SEP) }), none),
       load((id) => cachedEntries(id, entriesFrom), [] as Entry[]),
     ])
-    const pool = poolCampaigns(Object.fromEntries(Object.entries(win).map(([id, a]) => [id, a.rows])))
-    return clinics.map((c) => (failed[c.businessId] ? { ...unboundRaw(), bound: !!BINDINGS[c.businessId], error: failed[c.businessId] } : buildRaw(c, window, win, hist, entries, pool)))
+    const rowsOf = (w: Record<string, Attribution>) => Object.fromEntries(Object.entries(w).map(([id, a]) => [id, a.rows]))
+    const pool = poolCampaigns(rowsOf(win))
+    const prevPool = poolCampaigns(rowsOf(prevWin))
+    // Share of the surfacing business's spend that is this clinic's, over both periods.
+    const shareOf = (id: string) => {
+      const owned = [...ownedCampaigns(id, pool), ...ownedCampaigns(id, prevPool)]
+      const source = [...owned].sort((a, b) => b.spend - a.spend)[0]?.business ?? id
+      const total = [...win[source].rows, ...prevWin[source].rows].reduce((s, r) => s + num(r.spent), 0)
+      return { source, share: total > 0 ? Math.min(1, owned.reduce((s, c) => s + c.spend, 0) / total) : 0 }
+    }
+    const build = (w: Window, rows: Record<string, Attribution>, p: Map<string, Campaign>) =>
+      clinics.map((c) => (failed[c.businessId] ? { ...unboundRaw(), bound: !!BINDINGS[c.businessId], error: failed[c.businessId] } : buildRaw(c, w, rows, hist, entries, p, shareOf(c.businessId))))
+    return { cur: build(window, win, pool), prev: build(prev, prevWin, prevPool) }
   },
 }
