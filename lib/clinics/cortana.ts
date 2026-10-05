@@ -1,8 +1,8 @@
 import { unstable_cache } from 'next/cache'
-import { BINDINGS } from '@/lib/clinics/bindings'
+import { ACCOUNT_SNAPSHOT, ACCOUNT_SNAPSHOT_DATE, BINDINGS } from '@/lib/clinics/bindings'
 import { cortanaGet } from '@/lib/clinics/client'
 import { CACHE_SECONDS, isTestContact, type ClinicConfig } from '@/lib/clinics/config'
-import type { ClinicRaw, ClinicSource, DayPoint, Window } from '@/lib/clinics/types'
+import type { AccountState, AccountStatus, ClinicRaw, ClinicSource, DayPoint, Window } from '@/lib/clinics/types'
 
 // Cortana REST adapter (server-side only).
 //
@@ -44,6 +44,7 @@ async function fetchAttribution(businessId: string, qs: string) {
     rows: ((json?.data?.data || []) as any[]).map((r) => Object.fromEntries(ROW_FIELDS.map((f) => [f, r[f] ?? null]))),
     daily: (json?.data?.dailySummary || []) as any[],
     totals: (json?.data?.globalTotals || {}) as { uniqueByEventType?: Record<string, number> },
+    fetchedAt: Date.now(),
   }
 }
 type Attribution = Awaited<ReturnType<typeof fetchAttribution>>
@@ -130,9 +131,44 @@ export const unboundRaw = (): ClinicRaw => ({
   lastSpendDate: null,
   excludedEvents: 0,
   testContacts: [],
+  accounts: [],
+  metaConnected: false,
+  syncedAt: null,
   lastEventAt: null,
   excludedCampaigns: 0,
 })
+
+const STATE_LABEL: Record<AccountState, string> = {
+  active: 'Active',
+  disabled: 'Account disabled',
+  payment_issue: 'Payment issue',
+  closed: 'Account closed',
+  no_active_campaigns: 'No active campaigns',
+  campaign_paused: 'Campaign paused',
+  not_delivering: 'Active, not delivering',
+}
+const usd = (n: number) => `$${n.toFixed(2)}`
+
+// Status of each bound account: the account snapshot first (disabled / closed / payment issue),
+// then what the clinic's own campaigns in it are doing. `owned` = this window, `seen` = this or prior.
+function accountStatuses(accounts: string[], owned: Campaign[], seen: Campaign[]): AccountStatus[] {
+  return accounts.map((accountId) => {
+    const snap = ACCOUNT_SNAPSHOT[accountId]
+    const camps = seen.filter((c) => c.account === accountId)
+    const spend = owned.filter((c) => c.account === accountId).reduce((s, c) => s + c.spend, 0)
+    const asOf = `account status as listed by Cortana on ${ACCOUNT_SNAPSHOT_DATE}`
+    let state: AccountState
+    let detail: string
+    if (snap?.status === 101) [state, detail] = ['closed', asOf]
+    else if (snap?.status === 2 && spend === 0) [state, detail] = ['disabled', asOf]
+    else if (snap?.status === 3) [state, detail] = ['payment_issue', `Unsettled balance — ${asOf}. ${usd(spend)} spent in window`]
+    else if (!camps.length) [state, detail] = ['no_active_campaigns', 'No Genexa campaign delivered or logged an event in this or the prior period']
+    else if (!camps.some((c) => c.status === 'ACTIVE')) [state, detail] = ['campaign_paused', camps.map((c) => `${c.name}: ${c.status ?? 'unknown'}`).join('; ')]
+    else if (spend === 0) [state, detail] = ['not_delivering', 'Campaign is switched on but spent $0 in window — check billing / delivery']
+    else [state, detail] = ['active', `${usd(spend)} spent in window`]
+    return { accountId, name: snap?.name ?? `act_${accountId}`, state, label: STATE_LABEL[state], detail }
+  })
+}
 
 function buildRaw(
   clinic: ClinicConfig,
@@ -141,6 +177,7 @@ function buildRaw(
   hist: Record<string, Attribution>,
   entries: Record<string, Entry[]>,
   pool: Map<string, Campaign>,
+  seen: Campaign[],
   spendShare: { source: string; share: number }
 ): ClinicRaw {
   const id = clinic.businessId
@@ -210,6 +247,9 @@ function buildRaw(
     lastSpendDate: last((d) => d.spend > 0),
     excludedEvents: all.filter((e) => !e.test && !ours(e) && inWindow(e)).length,
     testContacts: [...new Set(all.filter((e) => e.test && inWindow(e)).map((e) => e.contact))],
+    accounts: accountStatuses(binding.accounts, owned, seen),
+    metaConnected: seen.length > 0,
+    syncedAt: win[id].fetchedAt ? new Date(win[id].fetchedAt).toISOString() : null,
     lastEventAt: all.length ? new Date(Math.max(...all.map((e) => e.at))).toISOString() : null,
     excludedCampaigns: win[id].rows.filter((r) => r.platformEntityId && !ownedIds.has(String(r.platformEntityId)) && num(r.spent) > 0).length,
   }
@@ -221,7 +261,7 @@ export const cortanaSource: ClinicSource = {
     const range = (w: Window) => ({ startDate: w.start.toISOString(), endDate: w.end.toISOString(), groupBy: 'campaign' })
     const lookback = { startDate: new Date(window.end.getTime() - LOOKBACK_DAYS * DAY).toISOString(), endDate: window.end.toISOString() }
     const failed: Record<string, string> = {}
-    const none: Attribution = { rows: [], daily: [], totals: {} }
+    const none: Attribution = { rows: [], daily: [], totals: {}, fetchedAt: 0 }
     const load = async <T,>(get: (businessId: string) => Promise<T>, fallback: T) =>
       Object.fromEntries(
         await Promise.all(
@@ -253,8 +293,17 @@ export const cortanaSource: ClinicSource = {
       const total = [...win[source].rows, ...prevWin[source].rows].reduce((s, r) => s + num(r.spent), 0)
       return { source, share: total > 0 ? Math.min(1, owned.reduce((s, c) => s + c.spend, 0) / total) : 0 }
     }
+    // Campaigns seen in either period, this window's version first.
+    const seenOf = (id: string) => {
+      const cur = ownedCampaigns(id, pool)
+      return [...cur, ...ownedCampaigns(id, prevPool).filter((c) => !cur.some((x) => x.id === c.id))]
+    }
     const build = (w: Window, rows: Record<string, Attribution>, p: Map<string, Campaign>) =>
-      clinics.map((c) => (failed[c.businessId] ? { ...unboundRaw(), bound: !!BINDINGS[c.businessId], error: failed[c.businessId] } : buildRaw(c, w, rows, hist, entries, p, shareOf(c.businessId))))
+      clinics.map((c) =>
+        failed[c.businessId]
+          ? { ...unboundRaw(), bound: !!BINDINGS[c.businessId], error: failed[c.businessId] }
+          : buildRaw(c, w, rows, hist, entries, p, seenOf(c.businessId), shareOf(c.businessId))
+      )
     return { cur: build(window, win, pool), prev: build(prev, prevWin, prevPool) }
   },
 }

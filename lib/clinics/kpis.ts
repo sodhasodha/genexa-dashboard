@@ -286,6 +286,7 @@ export function buildReport(clinic: ClinicConfig, raw: ClinicRaw, slack: SlackBo
     problem: biggestProblem(k, err),
     notes,
     slack,
+    health: { meta: raw.metaConnected, crm: !!raw.lastEventAt, revenue: raw.tracked.purchase, syncedAt: raw.syncedAt, lastEventAt: raw.lastEventAt },
     raw,
     prev: usable(raw) && usable(prevRaw) ? prior([prevRaw]) : null,
   }

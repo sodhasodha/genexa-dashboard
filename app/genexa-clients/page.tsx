@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Sparkline } from '@/components/Charts'
 import { Chip, Tone } from '@/components/finance/Chip'
-import type { ClinicReport, ClinicsResponse, Kpi, KpiKey, Status, WindowKey } from '@/lib/clinics/types'
+import type { AccountState, ClinicReport, ClinicsResponse, Kpi, KpiKey, Status, WindowKey } from '@/lib/clinics/types'
 
 const WINDOWS: { key: WindowKey; label: string }[] = [
   { key: 'mtd', label: 'Month to date' },
@@ -58,6 +58,53 @@ function sortClinics(list: ClinicReport[], sort: Sort): ClinicReport[] {
 
 function StatusPill({ status }: { status: Status }) {
   return <Chip tone={TONE[status]}>{PILL[status]}</Chip>
+}
+
+const ACCOUNT_TONE: Record<AccountState, Tone> = {
+  active: 'green',
+  disabled: 'red',
+  payment_issue: 'red',
+  closed: 'red',
+  no_active_campaigns: 'amber',
+  campaign_paused: 'amber',
+  not_delivering: 'amber',
+}
+
+// One chip per bound ad account — says why a clinic is at $0 instead of a bare "Off KPI".
+function Accounts({ c }: { c: ClinicReport }) {
+  if (!c.raw.bound) return <Chip tone="muted">Not bound</Chip>
+  return (
+    <span className="flex flex-col items-start gap-0.5">
+      {c.raw.accounts.map((a) => (
+        <Chip key={a.accountId} tone={ACCOUNT_TONE[a.state]} title={`${a.name} (act_${a.accountId}) — ${a.detail}`}>
+          {a.label}
+          {c.raw.accounts.length > 1 ? ` · ${a.name}` : ''}
+        </Chip>
+      ))}
+    </span>
+  )
+}
+
+function Dot({ ok, label, title }: { ok: boolean; label: string; title: string }) {
+  return (
+    <span className="whitespace-nowrap" title={title}>
+      <span className={ok ? 'text-los-green' : 'text-los-red'}>{ok ? '●' : '○'}</span> {label}
+    </span>
+  )
+}
+const clock = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—')
+
+// Is each source feeding this clinic, and when did we last pull it?
+function Health({ c }: { c: ClinicReport }) {
+  const h = c.health
+  return (
+    <div className="flex flex-col gap-0.5 text-[10px] text-los-text-secondary">
+      <Dot ok={h.meta} label="Meta" title={h.meta ? 'Cortana returned ad data for a bound campaign' : 'No ad data from Cortana for any bound campaign in this or the prior period'} />
+      <Dot ok={h.crm} label="GHL" title={h.crm ? `Last CRM event in Cortana: ${new Date(h.lastEventAt!).toLocaleString('en-US')}` : 'No CRM events in Cortana in the last 9 weeks'} />
+      <Dot ok={h.revenue} label="Revenue" title={h.revenue ? 'Closes are being logged in Cortana' : 'No closes logged in Cortana in the last 9 weeks — revenue not tracked'} />
+      <span className="text-los-text-muted whitespace-nowrap">Synced {clock(h.syncedAt)}</span>
+    </div>
+  )
 }
 
 function KpiCell({ k }: { k: Kpi }) {
@@ -343,6 +390,11 @@ export default function GenexaClientsPage() {
                     </th>
                     <th className="font-medium py-2 px-2 cursor-pointer select-none" onClick={() => clickSort('worst')}>
                       Status{arrow('worst')}
+                      <span className="block text-[10px] font-normal">KPI · ad account</span>
+                    </th>
+                    <th className="font-medium py-2 px-2">
+                      Data health
+                      <span className="block text-[10px] font-normal">sources · last sync</span>
                     </th>
                     {COLUMNS.map((key) => {
                       const k = data.clinics[0]?.kpis[key]
@@ -370,8 +422,22 @@ export default function GenexaClientsPage() {
                         </td>
                         <td className="py-2 px-2 align-top text-los-text-secondary whitespace-nowrap">{c.pod}</td>
                         <td className="py-2 px-2 align-top whitespace-nowrap">
-                          {c.raw.dataError ? <Chip tone="red" title={c.raw.dataError}>Data error: duplicate source</Chip> : c.raw.error ? <Chip tone="muted">No data</Chip> : c.atKpi ? <Chip tone="green">At KPI</Chip> : <Chip tone="red">Off KPI</Chip>}
-                          <p className="text-[10px] text-los-text-muted mt-0.5">{c.coreGreen}/5 core</p>
+                          {c.raw.dataError ? (
+                            <Chip tone="red" title={c.raw.dataError}>
+                              Data error: duplicate source
+                            </Chip>
+                          ) : c.raw.error ? (
+                            <Chip tone="muted">No data</Chip>
+                          ) : c.atKpi ? (
+                            <Chip tone="green">At KPI</Chip>
+                          ) : c.raw.spend > 0 ? (
+                            <Chip tone="red">Off KPI</Chip>
+                          ) : null}
+                          {!c.raw.error && !c.raw.dataError && <p className="text-[10px] text-los-text-muted my-0.5">{c.coreGreen}/5 core</p>}
+                          <Accounts c={c} />
+                        </td>
+                        <td className="py-2 px-2 align-top">
+                          <Health c={c} />
                         </td>
                         {COLUMNS.map((key) => (
                           <KpiCell key={key} k={c.kpis[key]} />
@@ -379,7 +445,7 @@ export default function GenexaClientsPage() {
                       </tr>
                       {open === c.businessId && (
                         <tr className="bg-los-surface-3">
-                          <td colSpan={COLUMNS.length + 3} className="px-4">
+                          <td colSpan={COLUMNS.length + 4} className="px-4">
                             <div className="sticky left-4 w-[calc(100vw-4.5rem)] md:w-[calc(100vw-14rem-5.5rem)] max-w-[1300px]">
                               <Detail c={c} label={data.label} prevLabel={data.prevLabel} />
                             </div>
@@ -403,7 +469,8 @@ export default function GenexaClientsPage() {
                         <td className="py-2 pl-4 pr-2 text-los-text font-medium">{c.name}</td>
                         <td className="py-2 px-2 text-los-text-secondary whitespace-nowrap">{c.pod}</td>
                         <td className="py-2 px-2 whitespace-nowrap">
-                          <Chip tone="muted">{c.raw.bound ? 'Not launched' : 'Not bound'}</Chip>
+                          {c.raw.bound ? <Chip tone="muted">Not launched</Chip> : null}
+                          <Accounts c={c} />
                         </td>
                         <td className="py-2 px-2 pr-4 text-los-text-muted">
                           {c.raw.bound ? 'Bound, but no spend, leads or CRM activity in the last 60 days' : 'No ad account binding — add it in lib/clinics/bindings.ts'}
@@ -416,7 +483,7 @@ export default function GenexaClientsPage() {
             </>
           )}
           <p className="text-[10px] text-los-text-muted">
-            Tap a clinic for its funnel, daily trend and biggest problem. * = value has a note (hover). Grey = source not connected or event not tracked, never zero. Slack
+            Tap a clinic for its funnel, daily trend and biggest problem. * = value has a note (hover). Grey = source not connected or event not tracked, never zero. Account disabled / payment issue / closed come from Cortana's account list as of the date in lib/clinics/bindings.ts; campaign states are live. Slack
             booking posts cross-check confirmations; pickups aren&apos;t posted in Slack. Every number is for {data.label} (UTC days) unless it says otherwise; trends compare against {data.prevLabel}. Last lead / last spend are day-level over a 60-day lookback. Rates: booked ÷ leads, confirmed ÷ booked, showed ÷ booked, closed ÷ showed. Data refreshes every 15 min. Targets live in
             lib/clinics/config.ts.
           </p>

@@ -54,7 +54,7 @@ async function mockClinic(clinic: ClinicConfig, window: Window): Promise<ClinicR
     const o = s.opts || {}
     const empty = { lead: false, booked: false, confirmed: false, shown: false, purchase: false }
     if (o.error)
-      return { error: o.error, bound: true, spend: 0, impressions: 0, linkClicks: 0, leads: 0, leadsFrom: 'cortana', booked: 0, confirmed: 0, shown: 0, purchases: 0, revenue: 0, tracked: empty, daily: [], lastLeadDate: null, lastSpendDate: null, excludedEvents: 0, testContacts: [], lastEventAt: null, excludedCampaigns: 0 }
+      return { error: o.error, bound: true, spend: 0, impressions: 0, linkClicks: 0, leads: 0, leadsFrom: 'cortana', booked: 0, confirmed: 0, shown: 0, purchases: 0, revenue: 0, tracked: empty, daily: [], lastLeadDate: null, lastSpendDate: null, excludedEvents: 0, testContacts: [], accounts: [], metaConnected: false, syncedAt: null, lastEventAt: null, excludedCampaigns: 0 }
 
     const daily: DayPoint[] = []
     const nDays = Math.ceil(window.days)
@@ -99,6 +99,9 @@ async function mockClinic(clinic: ClinicConfig, window: Window): Promise<ClinicR
       lastSpendDate: lastWith((d) => d.spend > 0),
       excludedEvents: 0,
       testContacts: [],
+      accounts: [{ accountId: 'mock', name: 'Mock account', state: o.adsOffDays ? 'campaign_paused' : 'active', label: o.adsOffDays ? 'Campaign paused' : 'Active', detail: 'mock' }],
+      metaConnected: true,
+      syncedAt: window.end.toISOString(),
       lastEventAt: window.end.toISOString(),
       excludedCampaigns: 0,
     }

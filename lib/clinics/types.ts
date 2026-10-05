@@ -7,6 +7,11 @@ export type Status = 'green' | 'amber' | 'red' | 'grey'
 
 export type DayPoint = { date: string; spend: number; leads: number; revenue: number } // date = YYYY-MM-DD
 
+// Where one bound ad account stands. disabled / payment_issue / closed come from the dated account
+// snapshot in bindings.ts; the campaign states are live from Cortana.
+export type AccountState = 'active' | 'disabled' | 'payment_issue' | 'closed' | 'no_active_campaigns' | 'campaign_paused' | 'not_delivering'
+export type AccountStatus = { accountId: string; name: string; state: AccountState; label: string; detail: string }
+
 // Raw per-clinic numbers for a window, as returned by a ClinicSource.
 export type ClinicRaw = {
   error?: string // source failed / not connected → every KPI from it is grey
@@ -29,6 +34,9 @@ export type ClinicRaw = {
   lastSpendDate: string | null // last day with spend (60-day lookback)
   excludedEvents: number // CRM events in the window attributed to campaigns outside the binding (not counted)
   testContacts: string[] // Cortana contact ids dropped as test contacts in the window
+  accounts: AccountStatus[] // one per bound ad account
+  metaConnected: boolean // Cortana returned ad data for a bound campaign in this or the prior period
+  syncedAt: string | null // when the dashboard last pulled this clinic from Cortana (ISO)
   lastEventAt: string | null // newest CRM event Cortana holds for the clinic (ISO)
   excludedCampaigns: number // paid campaigns Cortana lists for the clinic that aren't in its binding
 }
@@ -84,6 +92,8 @@ export type ClinicReport = {
   problem: string
   notes: string[]
   slack: SlackBookings | null
+  // Data health: is each source feeding this clinic?
+  health: { meta: boolean; crm: boolean; revenue: boolean; syncedAt: string | null; lastEventAt: string | null }
   raw: ClinicRaw
   prev: Prior | null
 }

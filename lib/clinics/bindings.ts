@@ -75,3 +75,23 @@ export const BINDINGS: Record<string, Binding> = {
   // Vitale Health.
   '621f3634-8a10-4576-8f15-b7909c5148f6': { accounts: ['1037026785668573'], campaignIds: ['120248072165010265', '120248060455850265'], campaignPrefix: GENEXA_PREFIX },
 }
+
+// Meta account_status for the bound accounts as Cortana listed them (1 active, 2 disabled,
+// 3 unsettled / payment issue, 101 closed). The REST API the dashboard uses has no ad-account
+// endpoint, so this is a dated snapshot — re-check in Cortana and update when an account changes.
+// Campaign-level status (active / paused / not delivering) is live from attribution rows.
+export const ACCOUNT_SNAPSHOT_DATE = '2026-10-05'
+export const ACCOUNT_SNAPSHOT: Record<string, { name: string; status: number }> = {
+  '659009857005776': { name: 'AC - Beyond Stem Cells', status: 1 },
+  '978821704755890': { name: 'interventional pain consultants cleveland', status: 1 },
+  '1550873579584747': { name: 'Interventional Pain Consultants', status: 1 },
+  '1079606670620181': { name: 'Home Fixed it INC', status: 1 },
+  '523469470236586': { name: 'MultiVita IV', status: 2 },
+  '1032441997226344': { name: 'Pivotal Health and Wellness-Darren Lastofsky', status: 1 },
+  '635515670294621': { name: 'Pure Health Medical Spa', status: 1 },
+  '1981468182398179': { name: 'Regen RX AL', status: 1 },
+  '2293482048090696': { name: 'Regenestem Florida', status: 1 },
+  '1008493701558167': { name: 'AL REVIV Regenerative', status: 1 },
+  '926482639147231': { name: 'TelMD 2', status: 3 },
+  '1037026785668573': { name: 'Vitale Health', status: 1 },
+}
