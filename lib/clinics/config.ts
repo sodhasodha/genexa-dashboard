@@ -43,6 +43,23 @@ export const CLINIC_META: Record<string, Partial<Omit<ClinicConfig, 'businessId'
   '621f3634-8a10-4576-8f15-b7909c5148f6': { name: 'Vitale Health', pod: 'Pod 2', slackClient: /vitale/i },
 }
 
+// Test contacts — dropped at ingest so they never count as leads, bookings, shows or sales.
+// A contact is a test if its name or email matches a pattern, or its phone is an internal number.
+export const TEST_CONTACTS = {
+  name: [/zztest/i, /\btest\b/i, /^tes$/i],
+  // Any "test" in an email is treated as a test (a real "latest@…" would be dropped too — acceptable).
+  email: [/test/i, /@(toolboxgrowth|genexascaling)\.com$/i, /^adityaarajdhiman@gmail\.com$/i, /^airealbro(\+.*)?@gmail\.com$/i, /^aryansodha\d*@gmail\.com$/i],
+  phones: ['16893459116', '15596693445'], // digits only
+}
+export function isTestContact(c: { name?: string | null; email?: string | null; phone?: string | null }): boolean {
+  const name = (c.name || '').trim()
+  const email = (c.email || '').trim()
+  const phone = (c.phone || '').replace(/\D/g, '')
+  return (
+    TEST_CONTACTS.name.some((p) => p.test(name)) || TEST_CONTACTS.email.some((p) => p.test(email)) || (!!phone && TEST_CONTACTS.phones.some((n) => phone.endsWith(n.slice(-10))))
+  )
+}
+
 // Appointment-notification channels per pod (channel ids aren't secrets; the token is SLACK_BOT_TOKEN).
 // The dashboard bot (@genexa_dashboard) must be a member of each channel.
 export const BOOKING_CHANNELS: Record<string, string> = {

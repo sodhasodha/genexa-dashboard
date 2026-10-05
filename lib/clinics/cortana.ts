@@ -1,7 +1,7 @@
 import { unstable_cache } from 'next/cache'
 import { BINDINGS } from '@/lib/clinics/bindings'
 import { cortanaGet } from '@/lib/clinics/client'
-import { CACHE_SECONDS, type ClinicConfig } from '@/lib/clinics/config'
+import { CACHE_SECONDS, isTestContact, type ClinicConfig } from '@/lib/clinics/config'
 import type { ClinicRaw, ClinicSource, DayPoint, Window } from '@/lib/clinics/types'
 
 // Cortana REST adapter (server-side only).
@@ -10,9 +10,11 @@ import type { ClinicRaw, ClinicSource, DayPoint, Window } from '@/lib/clinics/ty
 //  1. attribution?groupBy=campaign for the window → one row per campaign with its Meta ad account id
 //     (customerId), campaign id (platformEntityId), spend, impressions, link clicks, Meta leads and
 //     unique counts per conversion event.
-//  2. attribution for a 60-day lookback → daily series (sparkline, last lead / last spend)
-//     and which events the clinic tracks at all. Cortana only returns dailySummary when a filter is
-//     set, so this call filters to the funnel events.
+//  2. conversions/entries for a ~9-week lookback → every CRM event with its contact and attributed
+//     campaign id. The funnel (leads, booked, confirmed, shown, sold, revenue) is counted from these
+//     as unique contacts, so test contacts and events on non-bound campaigns can be dropped.
+//  3. attribution for a 60-day lookback → daily spend series (sparkline, last spend). Cortana only
+//     returns dailySummary when a filter is set, so this call filters to the funnel events.
 //  Campaign rows from every business are pooled by campaign id, then handed to clinics by the explicit
 //  binding in bindings.ts — a business's own row set is never trusted to be "its" campaigns.
 //  Each call is cached 15 min (windows end on a 15-min boundary, so keys are stable); failures
@@ -20,6 +22,8 @@ import type { ClinicRaw, ClinicSource, DayPoint, Window } from '@/lib/clinics/ty
 //  so daily spend is pro-rated by the clinic's share of that business's window spend.
 
 const DAY = 86400000
+const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+const num = (v: unknown) => Number(v) || 0
 const LOOKBACK_DAYS = 60
 const SEP = '|||' // Cortana's multi-value separator
 
@@ -46,12 +50,32 @@ type Attribution = Awaited<ReturnType<typeof fetchAttribution>>
 const cachedAttribution = unstable_cache(fetchAttribution, ['cortana-attribution-v2'], { revalidate: CACHE_SECONDS, tags: ['clinic-kpis'] })
 const attribution = (businessId: string, params: Record<string, string>) => cachedAttribution(businessId, new URLSearchParams(params).toString())
 
-const unique = (rows: any[], ev: string) => rows.reduce((s, r) => s + (r.conversions?.[ev]?.uniqueCount ?? r.conversions?.[ev]?.count ?? 0), 0)
-const revenueOf = (rows: any[]) =>
-  rows.reduce((s, r) => s + (r.conversions?.[EV.purchase]?.revenue ?? 0), 0) || rows.reduce((s, r) => s + (r.totalRevenue || 0), 0)
-const dayCount = (d: any, ev: string) => d.conversions?.[ev]?.count ?? 0
-const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10)
-const num = (v: unknown) => Number(v) || 0
+// One CRM conversion event. Contact details are reduced to an id + test flag before caching.
+export type Entry = { ev: string; value: number; at: number; campaignId: string | null; campaign: string | null; contact: string; test: boolean }
+const ENTRY_LOOKBACK_DAYS = 63
+const ENTRY_PAGE = 100 // Cortana's max
+const ENTRY_MAX_PAGES = 40
+
+async function fetchEntries(businessId: string, from: string): Promise<Entry[]> {
+  const out: Entry[] = []
+  for (let page = 1; page <= ENTRY_MAX_PAGES; page++) {
+    const qs = new URLSearchParams({ from, limit: String(ENTRY_PAGE), page: String(page), sort: '-occurredAt' })
+    const json = await cortanaGet(`businesses/${businessId}/conversions/entries?${qs}`)
+    for (const e of (json?.data || []) as any[])
+      out.push({
+        ev: e.configName,
+        value: num(e.eventValue),
+        at: Date.parse(e.occurredAt),
+        campaignId: e.attributionCampaignId ? String(e.attributionCampaignId) : null,
+        campaign: e.attributionCampaign || null,
+        contact: String(e.contactId ?? e.contact?.id ?? e.id),
+        test: isTestContact(e.contact || {}),
+      })
+    if (!json?.pagination?.hasMore) break
+  }
+  return out
+}
+const cachedEntries = unstable_cache(fetchEntries, ['cortana-entries-v1'], { revalidate: CACHE_SECONDS, tags: ['clinic-kpis'] })
 
 // A Meta campaign as Cortana reports it for a window, whichever business surfaced it.
 export type Campaign = { id: string; name: string; account: string; status: string | null; business: string; spend: number; impressions: number; linkClicks: number; metaLeads: number }
@@ -104,35 +128,56 @@ export const unboundRaw = (): ClinicRaw => ({
   daily: [],
   lastLeadDate: null,
   lastSpendDate: null,
+  excludedEvents: 0,
+  testContacts: [],
+  lastEventAt: null,
   excludedCampaigns: 0,
 })
 
-function buildRaw(clinic: ClinicConfig, window: Window, win: Record<string, Attribution>, hist: Record<string, Attribution>, pool: Map<string, Campaign>): ClinicRaw {
+function buildRaw(
+  clinic: ClinicConfig,
+  window: Window,
+  win: Record<string, Attribution>,
+  hist: Record<string, Attribution>,
+  entries: Record<string, Entry[]>,
+  pool: Map<string, Campaign>
+): ClinicRaw {
   const id = clinic.businessId
-  if (!BINDINGS[id]) return unboundRaw()
+  const binding = BINDINGS[id]
+  if (!binding) return unboundRaw()
   const owned = ownedCampaigns(id, pool)
-  const ownedIds = new Set(owned.map((c) => c.id))
+  const ownedIds = new Set([...owned.map((c) => c.id), ...binding.campaignIds])
   const sum = (k: 'spend' | 'impressions' | 'linkClicks' | 'metaLeads') => owned.reduce((s, c) => s + c[k], 0)
 
-  // CRM conversions come from the clinic's own business: rows on its bound campaigns plus
-  // organic / unattributed rows (the CRM sub-account is ours). Rows on other campaigns are dropped.
-  const own = win[id].rows
-  const rows = own.filter((r) => !r.platformEntityId || ownedIds.has(String(r.platformEntityId)))
-  const cortanaLeads = unique(rows, EV.lead)
+  // CRM events come from the clinic's own business: events on its bound campaigns plus organic /
+  // unattributed ones (the CRM sub-account is ours). Events on other campaigns and test contacts are dropped.
+  const all = entries[id]
+  const ours = (e: Entry) => !e.campaignId || ownedIds.has(e.campaignId) || (!!e.campaign && !!binding.campaignPrefix?.test(e.campaign))
+  const inWindow = (e: Entry) => e.at >= window.start.getTime() && e.at < window.end.getTime()
+  const real = all.filter((e) => !e.test && ours(e))
+  const cur = real.filter(inWindow)
+  const contacts = (...evs: string[]) => new Set(cur.filter((e) => evs.includes(e.ev)).map((e) => e.contact)).size
+  const cortanaLeads = contacts(EV.lead)
   const metaLeads = sum('metaLeads')
 
-  // Daily spend: the series of the business that surfaced the clinic's campaigns, pro-rated.
+  // Daily leads / revenue from CRM events; daily spend from the business that surfaced the clinic's
+  // campaigns, pro-rated by the clinic's share of that business's spend.
+  const byDate: Record<string, DayPoint> = {}
+  const day = (date: string) => (byDate[date] ??= { date, spend: 0, leads: 0, revenue: 0 })
+  const leadDays = new Set<string>()
+  for (const e of real) {
+    const key = `${isoDay(e.at)}|${e.contact}`
+    if (e.ev === EV.lead && !leadDays.has(key)) {
+      leadDays.add(key)
+      day(isoDay(e.at)).leads++
+    }
+    if (e.ev === EV.purchase) day(isoDay(e.at)).revenue += e.value
+  }
   const source = [...owned].sort((a, b) => b.spend - a.spend)[0]?.business ?? id
   const sourceSpend = win[source].rows.reduce((s, r) => s + num(r.spent), 0)
   const spendShare = sourceSpend > 0 ? Math.min(1, sum('spend') / sourceSpend) : 0
-  const spendByDate: Record<string, number> = Object.fromEntries(hist[source].daily.map((d) => [d.date, num(d.spend) * spendShare]))
-  const allDays: DayPoint[] = hist[id].daily.map((d) => ({ date: d.date, spend: 0, leads: dayCount(d, EV.lead), revenue: d.revenue || 0 }))
-  const byDate = Object.fromEntries(allDays.map((d) => [d.date, d]))
-  for (const [date, spend] of Object.entries(spendByDate)) {
-    if (byDate[date]) byDate[date].spend = spend
-    else allDays.push((byDate[date] = { date, spend, leads: 0, revenue: 0 }))
-  }
-  allDays.sort((a, b) => a.date.localeCompare(b.date))
+  for (const d of hist[source].daily) day(d.date).spend = num(d.spend) * spendShare
+  const allDays = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date))
   // One point per window day, zero-filled.
   const daily: DayPoint[] = []
   for (let t = window.start.getTime(); isoDay(t) <= isoDay(window.end.getTime()); t += DAY) {
@@ -140,8 +185,7 @@ function buildRaw(clinic: ClinicConfig, window: Window, win: Record<string, Attr
     daily.push(byDate[date] || { date, spend: 0, leads: 0, revenue: 0 })
   }
   const last = (pred: (d: DayPoint) => boolean) => [...allDays].reverse().find(pred)?.date ?? null
-  const seen = hist[id].totals.uniqueByEventType || {}
-  const seenEv = (ev: string) => (seen[ev] || 0) > 0 || unique(own, ev) > 0
+  const seenEv = (ev: string) => real.some((e) => e.ev === ev)
 
   return {
     bound: true,
@@ -150,11 +194,12 @@ function buildRaw(clinic: ClinicConfig, window: Window, win: Record<string, Attr
     linkClicks: sum('linkClicks'),
     leads: cortanaLeads || metaLeads,
     leadsFrom: cortanaLeads === 0 && metaLeads > 0 ? 'meta' : 'cortana',
-    booked: unique(rows, EV.booked),
-    confirmed: unique(rows, EV.confirmed),
-    shown: unique(rows, EV.shown),
-    purchases: unique(rows, EV.purchase),
-    revenue: revenueOf(rows),
+    // A confirmed appointment is a booking even when the unconfirmed event was never logged.
+    booked: contacts(EV.booked, EV.confirmed),
+    confirmed: contacts(EV.confirmed),
+    shown: contacts(EV.shown),
+    purchases: contacts(EV.purchase),
+    revenue: cur.filter((e) => e.ev === EV.purchase).reduce((s, e) => s + e.value, 0),
     tracked: {
       lead: seenEv(EV.lead),
       booked: seenEv(EV.booked),
@@ -165,7 +210,10 @@ function buildRaw(clinic: ClinicConfig, window: Window, win: Record<string, Attr
     daily,
     lastLeadDate: last((d) => d.leads > 0),
     lastSpendDate: last((d) => d.spend > 0),
-    excludedCampaigns: own.filter((r) => r.platformEntityId && !ownedIds.has(String(r.platformEntityId)) && num(r.spent) > 0).length,
+    excludedEvents: all.filter((e) => !e.test && !ours(e) && inWindow(e)).length,
+    testContacts: [...new Set(all.filter((e) => e.test && inWindow(e)).map((e) => e.contact))],
+    lastEventAt: all.length ? new Date(Math.max(...all.map((e) => e.at))).toISOString() : null,
+    excludedCampaigns: win[id].rows.filter((r) => r.platformEntityId && !ownedIds.has(String(r.platformEntityId)) && num(r.spent) > 0).length,
   }
 }
 
@@ -176,24 +224,27 @@ export const cortanaSource: ClinicSource = {
     const lookback = { startDate: new Date(window.end.getTime() - LOOKBACK_DAYS * DAY).toISOString(), endDate: window.end.toISOString() }
     const failed: Record<string, string> = {}
     const none: Attribution = { rows: [], daily: [], totals: {} }
-    const load = async (params: Record<string, string>) =>
+    const load = async <T,>(get: (businessId: string) => Promise<T>, fallback: T) =>
       Object.fromEntries(
         await Promise.all(
           clinics.map(async (c) => {
             try {
-              return [c.businessId, await attribution(c.businessId, params)] as const
+              return [c.businessId, await get(c.businessId)] as const
             } catch (e) {
               failed[c.businessId] = (e as Error).message
-              return [c.businessId, none] as const
+              return [c.businessId, fallback] as const
             }
           })
         )
-      ) as Record<string, Attribution>
-    const [win, hist] = await Promise.all([
-      load({ ...range, groupBy: 'campaign' }),
-      load({ ...lookback, groupBy: 'source', eventTypes: Object.values(EV).join(SEP) }),
+      ) as Record<string, T>
+    // Entries start on a day boundary so the cache key is stable through the day.
+    const entriesFrom = new Date(Math.floor(window.end.getTime() / DAY) * DAY - ENTRY_LOOKBACK_DAYS * DAY).toISOString()
+    const [win, hist, entries] = await Promise.all([
+      load((id) => attribution(id, { ...range, groupBy: 'campaign' }), none),
+      load((id) => attribution(id, { ...lookback, groupBy: 'source', eventTypes: Object.values(EV).join(SEP) }), none),
+      load((id) => cachedEntries(id, entriesFrom), [] as Entry[]),
     ])
     const pool = poolCampaigns(Object.fromEntries(Object.entries(win).map(([id, a]) => [id, a.rows])))
-    return clinics.map((c) => (failed[c.businessId] ? { ...unboundRaw(), bound: !!BINDINGS[c.businessId], error: failed[c.businessId] } : buildRaw(c, window, win, hist, pool)))
+    return clinics.map((c) => (failed[c.businessId] ? { ...unboundRaw(), bound: !!BINDINGS[c.businessId], error: failed[c.businessId] } : buildRaw(c, window, win, hist, entries, pool)))
   },
 }

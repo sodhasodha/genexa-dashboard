@@ -27,6 +27,9 @@ export type ClinicRaw = {
   daily: DayPoint[] // one point per day in the window
   lastLeadDate: string | null // last day with a lead (60-day lookback)
   lastSpendDate: string | null // last day with spend (60-day lookback)
+  excludedEvents: number // CRM events in the window attributed to campaigns outside the binding (not counted)
+  testContacts: string[] // Cortana contact ids dropped as test contacts in the window
+  lastEventAt: string | null // newest CRM event Cortana holds for the clinic (ISO)
   excludedCampaigns: number // paid campaigns Cortana lists for the clinic that aren't in its binding
 }
 
