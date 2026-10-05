@@ -6,10 +6,11 @@ import { Chip, Tone } from '@/components/finance/Chip'
 import type { ClinicReport, ClinicsResponse, Kpi, KpiKey, Status, WindowKey } from '@/lib/clinics/types'
 
 const WINDOWS: { key: WindowKey; label: string }[] = [
+  { key: 'mtd', label: 'Month to date' },
   { key: '7d', label: 'Last 7 days' },
   { key: '30d', label: 'Last 30 days' },
-  { key: 'mtd', label: 'Month to date' },
 ]
+const WINDOW_STORE = 'clinics-window-v2' // v2: default moved to MTD
 
 // Core KPIs first, then the extras.
 const COLUMNS: KpiKey[] = [
@@ -63,24 +64,47 @@ function KpiCell({ k }: { k: Kpi }) {
   return (
     <td className="py-2 px-2 align-top whitespace-nowrap" title={k.note}>
       <div className={`font-mono text-xs ${k.status === 'grey' ? 'text-los-text-muted' : 'text-los-text'}`}>
-        {k.display}
+        {k.error ? <span className="text-los-red">Data error</span> : k.display}
         {k.note && k.status !== 'grey' && <span className="text-los-text-muted">*</span>}
       </div>
-      <div className="mt-0.5">
-        <StatusPill status={k.status} />
-      </div>
+      <div className="mt-0.5">{k.error ? <Chip tone="red">Over 100%</Chip> : <StatusPill status={k.status} />}</div>
     </td>
   )
 }
 
-function Stat({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
+// Change vs the prior period. `lowerIsBetter` flips the colour (CPL).
+function Trend({ now, before, lowerIsBetter }: { now: number | null; before: number | null | undefined; lowerIsBetter?: boolean }) {
+  if (now === null || before === null || before === undefined) return <span className="text-los-text-muted">No prior data</span>
+  if (before === 0) return <span className="text-los-text-muted">{now === 0 ? 'Flat' : 'Prior period was 0'}</span>
+  const change = ((now - before) / before) * 100
+  if (Math.abs(change) < 0.5) return <span className="text-los-text-muted">Flat</span>
+  const good = lowerIsBetter ? change < 0 : change > 0
+  return (
+    <span className={good ? 'text-los-green' : 'text-los-red'}>
+      {change > 0 ? '▲' : '▼'} {Math.abs(change).toFixed(Math.abs(change) < 10 ? 1 : 0)}%
+    </span>
+  )
+}
+
+// Every card prints the active window; `trend` compares against the prior period.
+function Stat({ label, value, sub, color, window, trend, prevLabel }: { label: string; value: string; sub?: string; color?: string; window: string; trend?: React.ReactNode; prevLabel?: string }) {
   return (
     <div className="los-card p-4 min-w-0">
       <p className="los-label">{label}</p>
       <p className="los-metric-number mt-1 truncate" style={color ? { color } : undefined}>
         {value}
       </p>
-      {sub && <p className="text-[11px] text-los-text-muted mt-1 truncate">{sub}</p>}
+      {sub && (
+        <p className="text-[11px] text-los-text-muted mt-1 truncate" title={sub}>
+          {sub}
+        </p>
+      )}
+      {trend && (
+        <p className="text-[11px] mt-1 truncate">
+          {trend} <span className="text-los-text-muted">vs {prevLabel}</span>
+        </p>
+      )}
+      <p className="text-[10px] text-los-text-muted mt-1 truncate">{window}</p>
     </div>
   )
 }
@@ -94,7 +118,9 @@ function Funnel({ c }: { c: ClinicReport }) {
           <div className="rounded-lg bg-los-surface-2 px-3 py-2 min-w-[72px]">
             <p className="los-label leading-tight">{s.label}</p>
             <p className="font-mono text-base font-semibold text-los-text">{s.value === null ? '—' : s.value}</p>
-            <p className="text-[10px] text-los-text-muted">{s.value === null ? 'Not tracked' : s.pct === null ? (i === 0 ? ' ' : '—') : `${Math.round(s.pct)}%`}</p>
+            <p className={`text-[10px] ${s.error ? 'text-los-red' : 'text-los-text-muted'}`}>
+              {s.value === null ? 'Not tracked' : i === 0 ? ' ' : s.error ? 'Data error: over 100%' : s.pct === null ? `Not tracked ÷ ${s.of}` : `${Math.round(s.pct)}% of ${s.of}`}
+            </p>
           </div>
         </Fragment>
       ))}
@@ -102,7 +128,7 @@ function Funnel({ c }: { c: ClinicReport }) {
   )
 }
 
-function Detail({ c }: { c: ClinicReport }) {
+function Detail({ c, label, prevLabel }: { c: ClinicReport; label: string; prevLabel: string }) {
   const spend = c.daily.map((d) => d.spend)
   const leads = c.daily.map((d) => d.leads)
   const greys = COLUMNS.map((k) => c.kpis[k]).filter((k) => k.status === 'grey')
@@ -111,6 +137,15 @@ function Detail({ c }: { c: ClinicReport }) {
   return (
     <div className="flex flex-col gap-4 py-3 px-1">
       <p className={`text-sm font-medium ${bad}`}>{c.problem}</p>
+      <p className="text-[11px] text-los-text-muted">
+        {label}
+        {c.prev && (
+          <>
+            {' · '}Spend {fmtMoney(c.raw.spend)} (<Trend now={c.raw.spend} before={c.prev.spend} />) · Leads {c.raw.leads} (<Trend now={c.raw.leads} before={c.prev.leads} />) · Confirmed{' '}
+            {Math.max(c.raw.confirmed, c.raw.shown)} (<Trend now={Math.max(c.raw.confirmed, c.raw.shown)} before={c.prev.confirmed} />) vs {prevLabel}
+          </>
+        )}
+      </p>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 flex flex-col gap-2">
           <p className="los-label">Funnel</p>
@@ -176,7 +211,7 @@ function Detail({ c }: { c: ClinicReport }) {
 }
 
 export default function GenexaClientsPage() {
-  const [win, setWin] = useState<WindowKey>('7d')
+  const [win, setWin] = useState<WindowKey>('mtd')
   const [data, setData] = useState<ClinicsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -201,7 +236,7 @@ export default function GenexaClientsPage() {
   }
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('clinics-window') as WindowKey | null
+      const saved = localStorage.getItem(WINDOW_STORE) as WindowKey | null
       if (saved && WINDOWS.some((w) => w.key === saved)) setWin(saved)
     } catch {}
     setMock(new URLSearchParams(window.location.search).get('mock') === '1')
@@ -212,7 +247,7 @@ export default function GenexaClientsPage() {
   const pickWindow = (w: WindowKey) => {
     setWin(w)
     try {
-      localStorage.setItem('clinics-window', w)
+      localStorage.setItem(WINDOW_STORE, w)
     } catch {}
   }
 
@@ -261,16 +296,40 @@ export default function GenexaClientsPage() {
               label="Clinics at KPI"
               value={`${s.atKpi} of ${s.total}`}
               sub="≥3 confirmed/wk + 4 of 5 core green"
-              color={s.atKpi === s.total ? '#22c55e' : s.atKpi / s.total >= 0.5 ? '#f59e0b' : '#ef4444'}
+              color={s.total > 0 && s.atKpi === s.total ? '#22c55e' : s.total > 0 && s.atKpi / s.total >= 0.5 ? '#f59e0b' : '#ef4444'}
+              window={data.label}
             />
-            <Stat label="Total spend" value={fmtMoney(s.spend)} sub={`${fmtMoney(s.spend / data.days)}/day`} />
-            <Stat label="Total leads" value={String(s.leads)} />
-            <Stat label="Confirmed appts" value={String(s.confirmed)} sub={`${(s.confirmed / (data.days / 7)).toFixed(1)}/wk across book`} />
-            <Stat label="Blended CPL" value={s.cpl === null ? '—' : `$${s.cpl.toFixed(2)}`} sub="Target ≤$25" color={s.cpl === null ? undefined : s.cpl <= 25 ? '#22c55e' : s.cpl <= 30 ? '#f59e0b' : '#ef4444'} />
-            <Stat label="Blended ROAS" value={s.roasHidden ? 'Hidden' : s.roas === null ? '—' : `${s.roas.toFixed(1)}x`} sub={s.roasHidden ?? `${s.revenueTracked} clinics tracking closes`} color={s.roas === null ? undefined : s.roas >= 3 ? '#22c55e' : s.roas >= 2.4 ? '#f59e0b' : '#ef4444'} />
+            <Stat label="Total spend" value={fmtMoney(s.spend)} sub={`${fmtMoney(s.spend / data.days)}/day`} window={data.label} trend={<Trend now={s.spend} before={s.prev.spend} />} prevLabel={data.prevLabel} />
+            <Stat label="Total leads" value={String(s.leads)} window={data.label} trend={<Trend now={s.leads} before={s.prev.leads} />} prevLabel={data.prevLabel} />
+            <Stat
+              label="Confirmed appts"
+              value={String(s.confirmed)}
+              sub={`${(s.confirmed / (data.days / 7)).toFixed(1)}/wk across book`}
+              window={data.label}
+              trend={<Trend now={s.confirmed} before={s.prev.confirmed} />}
+              prevLabel={data.prevLabel}
+            />
+            <Stat
+              label="Blended CPL"
+              value={s.cpl === null ? '—' : `$${s.cpl.toFixed(2)}`}
+              sub="Target ≤$25"
+              color={s.cpl === null ? undefined : s.cpl <= 25 ? '#22c55e' : s.cpl <= 30 ? '#f59e0b' : '#ef4444'}
+              window={data.label}
+              trend={<Trend now={s.cpl} before={s.prev.cpl} lowerIsBetter />}
+              prevLabel={data.prevLabel}
+            />
+            <Stat
+              label="Blended ROAS"
+              value={s.roasHidden ? 'Hidden' : s.roas === null ? '—' : `${s.roas.toFixed(1)}x`}
+              sub={s.roasHidden ?? `${s.revenueTracked} clinics tracking closes`}
+              color={s.roasHidden || s.roas === null ? undefined : s.roas >= 3 ? '#22c55e' : s.roas >= 2.4 ? '#f59e0b' : '#ef4444'}
+              window={data.label}
+            />
           </div>
 
-          <p className="los-label">Live · {clinics.length} clinics</p>
+          <p className="los-label">
+            Live · {clinics.length} clinics · {data.label}
+          </p>
           <div className="los-card p-0 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-xs min-w-[1500px]">
@@ -322,7 +381,7 @@ export default function GenexaClientsPage() {
                         <tr className="bg-los-surface-3">
                           <td colSpan={COLUMNS.length + 3} className="px-4">
                             <div className="sticky left-4 w-[calc(100vw-4.5rem)] md:w-[calc(100vw-14rem-5.5rem)] max-w-[1300px]">
-                              <Detail c={c} />
+                              <Detail c={c} label={data.label} prevLabel={data.prevLabel} />
                             </div>
                           </td>
                         </tr>
@@ -358,7 +417,7 @@ export default function GenexaClientsPage() {
           )}
           <p className="text-[10px] text-los-text-muted">
             Tap a clinic for its funnel, daily trend and biggest problem. * = value has a note (hover). Grey = source not connected or event not tracked, never zero. Slack
-            booking posts cross-check confirmations; pickups aren&apos;t posted in Slack. Last lead / last spend are day-level. Data refreshes every 15 min. Targets live in
+            booking posts cross-check confirmations; pickups aren&apos;t posted in Slack. Every number is for {data.label} (UTC days) unless it says otherwise; trends compare against {data.prevLabel}. Last lead / last spend are day-level over a 60-day lookback. Rates: booked ÷ leads, confirmed ÷ booked, showed ÷ booked, closed ÷ showed. Data refreshes every 15 min. Targets live in
             lib/clinics/config.ts.
           </p>
         </>
