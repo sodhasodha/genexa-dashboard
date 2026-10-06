@@ -274,8 +274,8 @@ export default function MercuryLive() {
         </div>
       </Card>
 
-      <Card title="Expenses by category" sub="Business spend this month vs 3-month average · excludes transfers, owner draws, personal">
-        <ExpenseControls rows={data.expenseRows} />
+      <Card title="Expenses" sub="Business spend this month · excludes transfers, owner draws, personal">
+        <ExpenseControls rows={data.expenseRows} txs={data.expenseTxs || []} months={[new Date().toISOString().slice(0, 7)]} periodLabel="This month" />
       </Card>
 
       <Card title="Recent transactions" sub="Last 30 across checking, savings and card">

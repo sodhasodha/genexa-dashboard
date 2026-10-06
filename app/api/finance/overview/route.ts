@@ -4,7 +4,7 @@ import { fetchWhopMemberships, fetchWhopPayments, fetchWhopPlans, fetchWhopProdu
 import { fetchMondayClients, MondayClient } from '@/lib/monday'
 import { fetchColdSmsSheet, SheetMonth } from '@/lib/coldSmsSheet'
 import { buildReceivables, summariseReceivables } from '@/lib/receivables'
-import { buildExpenseRows, expenseDrivers } from '@/lib/expenseControls'
+import { buildExpenseRows, expenseDrivers, expenseLedger } from '@/lib/expenseControls'
 import { runAllScenarios, Renewal } from '@/lib/scenarios'
 import { coldSmsPayout } from '@/lib/payStructure'
 import { genexaMrr, smsMrr, totalMrr } from '@/lib/mrr'
@@ -384,7 +384,7 @@ export async function GET() {
       },
       mrr,
       receivables: { items: receivables, summary: summariseReceivables(receivables) },
-      expenses: { rows: expenseRows },
+      expenses: { rows: expenseRows, txs: expenseLedger(txs) },
       drivers: {
         recurringRevenue: Math.round(recurringRevenue),
         ...drivers,

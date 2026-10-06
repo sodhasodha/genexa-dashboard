@@ -488,8 +488,13 @@ export default function FinancePage() {
           <Card title="Expected money" sub="Next 30 days · Whop renewals, failed charges, Monday invoices" tight>
             <ExpectedMoney items={arItems} filter={(i) => i.business === 'Genexa'} />
           </Card>
-          <Card title="Expenses by category" sub="Mercury business spend · excludes transfers, owner draws, personal" tight>
-            <ExpenseControls rows={data.expenses.rows} />
+          <Card title="Expenses" sub="Mercury business spend · excludes transfers, owner draws, personal · adds up to the Expenses KPI above" tight>
+            <ExpenseControls
+              rows={data.expenses.rows}
+              txs={data.expenses.txs || []}
+              months={periodRows(data.genexa.monthly, period).map((r) => r.month)}
+              periodLabel={PERIODS.find((p) => p.key === period)!.label}
+            />
           </Card>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
             <Card title="This month vs last" sub="Cumulative Whop net revenue by day">

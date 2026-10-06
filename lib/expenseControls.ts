@@ -27,7 +27,7 @@ const SOFTWARE_CATS = /software|subscription/i
 export const isAdCategory = (c: string) => AD_CATS.test(c)
 export const isSoftwareCategory = (c: string) => SOFTWARE_CATS.test(c)
 // Card descriptors like "Whop*cameronconsul" and "Whop" are the same merchant.
-const merchantKey = (name: string) => name.split('*')[0].toLowerCase().replace(/[^a-z]/g, '').slice(0, 24) || 'unknown'
+export const merchantKey = (name: string) => name.split('*')[0].toLowerCase().replace(/[^a-z]/g, '').slice(0, 24) || 'unknown'
 
 export function buildExpenseRows(txs: any[], now = new Date()): ExpenseRow[] {
   const y = now.getUTCFullYear()
@@ -127,4 +127,11 @@ export function potentialSavings(rows: ExpenseRow[], status: (r: ExpenseRow) => 
     else if (s === 'Review' && !isAdCategory(r.category)) total += Math.max(0, r.pace - r.avg3)
   }
   return Math.round(total)
+}
+
+// Every business-expense transaction, tagged with its merchant key — the same set the Expenses
+// KPI sums, so a breakdown built from these always adds up to the KPI.
+export type ExpenseTx = { ts: number; amount: number; name: string; category: string; key: string }
+export function expenseLedger(txs: any[]): ExpenseTx[] {
+  return businessExpenses(txs).map((e) => ({ ts: e.ts, amount: Math.round(e.amount * 100) / 100, name: e.name, category: e.category, key: merchantKey(e.name) }))
 }
