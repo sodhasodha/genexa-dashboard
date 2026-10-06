@@ -10,7 +10,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "db:push": "node --env-file=.env.local scripts/db-push.mjs",
-    "check": "npm run typecheck && npm run lint && npm test"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "import:monday": "tsx --env-file=.env.local scripts/import-monday.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

@@ -131,12 +131,16 @@ describe("renewals", () => {
     expect((await status(id)).status).toBe("paid");
   });
 
-  it("legacy billing has no renewal date or amount, and churned clients are left out", async () => {
-    const id = await client("R6", ", billing_cycle, monthly_fee, launch_date", ", 'legacy', 1500, app_today() - 400");
+  it("legacy billing renews every 30 days; no cycle set means no renewal; churned clients are left out", async () => {
+    const id = await client("R6", ", billing_cycle, monthly_fee, launch_date", ", 'legacy', 1500, app_today() - 40");
     const s = await status(id);
-    expect(s.status).toBeNull();
-    expect(s.renewal_date).toBeNull();
-    expect(s.renewal_amount).toBeNull();
+    expect(s.status).toBe("overdue");
+    expect(s.days_until).toBe(-10);
+    expect(Number(s.renewal_amount)).toBe(1500);
+    const none = await client("R7", ", monthly_fee, launch_date", ", 1000, app_today() - 40");
+    const sn = await status(none);
+    expect(sn.status).toBeNull();
+    expect(sn.renewal_date).toBeNull();
     await db.query(`update clients set stage = 'churned' where id = $1`, [id]);
     expect(await status(id)).toBeUndefined();
   });

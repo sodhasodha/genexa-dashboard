@@ -40,3 +40,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# marketplace installer extras
+/.agents
+/.claude
+/skills-lock.json
+# raw Monday exports contain pay and contact details
+/fixtures/monday/raw

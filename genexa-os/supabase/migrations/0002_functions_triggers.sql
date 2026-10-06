@@ -170,7 +170,7 @@ do $$
 declare
   t text;
   audited text[] := array[
-    'staff','staff_pay','clients','client_locations','launches','tech_jobs','sla_pauses',
+    'staff','staff_pay','clients','client_locations','client_campaign_scope','launches','tech_jobs','sla_pauses',
     'appointments','sales','exceptions','eods','tasks','prospects','ideas','touches',
     'briefs','scoring_config','app_settings','reminder_rules','finance_rules','agency_month'];
 begin
@@ -314,9 +314,17 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_name text := lower(btrim(coalesce(new.name, '')));
   v_email text := lower(btrim(coalesce(new.email, '')));
+  v_local text := split_part(v_email, '@', 1);
+  v_domain text := split_part(v_email, '@', 2);
 begin
   if new.is_test then return new; end if;
-  if v_name like '%test%' or v_email like '%test%' or v_name like 'zz%'
+  -- "test" must be a whole word (Test Lead, John test, zztest), never part of a
+  -- real surname (Testa, Contestabile). ZZ prefixes are the team's test convention.
+  if v_name ~ '\m(test|tests|testing|tester)\M'
+     or v_name ~ '^zz'
+     or v_local ~ '(^|[._+-])(test|testing|tester)([._+-]|[0-9]*$)'
+     or v_local ~ '^zz'
+     or v_domain in ('test.com', 'example.com', 'genexascaling.com')
      or exists (
        select 1 from staff s
        where (v_name <> '' and lower(s.name) = v_name)

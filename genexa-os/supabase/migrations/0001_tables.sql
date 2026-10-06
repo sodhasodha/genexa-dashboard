@@ -18,6 +18,7 @@ create table staff (
   status text not null default 'active' check (status in ('trial','active','at_risk','left')),
   start_date date,
   slack_user_id text,
+  legacy_ref text unique,
   shift_start time,
   shift_end time,
   timezone text not null default 'America/New_York',
@@ -74,6 +75,9 @@ create table clients (
   churn_date date,
   churn_reason text,
   legacy_ref text,
+  -- Imported once from monday.com for reference. Whop payments are the source of truth.
+  legacy_last_payment_date date,
+  legacy_total_paid numeric(12,2),
   deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -96,6 +100,22 @@ create table client_locations (
   updated_at timestamptz not null default now()
 );
 create index client_locations_client_idx on client_locations (client_id);
+
+-- Which Meta campaigns in a clinic's Cortana business are ours. Cortana reports a
+-- whole business (and sometimes a whole ad account), so spend is only trusted
+-- inside this scope. verified = false means the scope has not been checked by a
+-- person: the clinic's ad numbers render as unverified and ad rules don't fire.
+create table client_campaign_scope (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null unique references clients(id),
+  -- Case-insensitive substring a campaign name must contain. Null = every campaign.
+  campaign_name_contains text,
+  ad_account_ids text[] not null default '{}',
+  verified boolean not null default false,
+  note text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
 create table launches (
   id uuid primary key default gen_random_uuid(),
@@ -195,7 +215,6 @@ create table ad_metrics_ad_daily (
   client_id uuid not null references clients(id),
   ad_id text not null,
   ad_name text,
-  ad_set_name text,
   ad_status text,
   date date not null,
   spend numeric(12,2),
@@ -442,6 +461,7 @@ create table deleted_tasks (
   owner_id uuid not null references staff(id),
   title text not null,
   deleted_at timestamptz not null default now(),
+  legacy_ref text unique,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

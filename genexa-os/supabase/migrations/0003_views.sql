@@ -144,15 +144,14 @@ where month = date_trunc('month', app_today())::date;
 -- paid    = a classified payment from 5 days before that renewal date
 --           up to 5 days before the following one.
 -- overdue = the most recent renewal date has passed with no such payment.
--- Amount  = monthly_fee x months in the cycle. Legacy cycles have no dates
---           until the owner defines them.
+-- Amount  = monthly_fee x months in the cycle. Legacy billing renews every 30 days.
 -- ---------------------------------------------------------------------------
 create view renewals with (security_invoker = true) as
 with base as (
   select
     c.id as client_id, c.name, c.stage, c.billing_cycle, c.monthly_fee, c.launch_date,
-    case c.billing_cycle when '30' then 30 when '90' then 90 end as cycle_days,
-    case c.billing_cycle when '30' then 1 when '90' then 3 end as cycle_months,
+    case c.billing_cycle when '30' then 30 when 'legacy' then 30 when '90' then 90 end as cycle_days,
+    case c.billing_cycle when '30' then 1 when 'legacy' then 1 when '90' then 3 end as cycle_months,
     app_today() as today
   from clients c
   where c.deleted_at is null and c.stage <> 'churned'

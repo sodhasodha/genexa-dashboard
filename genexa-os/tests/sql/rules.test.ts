@@ -107,7 +107,7 @@ describe("launch QC gate", () => {
 });
 
 describe("test-lead filter", () => {
-  it("flags test names, ZZ names and staff names; leaves real patients alone", async () => {
+  it("flags whole-word test names, ZZ names and staff; leaves real patients (incl. Testa) alone", async () => {
     const c = await one<{ id: string }>(`insert into clients (name) values ('Lead Clinic') returning id`);
     const names: [string, string | null, boolean][] = [
       ["Test Lead", null, true],
@@ -115,7 +115,13 @@ describe("test-lead filter", () => {
       ["Amanda Harder", null, true],
       ["John Smith", "sameer@example.test", true],
       ["John Smith", "qa+test@clinic.com", true],
-      ["Maria Lopez", "maria@example.com", false],
+      ["zztest", null, true],
+      ["Jane Doe", "test@gmail.com", true],
+      ["Jane Doe", "ryan@genexascaling.com", true],
+      ["Maria Lopez", "maria.lopez@gmail.com", false],
+      ["Maria Testa", "mtesta@gmail.com", false],
+      ["Tom Contestabile", "contestabile.t@yahoo.com", false],
+      ["Lizzy Greatest", "latest.lizzy@gmail.com", false],
     ];
     for (const [i, [name, email, expected]] of names.entries()) {
       const r = await one<{ is_test: boolean }>(
@@ -125,7 +131,7 @@ describe("test-lead filter", () => {
       expect(r.is_test, `${name} / ${email}`).toBe(expected);
     }
     const perf = await one<{ leads: string }>(`select sum(leads) as leads from client_performance_daily where client_id = $1`, [c.id]);
-    expect(Number(perf.leads)).toBe(1);
+    expect(Number(perf.leads)).toBe(4);
   });
 });
 

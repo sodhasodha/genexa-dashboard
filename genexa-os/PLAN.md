@@ -34,9 +34,8 @@ genexa-os/
     actions/                    # server actions (all writes)
     mcp/                        # tool definitions
   supabase/migrations/          # the schema — authoritative SQL
-  fixtures/<source>/<endpoint>.json   # raw responses from real calls
-  seed/                         # supplied JSON
-  scripts/seed.ts  scripts/migrate.ts
+  fixtures/<source>/<endpoint>.json   # raw responses from real calls (monday/raw is git-ignored: pay + contacts)
+  scripts/import-monday.ts  scripts/db-push.mjs
   tests/                        # sql/ (PGlite), unit/, fixtures-driven mapper tests
 ```
 
@@ -57,6 +56,8 @@ The SQL itself is `supabase/migrations/*.sql`; that is the single copy. Summary 
 | `audit_log.by` | `audit_log.actor` | `by` is a reserved word. |
 | `leads.created_at` | kept as the GHL creation time; row insert time is `inserted_at` | speed-to-lead needs GHL's timestamp, not ours. |
 | `clients` | + `legacy_ref` | section 9. |
+| — | `client_campaign_scope`, `clients.legacy_last_payment_date`, `clients.legacy_total_paid`, `legacy_ref` on imported tables | campaign scoping; values imported from Monday for reference; idempotent import. |
+| `ad_metrics_ad_daily.ad_set_name` | dropped | Cortana has no ad-set level. |
 | soft delete on 3 tables | `deleted_at` on every user-editable business table | rule 7: no hard deletes anywhere. A trigger rejects `DELETE` on every table. |
 | `integration_sync_status` | + `schedule_minutes` | staleness = older than 2× schedule, so the schedule has to be stored. |
 | — | `webhook_events(source, event_id unique)` | idempotency for inbound webhooks. |
@@ -136,7 +137,7 @@ Section 2 of the brief, plus: `CRON_SECRET` (pg_cron → jobs), `APP_URL` (links
 
 ## 5. Phases
 
-- [ ] **1 Foundation** — project, magic-link auth, roles + RLS, schema + views, audit triggers, seed script, layout + sidebar, role landing. Done when every seed row loads, each role sees only what it should, typecheck / lint / tests pass.
+- [ ] **1 Foundation** — project, magic-link auth, roles + RLS, schema + views, audit triggers, Monday import, layout + sidebar, role landing. Done when every seed row loads, each role sees only what it should, typecheck / lint / tests pass.
 - [ ] **2 Cortana + exceptions engine** — fixtures, sync, sync status, ad + tech rules, Slack DM on open. Done when 12 clinics' spend for yesterday matches Cortana to the cent and a stale-source test proves rules don't fire.
 - [ ] **3 Tech page** — jobs, request form, SLA + pauses, tech EOD, scorecard. Done when tests cover Friday 16:50 → Monday 09:20, a pause is removed from Genexa time, and Rockwall shows overdue.
 - [ ] **4 Media Buying page** — account + ad tables over 3 windows, SOP stage, verdicts, fatigue, media EOD, scorecard.
@@ -148,7 +149,23 @@ Section 2 of the brief, plus: `CRON_SECRET` (pg_cron → jobs), `APP_URL` (links
 - [ ] **10 MCP endpoint** — tools, auth, rule enforcement, `MCP.md`, tests per tool.
 - [ ] **11 Hardening** — drill-down everywhere, empty / stale / error states, mobile, 50-clinic load test, README.
 
-## 6. Open questions (not blocking Phase 1 code)
+## 6. Decisions made after the brief
 
-1. `billing_cycle = legacy`: what is the renewal interval and the "months in cycle" for money at risk? Until answered, legacy clients have no renewal date and no money at risk.
-2. Media buyer "book-wide 7d cost per booked vs previous 7d": the brief gives green for flat / down and amber for +10–25%. Up 0–10% is undefined; built as green.
+- Legacy billing renews every 30 days (1 month for money at risk).
+- Book-wide 7d cost per booked up 0–10% is green.
+- Test-lead filter matches "test" as a whole word, ZZ prefixes, staff names / emails and test domains. A surname like "Testa" is a real lead.
+- `ad_set_name` dropped: Cortana has no ad-set level (`groupBy` accepts source, campaign, medium, ad only).
+- `client_campaign_scope` says which campaigns in a clinic's Cortana business are ours, and whether a person has verified that. Unverified scope = ad numbers shown as unverified and ad rules don't fire.
+- No seed files. Starting data is a one-off, re-runnable import from monday.com (`npm run import:monday`, read-only on Monday). The team's logins are created by the same script.
+- Slack: a separate Slack app for Genexa OS (not the Life OS bot).
+
+## 7. Infrastructure
+
+- Vercel project `genexa-os` (team ryan-7487s-projects), deployed from this folder with `npx vercel deploy --prod`. Not connected to git, so pushing the repo never deploys it by accident.
+- Supabase `genexa-os-db` (free plan, us-east), provisioned through the Vercel Marketplace and connected to this project only. Migrations: `npm run db:push`.
+
+## 8. Cortana facts (from real responses, 7 Sep – 6 Oct 2026)
+
+- Event names: `lead`, `unconfirmed_appointment_booked` (= booked), `appointment_booked` (= confirmed), `appointment_shown`, `appointment_no_show`, `appointment_cancelled`, `purchase`.
+- Per-row fields used: `spent`, `impressions`, `clicks`, `ctr`, `cpm`, `frequency`, `metaPlatformLeads`, `leads`, `conversions.<event>.uniqueCount`, `totalRevenue`, `effectiveStatus`, `customerId` (Meta ad account), `platformEntityId`.
+- "Interventional Pain Consultants - Cleveland" reports spend from the same two ad accounts as the Georgia business and the base IPC business, so it is marked unverified.
