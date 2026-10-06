@@ -11,12 +11,16 @@
     "test": "vitest run",
     "db:push": "node --env-file=.env.local scripts/db-push.mjs",
     "check": "npm run typecheck && npm run lint && npm test",
-    "import:monday": "tsx --env-file=.env.local scripts/import-monday.ts"
+    "import:monday": "tsx --env-file=.env.local scripts/import-monday.ts",
+    "sync:cortana": "tsx --env-file=.env.local scripts/sync-cortana.ts",
+    "verify:cortana": "tsx --env-file=.env.local scripts/verify-cortana.ts",
+    "setup:cron": "node --env-file=.env.local scripts/setup-cron.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
     "next": "16.4.0",
+    "pg": "^8.23.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "server-only": "^0.0.1",
