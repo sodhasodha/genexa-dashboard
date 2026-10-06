@@ -5,15 +5,16 @@ import { BANDS, bandLabel, bandRange, coldSmsPayout, poolRule, poolRuleLabel } f
 import { monthLabel } from '@/lib/forecast'
 import { Chip } from '@/components/finance/Chip'
 
-type Reconcile = { month: string; sheet: number | null; commas: number; canonical: number; profit: number; source: string; calcAryan: number; received: number }
+type Reconcile = { month: string; sheet: number | null; commas: number; canonical: number; expenses: number; profit: number; payoutRevenue: number; payoutProfit: number; payoutBasis: string; costSource: string; estimatedCosts: { name: string; amount: number }[]; current: boolean; calcAryan: number; received: number }
 
-// Payout for a month under the pool rule in force that month.
-const payoutFor = (r: Reconcile) => coldSmsPayout({ revenue: r.canonical, profit: r.profit }, r.month)
+// Payout for a month under the pool rule in force that month. Worked out from Jacob's sheet
+// (payoutRevenue / payoutProfit), not from Commas company revenue.
+const payoutFor = (r: Reconcile) => coldSmsPayout({ revenue: r.payoutRevenue, profit: r.payoutProfit }, r.month)
 
 const fmtCurrency = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const fmtPct = (n: number) => `${n.toFixed(1)}%`
 
-type Reason = 'matched' | 'prior-month accrual' | 'timing difference' | 'sheet not updated' | 'unknown'
+type Reason = 'matched' | 'prior-month accrual' | 'timing difference' | 'month in progress' | 'unknown'
 
 // Why calculated vs received payout differ for one month. Payouts are paid in arrears, so a
 // mismatch is usually timing, not an error. `rows` must be sorted oldest → newest.
@@ -22,8 +23,7 @@ function varianceReason(rows: Reconcile[], i: number): Reason {
   const calc = payoutFor(r).aryan
   const v = r.received - calc
   if (Math.abs(v) < Math.max(250, calc * 0.1)) return 'matched'
-  const isCurrent = i === rows.length - 1 && r.source !== 'sheet'
-  if (isCurrent) return v > 0 ? 'prior-month accrual' : 'sheet not updated'
+  if (r.current) return v > 0 ? 'prior-month accrual' : 'month in progress'
   const varOf = (j: number) => (rows[j] ? rows[j].received - payoutFor(rows[j]).aryan : 0)
   // A neighbouring month off by roughly the opposite amount → money landed in the other month.
   for (const j of [i - 1, i + 1]) {
@@ -68,7 +68,8 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
   const reason = varianceReason(sorted, idx)
 
   // Collapsed reconciliation summary: closed months only (current month is still accruing).
-  const closed = sorted.map((r, i) => ({ r, i })).filter(({ r }) => r.source === 'sheet')
+  const closed = sorted.map((r, i) => ({ r, i })).filter(({ r }) => !r.current && r.costSource !== 'estimate')
+  const estNote = (r: Reconcile) => r.estimatedCosts.map((e) => `${e.name} ~${fmtCurrency(e.amount)}`).join(', ')
   const totalVar = closed.reduce((sum, { r }) => sum + r.received - payoutFor(r).aryan, 0)
   const totalCalc = closed.reduce((sum, { r }) => sum + payoutFor(r).aryan, 0)
   const reasons = closed.map(({ i }) => varianceReason(sorted, i)).filter((x) => x !== 'matched')
@@ -83,7 +84,12 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-[11px] text-los-text-muted">
-          Revenue source: {row.source === 'sheet' ? "Jacob's sheet" : 'Commas (sheet not updated yet)'}
+          {row.payoutBasis === 'sheet'
+            ? `What Jacob owes you is worked out from his sheet: sheet revenue − costs${row.current ? ' (month so far)' : ''}.`
+            : 'No revenue in the sheet for this month yet, so the payout is estimated from Commas.'}{' '}
+          Company revenue ({fmtCurrency(row.canonical)}) comes from Commas and is not used here.
+          {row.costSource === 'estimate' ? ' Costs estimated (not in sheet yet).' : ''}
+          {row.costSource === 'partial' ? ` Costs include an estimate for ${estNote(row)} until Jacob fills it in.` : ''}
           {sheetUpdatedTo ? ` · sheet updated to ${monthLabel(sheetUpdatedTo)}` : ''}
         </p>
         <select
@@ -101,14 +107,14 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
         {/* Metrics + progress */}
         <div className="lg:col-span-2 flex flex-col gap-3">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <Stat label="Cold SMS revenue" value={fmtCurrency(row.canonical)} sub={row.source === 'sheet' ? 'Sheet' : 'Commas · est.'} />
-            <Stat label="Payout pool" value={fmtCurrency(split.pool)} sub={`${poolRuleLabel(split.rule)}${split.rule.basis === 'profit' ? ` (${fmtCurrency(row.profit)})` : ''}`} />
+            <Stat label={row.payoutBasis === 'sheet' ? 'Sheet revenue' : 'Revenue (est.)'} value={fmtCurrency(row.payoutRevenue)} sub={row.payoutBasis === 'sheet' ? "Jacob's sheet · payout basis" : 'Commas until sheet updated'} />
+            <Stat label="Payout pool" value={fmtCurrency(split.pool)} sub={`${poolRuleLabel(split.rule)}${split.rule.basis === 'profit' ? ` (${fmtCurrency(row.payoutProfit)})` : ''}`} />
             <Stat label="Aryan payout" value={fmtCurrency(split.aryan)} color="#f59e0b" sub="Calculated" />
             <Stat label="Rishil payout" value={fmtCurrency(split.rishil)} />
             <Stat label="Current split" value={bandLabel(band)} sub={`Aryan / Rishil · ${bandRange(band)}`} />
             <Stat label="Next Aryan threshold" value={split.nextThreshold === null ? 'Top band' : fmtCurrency(split.nextThreshold)} />
             <Stat label="Aryan income to next band" value={split.untilNextBand === null ? '—' : fmtCurrency(split.untilNextBand)} sub={split.untilNextBand === null ? '' : 'Aryan income'} />
-            <Stat label="Aryan effective" value={fmtPct(split.aryanPctOfRevenue)} sub="of total revenue" />
+            <Stat label="Aryan effective" value={fmtPct(split.aryanPctOfRevenue)} sub="of sheet revenue" />
           </div>
 
           <div className="rounded-lg bg-los-surface-2 px-3 py-2.5 flex items-center gap-x-5 gap-y-1 flex-wrap text-xs">
@@ -219,10 +225,10 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
           <thead>
             <tr className="text-los-text-muted text-left">
               <th className="font-medium py-1.5 pr-3">Month</th>
-              <th className="font-medium py-1.5 px-2 text-right">Sheet</th>
-              <th className="font-medium py-1.5 px-2 text-right">Commas net</th>
-              <th className="font-medium py-1.5 px-2 text-right">Used</th>
-              <th className="font-medium py-1.5 px-2 text-right">Profit</th>
+              <th className="font-medium py-1.5 px-2 text-right">Commas revenue</th>
+              <th className="font-medium py-1.5 px-2 text-right">Sheet revenue</th>
+              <th className="font-medium py-1.5 px-2 text-right">Costs</th>
+              <th className="font-medium py-1.5 px-2 text-right">Sheet profit</th>
               <th className="font-medium py-1.5 px-2 text-right">Pool rule</th>
               <th className="font-medium py-1.5 px-2 text-right">Aryan (calc)</th>
               <th className="font-medium py-1.5 px-2 text-right">Received</th>
@@ -238,10 +244,10 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
               return (
                 <tr key={r.month} className="border-t border-los-border">
                   <td className="py-1.5 pr-3 text-los-text-secondary">{monthLabel(r.month)}</td>
-                  <td className="py-1.5 px-2 text-right font-mono text-los-text-muted">{r.sheet === null ? '—' : fmtCurrency(r.sheet)}</td>
-                  <td className="py-1.5 px-2 text-right font-mono text-los-text-muted">{fmtCurrency(r.commas)}</td>
-                  <td className="py-1.5 px-2 text-right font-mono text-los-text">{fmtCurrency(r.canonical)}</td>
-                  <td className="py-1.5 px-2 text-right font-mono text-los-text-muted">{fmtCurrency(r.profit)}</td>
+                  <td className="py-1.5 px-2 text-right font-mono text-los-text-muted">{fmtCurrency(r.canonical)}</td>
+                  <td className="py-1.5 px-2 text-right font-mono text-los-text">{r.sheet === null ? '—' : fmtCurrency(r.sheet)}</td>
+                  <td className="py-1.5 px-2 text-right font-mono text-los-text-muted">{fmtCurrency(r.expenses)}</td>
+                  <td className="py-1.5 px-2 text-right font-mono text-los-text">{fmtCurrency(r.payoutProfit)}</td>
                   <td className="py-1.5 px-2 text-right text-los-text-muted whitespace-nowrap">{poolRuleLabel(poolRule(r.month))}</td>
                   <td className="py-1.5 px-2 text-right font-mono text-los-text">{fmtCurrency(calcA)}</td>
                   <td className="py-1.5 px-2 text-right font-mono text-los-text">{fmtCurrency(r.received)}</td>
@@ -250,7 +256,9 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
                     <span className="inline-flex gap-1 flex-wrap">
                       {why !== 'matched' && <Chip tone="amber">{why}</Chip>}
                       {srcDiff !== null && Math.abs(srcDiff) >= 15 && <Chip tone="amber">Sources differ {Math.round(Math.abs(srcDiff))}%</Chip>}
-                      {r.source !== 'sheet' && <Chip tone="muted">Sheet pending</Chip>}
+                      {r.payoutBasis !== 'sheet' && <Chip tone="muted">Sheet revenue pending</Chip>}
+                      {r.costSource === 'estimate' && <Chip tone="muted">Costs est.</Chip>}
+                      {r.costSource === 'partial' && <Chip tone="muted">Est. {estNote(r)}</Chip>}
                       {srcDiff !== null && Math.abs(srcDiff) < 15 && <Chip tone="green">Matches</Chip>}
                     </span>
                   </td>
@@ -260,7 +268,8 @@ export default function PayStructure({ reconcile, sheetUpdatedTo }: { reconcile:
           </tbody>
         </table>
         <p className="text-[10px] text-los-text-muted mt-2">
-          Sheet = Fanbasis withdrawals net of fees (Jacob&apos;s books). Commas net = gross − refunds − fees by charge date, so it leads the sheet by the withdrawal lag.
+          Aryan (calc) = your share of sheet profit (sheet revenue − costs) — the sheet is what Jacob pays on. Sheet revenue = Fanbasis withdrawals, so it trails Commas by the withdrawal lag.
+          Commas revenue = company revenue (gross − refunds − fees by charge date); shown for comparison, not used for the payout.
           Received = Ray Media / FanBasis deposits in Mercury that month; payouts land the following month, so compare over several months, not one.
         </p>
       </div>

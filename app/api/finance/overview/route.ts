@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { classifyTx, fetchMercuryTransactions, mercuryGet, txTime, businessExpenses } from '@/lib/mercury'
 import { fetchWhopMemberships, fetchWhopPayments, fetchWhopPlans, fetchWhopProducts } from '@/lib/whop'
 import { fetchMondayClients, MondayClient } from '@/lib/monday'
-import { fetchColdSmsSheet, SheetMonth } from '@/lib/coldSmsSheet'
+import { estimateMissingCosts, fetchColdSmsSheet, SheetMonth } from '@/lib/coldSmsSheet'
 import { buildReceivables, summariseReceivables } from '@/lib/receivables'
 import { buildExpenseRows, expenseDrivers, expenseLedger } from '@/lib/expenseControls'
 import { runAllScenarios, Renewal } from '@/lib/scenarios'
@@ -187,32 +187,48 @@ export async function GET() {
 
     /* ------------------------------ Cold SMS ------------------------------ */
     // Canonical per metric (never summed across sources):
-    //   revenue / expenses / profit → Jacob's sheet for months he has closed;
-    //                                 current month → Commas net (gross − refunds − fees), expenses est.
-    //   Aryan's payout (cash)       → Mercury deposits (Ray Media / FanBasis).
-    //   new cash / backend / fees / clients → Commas (sheet doesn't split these).
+    //   revenue               → Commas net (gross − refunds − fees), by charge date.
+    //   expenses              → Jacob's sheet; regular costs he hasn't entered yet (e.g. Sendivo) are
+    //                           estimated from recent months and flagged until he fills them in.
+    //   payout owed to Aryan  → worked out from Jacob's sheet (sheet revenue − costs), since that is
+    //                           what Jacob pays on; Commas is only used until the sheet has revenue.
+    //   Aryan's payout (cash) → Mercury deposits (Ray Media / FanBasis).
+    //   new cash / backend / fees / clients → Commas.
     const s = monthlyRevenue(commas.sales, commas.refunds, months, 30)
     const sheetBy: Record<string, SheetMonth> = {}
     for (const m of sheet) sheetBy[m.month] = m
-    const sheetExpAvg = avg(sheet.slice(-3).map((m) => m.expenses))
+    // Estimated regular costs missing from the sheet (prorated for the current month).
+    const missing = estimateMissingCosts(sheet)
+    const missingFor = (month: string) => (missing[month] || []).map((e) => ({ name: e.name, amount: r2(month === curMonth ? (e.amount * day) / dim : e.amount) }))
+    const sum = (xs: { amount: number }[]) => xs.reduce((t, x) => t + x.amount, 0)
+    // Average of the last 3 finished months with costs entered (the current month is still partial).
+    const sheetExpAvg = avg(sheet.filter((m) => m.month < curMonth && m.expenses > 0).slice(-3).map((m) => m.expenses + sum(missingFor(m.month))))
     const smsMonthly = s.monthly.map((m) => {
       const commasNet = r2(m.gross - m.refunds - m.fees)
       const sh = sheetBy[m.month]
-      const revenue = sh ? sh.revenue : commasNet
-      // No sheet row yet: estimate expenses from the sheet's 3-mo average (prorated for the current month).
+      const revenue = commasNet
+      const hasCosts = !!sh && sh.expenses > 0
+      // No costs in the sheet yet: estimate from the sheet's 3-mo average (prorated for the current month).
       const estExp = m.month === curMonth ? (sheetExpAvg * day) / dim : sheetExpAvg
-      const exp = sh ? sh.expenses : commasNet > 0 && sheet.length ? estExp : 0
+      const estimated = hasCosts ? missingFor(m.month) : []
+      const exp = hasCosts ? sh.expenses + sum(estimated) : commasNet > 0 ? estExp : 0
       const netProfit = revenue - exp
+      const sheetRevenue = sh && sh.revenue > 0 ? r2(sh.revenue) : null
+      const payoutRevenue = sheetRevenue ?? revenue
       return {
         ...m,
         commasNet,
-        sheetRevenue: sh ? r2(sh.revenue) : null,
+        sheetRevenue,
+        payoutRevenue: r2(payoutRevenue),
+        payoutProfit: r2(payoutRevenue - exp),
+        payoutBasis: sheetRevenue !== null ? 'sheet' : 'commas',
         netRev: r2(revenue),
         revenue: r2(revenue),
         expenses: r2(exp),
         netProfit: r2(netProfit),
         netMargin: revenue > 0 ? r2((netProfit / revenue) * 100) : 0,
-        source: sh ? 'sheet' : 'commas',
+        costSource: !hasCosts ? 'estimate' : estimated.length ? 'partial' : 'sheet',
+        estimatedCosts: estimated,
       }
     })
     const payoutByMonth: Record<string, number> = {}
@@ -223,7 +239,7 @@ export async function GET() {
     }
     const takeMonthly = months.map((month, i) => {
       const received = r2(payoutByMonth[month] || 0)
-      const calc = coldSmsPayout({ revenue: smsMonthly[i].revenue, profit: smsMonthly[i].netProfit }, month)
+      const calc = coldSmsPayout({ revenue: smsMonthly[i].payoutRevenue, profit: smsMonthly[i].payoutProfit }, month)
       return { month, payouts: received, calcAryan: r2(calc.aryan), calcRishil: r2(calc.rishil), pool: r2(calc.pool) }
     })
     // Reconciliation rows for months where either source has data.
@@ -236,8 +252,14 @@ export async function GET() {
           sheet: m.sheetRevenue,
           commas: m.commasNet,
           canonical: m.revenue,
+          expenses: m.expenses,
           profit: m.netProfit,
-          source: m.source,
+          payoutRevenue: m.payoutRevenue,
+          payoutProfit: m.payoutProfit,
+          payoutBasis: m.payoutBasis,
+          costSource: m.costSource,
+          estimatedCosts: m.estimatedCosts,
+          current: m.month === curMonth,
           calcAryan: t.calcAryan,
           received: t.payouts,
         }
@@ -271,7 +293,8 @@ export async function GET() {
     /* ---------------------------- Expected money --------------------------- */
     const curSms = smsMonthly[smsMonthly.length - 1]
     const smsProjectedRev = (curSms.commasNet / day) * dim
-    const smsProjectedExp = sheetBy[curMonth]?.expenses ?? sheetExpAvg
+    // The sheet's current month is only what's been entered so far, so never project below the average.
+    const smsProjectedExp = Math.max(curSms.expenses, sheetExpAvg)
     const smsExpected = Math.max(0, coldSmsPayout({ revenue: smsProjectedRev, profit: smsProjectedRev - smsProjectedExp }, curMonth).aryan)
     const receivables = buildReceivables({
       payments,
@@ -375,7 +398,7 @@ export async function GET() {
         reconcile,
         activeClients: smsMonthly[smsMonthly.length - 1].clients,
         pace: paceSeries(s.dailyNet),
-        sheetUpdatedTo: sheet.length ? sheet[sheet.length - 1].month : null,
+        sheetUpdatedTo: sheet.filter((m) => m.expenses > 0).pop()?.month ?? null,
       },
       total: {
         monthly: totalMonthly,

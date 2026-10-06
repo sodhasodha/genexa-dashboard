@@ -522,13 +522,12 @@ export default function FinancePage() {
             day={day}
             dim={dim}
             extraChips={{
-              revenue: view.rows[view.rows.length - 1].source === 'sheet' || period !== 'mtd' ? [] : [{ tone: 'muted', text: 'Sheet pending · Commas est.' }],
-              expenses: view.rows[view.rows.length - 1].source === 'sheet' || period !== 'mtd' ? [] : [{ tone: 'muted', text: 'Est. from 3-mo avg' }],
+              expenses: period !== 'mtd' ? [] : [{ tone: 'muted', text: { sheet: 'Sheet so far', partial: 'Sheet so far + est. missing costs', estimate: 'Est. from 3-mo avg' }[view.rows[view.rows.length - 1].costSource as string] || '' }],
             }}
             kpis={[
-              { label: 'Revenue', key: 'revenue', kind: 'money', hint: "Jacob's sheet (Commas until updated)", watch: 'revenue' },
+              { label: 'Revenue', key: 'revenue', kind: 'money', hint: 'Company revenue · Commas, net of refunds & fees', watch: 'revenue' },
               { label: 'Expenses', key: 'expenses', kind: 'money', invert: true, hint: "Jacob's sheet", watch: 'cost' },
-              { label: 'Net Profit', key: 'netProfit', kind: 'money', color: C.backend, watch: 'revenue' },
+              { label: 'Net Profit', key: 'netProfit', kind: 'money', color: C.backend, hint: 'Commas revenue − sheet costs', watch: 'revenue' },
               { label: 'Net Margin', key: 'netMargin', kind: 'pct', color: C.margin, watch: 'margin' },
               { label: 'Active Clients', key: 'clients', kind: 'count', hint: 'Paid in last 30 days' },
               { label: 'New Cash', key: 'newCash', kind: 'money', hint: 'Commas first payments', watch: 'revenue' },
@@ -538,7 +537,7 @@ export default function FinancePage() {
             ]}
           />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-            <Card title="Revenue & profit" sub="Bars = Commas sales · line = net profit (sheet) · * current month at pace" className="lg:col-span-2">
+            <Card title="Revenue & profit" sub="Bars = Commas sales · line = net profit (Commas revenue − sheet costs) · * current month at pace" className="lg:col-span-2">
               <StackedForecast
                 data={view.chart}
                 series={[
@@ -554,7 +553,7 @@ export default function FinancePage() {
               <PaceChart pace={data.sms.pace} color={C.sms} name="Sales" />
             </Card>
           </div>
-          <Card title="Pay structure" sub="Our share of Cold SMS profit (60% from Sep 2026, 50% before; Jacob keeps the rest) is split progressively between Aryan and Rishil" tight>
+          <Card title="Pay structure" sub="What Jacob owes you, worked out from his sheet (not Commas). Our share of Cold SMS profit (60% from Sep 2026, 50% before; Jacob keeps the rest) is split progressively between Aryan and Rishil" tight>
             <PayStructure reconcile={data.sms.reconcile} sheetUpdatedTo={data.sms.sheetUpdatedTo} />
           </Card>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
