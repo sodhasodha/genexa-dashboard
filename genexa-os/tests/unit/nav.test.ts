@@ -9,9 +9,9 @@ describe("role-based landing", () => {
     expect(landingPath({ id: "abc", role: "csr" })).toBe("/call-centre?csr=abc");
   });
 
-  it("has the nine sidebar pages in the brief's order", () => {
+  it("has the brief's nine pages in order, plus Team", () => {
     expect(NAV.map((n) => n.label)).toEqual([
-      "Overview", "Clients", "Launches", "Call Centre", "Media Buying", "Tech", "Tasks", "Pipeline", "Ideas",
+      "Overview", "Clients", "Launches", "Call Centre", "Media Buying", "Tech", "Team", "Tasks", "Pipeline", "Ideas",
     ]);
   });
 });
