@@ -16,7 +16,7 @@ beforeAll(async () => {
   people = await seedStaff(db);
   await db.query(`insert into staff_pay (staff_id, hourly_rate, weekly_pay) values ($1, 6, 240)`, [people.amanda]);
   await db.query(`insert into finance_transactions (mercury_id, amount, counterparty) values ('m1', 5000, 'Whop')`);
-  clientId = (await db.query<{ id: string }>(`insert into clients (name, monthly_fee) values ('RLS Clinic', 3000) returning id`)).rows[0].id;
+  clientId = (await db.query<{ id: string }>(`insert into clients (name, cycle_fee) values ('RLS Clinic', 3000) returning id`)).rows[0].id;
   amandaTask = (
     await db.query<{ id: string }>(`insert into tasks (owner_id, title, source) values ($1, 'Call back patient', 'ryan') returning id`, [people.amanda])
   ).rows[0].id;
@@ -66,7 +66,7 @@ describe.each([
   it("cannot edit clients, staff or scoring rules", async () => {
     await asUser(db, AUTH[who], async () => {
       for (const sql of [
-        `update clients set monthly_fee = 1 returning id`,
+        `update clients set cycle_fee = 1 returning id`,
         `update staff set role = 'owner' returning id`,
         `update scoring_config set green = 0 returning id`,
       ]) {

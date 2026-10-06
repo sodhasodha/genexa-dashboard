@@ -28,14 +28,14 @@ describe("no hard deletes + audit log", () => {
   });
 
   it("writes one audit row per changed field", async () => {
-    const c = await one<{ id: string }>(`insert into clients (name, monthly_fee) values ('Audit Clinic', 3000) returning id`);
-    await db.query(`update clients set monthly_fee = 3500, next_action = 'Call Friday' where id = $1`, [c.id]);
+    const c = await one<{ id: string }>(`insert into clients (name, cycle_fee) values ('Audit Clinic', 3000) returning id`);
+    await db.query(`update clients set cycle_fee = 3500, next_action = 'Call Friday' where id = $1`, [c.id]);
     const rows = await db.query<{ field: string; old_value: string | null; new_value: string | null; actor: string }>(
       `select field, old_value, new_value, actor from audit_log where table_name = 'clients' and row_id = $1 order by field`,
       [c.id],
     );
     const byField = Object.fromEntries(rows.rows.map((r) => [r.field, r]));
-    expect(Object.keys(byField).sort()).toEqual(["_created", "monthly_fee", "next_action"]);
+    expect(Object.keys(byField).sort()).toEqual(["_created", "cycle_fee", "monthly_fee", "next_action"]);
     expect(Number(byField.monthly_fee.old_value)).toBe(3000);
     expect(Number(byField.monthly_fee.new_value)).toBe(3500);
     expect(byField.next_action.new_value).toBe("Call Friday");

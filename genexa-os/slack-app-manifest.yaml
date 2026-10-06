@@ -1,0 +1,30 @@
+# Genexa OS Slack app. Create at https://api.slack.com/apps -> Create New App -> From a manifest.
+# After installing to the workspace, send back:
+#   SLACK_BOT_TOKEN       (OAuth & Permissions -> Bot User OAuth Token, starts xoxb-)
+#   SLACK_SIGNING_SECRET  (Basic Information -> App Credentials -> Signing Secret)
+display_information:
+  name: Genexa OS
+  description: Reminders and alerts from the Genexa operating system
+  background_color: "#16181d"
+features:
+  bot_user:
+    display_name: Genexa OS
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - chat:write          # send DMs and post in channels the bot is in
+      - chat:write.public   # post in public channels without being invited
+      - im:write            # open a DM with a staff member
+      - users:read          # look up workspace members
+      - users:read.email    # match staff to Slack users by email
+      - channels:read       # resolve public channel ids (pod and clinic channels)
+      - groups:read         # resolve private channel ids the bot has been added to
+settings:
+  interactivity:
+    is_enabled: true
+    # Done / Snooze 1h buttons post here.
+    request_url: https://ops.genexascaling.com/api/webhooks/slack
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

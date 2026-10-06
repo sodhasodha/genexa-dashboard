@@ -51,6 +51,7 @@ The SQL itself is `supabase/migrations/*.sql`; that is the single copy. Summary 
 
 | Spec | Built | Reason |
 |---|---|---|
+| `clients.monthly_fee` stored (90-day = fee / 3) | `clients.cycle_fee` stored; `monthly_fee` generated from it | the renewal amount must be exactly the cycle fee ($5,000), not 3 × a rounded monthly figure. |
 | `staff.hourly_rate, hours_week, weekly_pay, payment_method` | separate `staff_pay` table (1:1) | RLS is row-level. "Staff read everything except pay fields" needs the pay fields in their own owner-only table. |
 | `tasks.group` | `tasks.task_group` | `group` is a reserved word. |
 | `audit_log.by` | `audit_log.actor` | `by` is a reserved word. |
@@ -94,7 +95,7 @@ The SQL itself is `supabase/migrations/*.sql`; that is the single copy. Summary 
 - Show rate = showed ÷ (showed + no-show), by month of `scheduled_for`. Appointments with no outcome logged are counted separately as "outcomes pending" and never count as no-shows.
 - Close rate = closed-won (month of `closed_at`) ÷ shows in that month.
 - Renewal paid = a classified payment from 5 days before that renewal date up to 5 days before the following one. Overdue = the most recent renewal date has passed with no such payment.
-- Next renewal amount = `monthly_fee` × months in cycle (30 → 1, 90 → 3).
+- Next renewal amount = `cycle_fee`, the stored fee per billing cycle. `monthly_fee` = `cycle_fee` ÷ months in cycle; MRR sums it.
 
 **RLS**
 - Owner: read / write everything.
@@ -137,7 +138,8 @@ Section 2 of the brief, plus: `CRON_SECRET` (pg_cron → jobs), `APP_URL` (links
 
 ## 5. Phases
 
-- [ ] **1 Foundation** — project, magic-link auth, roles + RLS, schema + views, audit triggers, Monday import, layout + sidebar, role landing. Done when every seed row loads, each role sees only what it should, typecheck / lint / tests pass.
+- [x] **1 Foundation** — project, magic-link auth, roles + RLS, schema + views, audit triggers, Monday import, layout + sidebar, role landing. Done when every seed row loads, each role sees only what it should, typecheck / lint / tests pass.
+- [ ] **1b Team page** — staff list with each person's shift (start, end, timezone, working days) entered by the owner, and a coverage view: who is on, hour by hour in ET, with gaps flagged. Built before any reminder is sent, because every reminder is held to the recipient's shift.
 - [ ] **2 Cortana + exceptions engine** — fixtures, sync, sync status, ad + tech rules, Slack DM on open. Done when 12 clinics' spend for yesterday matches Cortana to the cent and a stale-source test proves rules don't fire.
 - [ ] **3 Tech page** — jobs, request form, SLA + pauses, tech EOD, scorecard. Done when tests cover Friday 16:50 → Monday 09:20, a pause is removed from Genexa time, and Rockwall shows overdue.
 - [ ] **4 Media Buying page** — account + ad tables over 3 windows, SOP stage, verdicts, fatigue, media EOD, scorecard.
@@ -161,6 +163,7 @@ Section 2 of the brief, plus: `CRON_SECRET` (pg_cron → jobs), `APP_URL` (links
 
 ## 7. Infrastructure
 
+- Domain: `ops.genexascaling.com` (A record → 76.76.21.21 at Cloudflare, DNS only).
 - Vercel project `genexa-os` (team ryan-7487s-projects), deployed from this folder with `npx vercel deploy --prod`. Not connected to git, so pushing the repo never deploys it by accident.
 - Supabase `genexa-os-db` (free plan, us-east), provisioned through the Vercel Marketplace and connected to this project only. Migrations: `npm run db:push`.
 

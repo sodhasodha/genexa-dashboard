@@ -90,32 +90,34 @@ describe("renewals", () => {
     );
 
   it("not started without a launch date", async () => {
-    const id = await client("R0", ", billing_cycle, monthly_fee", ", '30', 3000");
+    const id = await client("R0", ", billing_cycle, cycle_fee", ", '30', 3000");
     expect((await status(id)).status).toBe("not_started");
   });
 
   it("upcoming, then due within 7 days", async () => {
-    const a = await client("R1", ", billing_cycle, monthly_fee, launch_date", ", '30', 3000, app_today() - 10");
+    const a = await client("R1", ", billing_cycle, cycle_fee, launch_date", ", '30', 3000, app_today() - 10");
     const sa = await status(a);
     expect(sa.status).toBe("upcoming");
     expect(sa.days_until).toBe(20);
     expect(Number(sa.renewal_amount)).toBe(3000);
-    const b = await client("R2", ", billing_cycle, monthly_fee, launch_date", ", '30', 3000, app_today() - 25");
+    const b = await client("R2", ", billing_cycle, cycle_fee, launch_date", ", '30', 3000, app_today() - 25");
     const sb = await status(b);
     expect(sb.status).toBe("due_7d");
     expect(sb.days_until).toBe(5);
   });
 
-  it("overdue when the last renewal date passed unpaid; amount = monthly fee x months in cycle", async () => {
-    const id = await client("R3", ", billing_cycle, monthly_fee, launch_date", ", '90', 2000, app_today() - 100");
+  it("overdue when the last renewal date passed unpaid; amount = the cycle fee exactly, monthly fee derived", async () => {
+    const id = await client("R3", ", billing_cycle, cycle_fee, launch_date", ", '90', 5000, app_today() - 100");
     const s = await status(id);
     expect(s.status).toBe("overdue");
     expect(s.days_until).toBe(-10);
-    expect(Number(s.renewal_amount)).toBe(6000);
+    expect(Number(s.renewal_amount)).toBe(5000);
+    const fee = await one<{ monthly_fee: string }>(`select monthly_fee from clients where id = $1`, [id]);
+    expect(Number(fee.monthly_fee)).toBe(1666.67);
   });
 
   it("a classified payment near the renewal date clears it; an unclassified one does not", async () => {
-    const id = await client("R4", ", billing_cycle, monthly_fee, launch_date", ", '30', 3000, app_today() - 40");
+    const id = await client("R4", ", billing_cycle, cycle_fee, launch_date", ", '30', 3000, app_today() - 40");
     expect((await status(id)).status).toBe("overdue");
     await db.query(`insert into payments (client_id, whop_payment_id, amount, paid_at, product_title) values ($1, 'r4a', 3000, now() - interval '9 days', null)`, [id]);
     expect((await status(id)).status).toBe("overdue");
@@ -126,18 +128,18 @@ describe("renewals", () => {
   });
 
   it("paid early (within 5 days before the date) shows paid", async () => {
-    const id = await client("R5", ", billing_cycle, monthly_fee, launch_date", ", '30', 3000, app_today() - 27");
+    const id = await client("R5", ", billing_cycle, cycle_fee, launch_date", ", '30', 3000, app_today() - 27");
     await db.query(`insert into payments (client_id, whop_payment_id, amount, paid_at, product_title) values ($1, 'r5', 3000, now() - interval '1 day', 'Growth Plan')`, [id]);
     expect((await status(id)).status).toBe("paid");
   });
 
   it("legacy billing renews every 30 days; no cycle set means no renewal; churned clients are left out", async () => {
-    const id = await client("R6", ", billing_cycle, monthly_fee, launch_date", ", 'legacy', 1500, app_today() - 40");
+    const id = await client("R6", ", billing_cycle, cycle_fee, launch_date", ", 'legacy', 1500, app_today() - 40");
     const s = await status(id);
     expect(s.status).toBe("overdue");
     expect(s.days_until).toBe(-10);
     expect(Number(s.renewal_amount)).toBe(1500);
-    const none = await client("R7", ", monthly_fee, launch_date", ", 1000, app_today() - 40");
+    const none = await client("R7", ", cycle_fee, launch_date", ", 1000, app_today() - 40");
     const sn = await status(none);
     expect(sn.status).toBeNull();
     expect(sn.renewal_date).toBeNull();

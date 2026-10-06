@@ -25,7 +25,7 @@ describe("clients", () => {
     const unmapped: Unmapped[] = [];
     const row = mapClient(boards.clients, item(boards.clients, "Pure Health medical Pod 1"), unmapped);
     expect(row).toMatchObject({
-      name: "Pure Health medical", stage: "live", pod: "pod_1", billing_cycle: "30", monthly_fee: 1500,
+      name: "Pure Health medical", stage: "live", pod: "pod_1", billing_cycle: "30", cycle_fee: 1500,
       launch_date: "2026-09-08", guarantee_text: "$4,500 revenue in 30 days (modified)", guarantee_target_amount: 4500,
       guarantee_deadline: "2026-10-08", ob_form_status: "Completed",
     });
@@ -37,8 +37,13 @@ describe("clients", () => {
   it("keeps blanks as null and reports them instead of inventing values", () => {
     const unmapped: Unmapped[] = [];
     const row = mapClient(boards.clients, item(boards.clients, "Multivita IV"), unmapped);
-    expect(row).toMatchObject({ pod: null, billing_cycle: null, monthly_fee: null, launch_date: null, guarantee_target_amount: null });
+    expect(row).toMatchObject({ pod: null, billing_cycle: null, cycle_fee: null, launch_date: null, guarantee_target_amount: null });
     expect(unmapped.map((u) => u.problem).join(" | ")).toMatch(/No Billing Cycle.*No Monthly Fee.*no Launch Date/);
+  });
+
+  it("stores a 90-day fee per cycle, not as the rounded monthly figure", () => {
+    const row = mapClient(boards.clients, item(boards.clients, "Georgia Interventional Pain Consultants Pod 2"), []);
+    expect(row).toMatchObject({ billing_cycle: "90", cycle_fee: 5000 });
   });
 
   it("maps legacy billing and the churned group", () => {

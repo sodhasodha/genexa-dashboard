@@ -89,8 +89,11 @@ export function mapClient(board: MondayBoard, item: MondayItem, unmapped: Unmapp
   const billing_cycle = cycleText ? (CYCLE[cycleText] ?? null) : null;
   if (cycleText && !billing_cycle) note(`Billing Cycle "${cycleText}" not recognised`);
   if (!cycleText && stage !== "churned") note("No Billing Cycle: no renewal date can be computed");
-  const monthly_fee = c.number("Monthly Fee ($)");
-  if (monthly_fee === null && stage !== "churned") note("No Monthly Fee: excluded from MRR until set");
+  // Monday holds a rounded monthly figure (1667 for a $5,000 90-day deal). The app stores
+  // the fee per cycle, so a 90-day fee is 3 months rounded to the nearest $10.
+  const mondayMonthly = c.number("Monthly Fee ($)");
+  if (mondayMonthly === null && stage !== "churned") note("No Monthly Fee: excluded from MRR until set");
+  const cycle_fee = mondayMonthly === null ? null : billing_cycle === "90" ? Math.round((mondayMonthly * 3) / 10) * 10 : mondayMonthly;
   const launch_date = c.date("Launch Date");
   if (!launch_date && stage === "live") note("Live with no Launch Date: renewals and days live show no data");
 
@@ -104,7 +107,7 @@ export function mapClient(board: MondayBoard, item: MondayItem, unmapped: Unmapp
     stage,
     pod: podFromGroup(item.group.title),
     billing_cycle,
-    monthly_fee,
+    cycle_fee,
     launch_date,
     guarantee_text,
     guarantee_target_amount: amount ? Number(amount[1].replace(/,/g, "")) : null,

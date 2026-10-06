@@ -42,6 +42,19 @@ const EXTRA_STAFF = [
   { legacy_ref: "manual:sameer", name: "Sameer", role: "tech", also_role: null, pod: null, status: "active", start_date: null },
 ];
 
+// Decisions Ryan made that Monday does not hold.
+const STAFF_OVERRIDES: Record<string, { role: string; status: string }> = {
+  sundaram: { role: "freelance", status: "active" }, // freelance, no login
+};
+// Cortana businesses Ryan confirmed where the names do not match clearly.
+const CORTANA_CONFIRMED: Record<string, string> = {
+  "dr darren - pivotal health (lake worth)": "ace397d2-aca1-4fa5-836a-17277a21fabc", // Pivotal Health Florida
+  "cleveland icp": "1cea99f9-0fee-414c-8321-14a3a48b4ff4", // Interventional Pain Consultants - Cleveland (scope stays unverified)
+  "dr russell smith knoxville": "e62c2cb3-da61-4a41-a4cb-506ead4b830e", // Interventional Pain Consultants
+};
+// Tech jobs with no Clinic on Monday whose clinic Ryan named.
+const JOB_CLIENT: { title: RegExp; client: string }[] = [{ title: /rockwall/i, client: "Vitale Health Clinic" }];
+
 const env = (name: string) => {
   const v = process.env[name];
   if (!v) throw new Error(`Missing environment variable: ${name}`);
@@ -163,6 +176,7 @@ async function main() {
   const team = teamBoard.items_page.items.map((i) => mapStaff(teamBoard, i, unmapped)).filter((x) => x !== null);
   const staffRows = [...team.map((t) => t.staff), ...EXTRA_STAFF].map((s) => ({
     ...s,
+    ...(STAFF_OVERRIDES[s.name.toLowerCase()] ?? {}),
     email: EMAILS[s.name.split(/\s+/)[0].toLowerCase()] ?? null,
   }));
   const staff = await upsertByRef("staff", staffRows);
@@ -188,7 +202,7 @@ async function main() {
     const staffId = staff.ids.get(s.legacy_ref);
     if (!staffId) continue;
     if (!s.email) {
-      unmapped.push({ board: "Team", item: s.name, problem: "no email supplied: imported without a login" });
+      if (s.role !== "freelance") unmapped.push({ board: "Team", item: s.name, problem: "no email supplied: imported without a login" });
       continue;
     }
     const authUserId = await ensureAuthUser(s.email);
@@ -215,21 +229,26 @@ async function main() {
 
   // Cortana business ids: only clear name matches are written, and never over an existing value.
   const cortanaLines: string[] = [];
+  const usedBusinessIds = new Set<string>();
   for (const row of clientRows) {
     const id = clients.ids.get(row.legacy_ref);
     if (!id) continue;
-    const { match, candidates } = matchCortanaBusiness(row.name, businesses);
+    const confirmedId = CORTANA_CONFIRMED[row.name.toLowerCase()];
+    const confirmed = confirmedId ? businesses.find((b) => b.id === confirmedId) : undefined;
+    if (confirmedId && !confirmed) throw new Error(`Confirmed Cortana business ${confirmedId} for ${row.name} is not in Cortana's list`);
+    const { match: nameMatch, candidates } = matchCortanaBusiness(row.name, businesses);
+    const match = confirmed ? { business_id: confirmed.id, business_name: confirmed.name, confidence: "confirmed by Ryan" } : nameMatch;
     if (match) {
       const { error } = await db.from("clients").update({ cortana_business_id: match.business_id }).eq("id", id).is("cortana_business_id", null);
       if (error) throw new Error(`clients cortana id: ${error.message}`);
       cortanaLines.push(`  ${row.name.padEnd(42)} -> ${match.business_name}  [${match.confidence}]`);
     } else {
-      const hint = candidates.length ? `possible: ${candidates.map((c) => c.business_name).join(" / ")}` : "no Cortana business with a similar name";
+      const hint = candidates.length ? `possible: ${candidates.map((c) => c.business_name).join(" / ")}` : "not connected";
       cortanaLines.push(`  ${row.name.padEnd(42)} -> (blank)  ${hint}`);
     }
+    if (match) usedBusinessIds.add(match.business_id);
   }
-  const usedBusinessNames = new Set(clientRows.map((r) => matchCortanaBusiness(r.name, businesses).match?.business_name));
-  const unusedBusinesses = businesses.filter((b) => !usedBusinessNames.has(b.name)).map((b) => b.name);
+  const unusedBusinesses = businesses.filter((b) => !usedBusinessIds.has(b.id)).map((b) => b.name);
 
   // Campaign scope: the two clinics whose Cortana business is known to cover more than our campaigns.
   const scopes = [
@@ -303,8 +322,9 @@ async function main() {
     const j = mapTechJob(sameerBoard, item, unmapped);
     if (!j) continue;
     const { client_text, ...row } = j;
-    const { client_id, extra } = resolveClient(sameerBoard.name, item.name, client_text);
-    if (!client_text) unmapped.push({ board: sameerBoard.name, item: item.name, problem: "no Clinic set on Monday: imported with no client" });
+    const named = JOB_CLIENT.find((j) => j.title.test(item.name));
+    const { client_id, extra } = resolveClient(sameerBoard.name, item.name, client_text ?? named?.client ?? null);
+    if (!client_text && !named) unmapped.push({ board: sameerBoard.name, item: item.name, problem: "no Clinic set on Monday: imported with no client" });
     jobRows.push({ ...row, owner_id: sameerId, client_id, notes: extra });
   }
   const jobs = await upsertByRef("tech_jobs", jobRows);
