@@ -8,6 +8,8 @@ const SMS_PAYOUT = /ray media|fanbasis/i
 const OWNER_DRAW = /aryan.*sodha/i
 // Uncategorised card spend in these Mercury categories is personal.
 const PERSONAL_MERCURY_CATS = new Set(['Retail', 'Entertainment', 'Restaurants', 'Groceries'])
+// Merchants whose spend is always personal, whatever category Mercury gives it (confirmed by Aryan 2026-10-06).
+const PERSONAL_MERCHANTS = /acorn\s*fire|amazon|temu|paypal/i
 // Card charges that Mercury mislabels (e.g. consulting bought via Whop shows as Entertainment) — always business.
 const BUSINESS_MERCHANTS = /whop/i
 
@@ -53,10 +55,11 @@ export function classifyTx(t: any): TxClass {
   if (t.kind === 'internalTransfer' || t.kind === 'treasuryTransfer') return 'transfer'
   if (t.amount > 0) {
     if (SMS_PAYOUT.test(name)) return 'smsPayout'
-    if (t.kind === 'creditCardCredit') return 'cardRefund'
+    if (t.kind === 'creditCardCredit') return PERSONAL_MERCHANTS.test(desc) ? 'personal' : 'cardRefund' // a personal refund isn't a business credit
     return 'income'
   }
   if (t.kind !== 'debitCardTransaction' && t.kind !== 'creditCardTransaction' && OWNER_DRAW.test(desc)) return 'ownerDraw'
+  if (PERSONAL_MERCHANTS.test(desc)) return 'personal'
   if (!t.categoryData?.name && PERSONAL_MERCURY_CATS.has(t.mercuryCategory) && !BUSINESS_MERCHANTS.test(desc)) return 'personal'
   return 'expense'
 }
