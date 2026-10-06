@@ -47,3 +47,4 @@ next-env.d.ts
 /skills-lock.json
 # raw Monday exports contain pay and contact details
 /fixtures/monday/raw
+/supabase/.temp
