@@ -1,0 +1,154 @@
+# Genexa OS — build plan
+
+Standalone app in `genexa-os/` (separate Vercel project, root directory `genexa-os`). The Life OS dashboard at the repo root is untouched.
+
+Stack: Next.js 16 (App Router, TypeScript, Cache Components on), Supabase (Postgres, Auth, RLS, pg_cron + pg_net), Tailwind 4, Vitest. SQL is tested against a real Postgres (PGlite, in-process) with a small Supabase shim, so views, triggers and RLS are proven before they touch the hosted database.
+
+## 1. Folder structure
+
+```
+genexa-os/
+  PLAN.md  README.md  MCP.md  .env.example
+  proxy.ts                      # session refresh + redirect to /login (Next 16 name for middleware)
+  app/
+    login/                      # magic-link form, /auth/confirm callback
+    (app)/                      # authenticated shell: sidebar + freshness
+      page.tsx                  # role-based landing redirect
+      overview/  clients/  clients/[id]/  launches/  call-centre/
+      media-buying/  tech/  tasks/  pipeline/  ideas/
+      eod/                      # one form per role, chosen from the logged-in user
+      drill/[metric]/           # rows behind any number
+    api/
+      webhooks/outcome  webhooks/onboarding  webhooks/ghl  webhooks/slack (interactive)
+      jobs/[job]                # called by pg_cron, bearer CRON_SECRET
+      mcp                       # streamable HTTP MCP, bearer MCP_BEARER_TOKEN
+  components/                   # display only: Table, Pill, Stat, Sidebar, FreshnessBar…
+  lib/
+    supabase/                   # server, browser, admin (service role) clients
+    auth/                       # current staff, role guards, landing path
+    integrations/<source>/      # client.ts (HTTP), mapper.ts (typed), sync.ts
+    exceptions/                 # rule registry + engine
+    reminders/                  # rule evaluation, quiet hours, Slack delivery
+    sla/                        # business-hours maths (mirrors the SQL functions)
+    queries/                    # typed reads of the SQL views, one file per page
+    actions/                    # server actions (all writes)
+    mcp/                        # tool definitions
+  supabase/migrations/          # the schema — authoritative SQL
+  fixtures/<source>/<endpoint>.json   # raw responses from real calls
+  seed/                         # supplied JSON
+  scripts/seed.ts  scripts/migrate.ts
+  tests/                        # sql/ (PGlite), unit/, fixtures-driven mapper tests
+```
+
+## 2. Schema
+
+The SQL itself is `supabase/migrations/*.sql`; that is the single copy. Summary of what it contains:
+
+**Conventions.** uuid PKs, `created_at` / `updated_at` on every table (trigger-maintained), timestamptz in UTC, ET for day/week/month boundaries (`app_today()`, `app_week_start()`). Enumerations are `text` + check constraints. Every view is `security_invoker`, so RLS applies through views.
+
+**Tables from the spec** (columns as specified): `staff`, `clients`, `client_locations`, `launches`, `tech_jobs`, `sla_pauses`, `ad_metrics_daily`, `ad_metrics_ad_daily`, `leads`, `appointments`, `sales`, `payments`, `finance_transactions`, `integration_sync_status`, `exceptions`, `eods`, `tasks`, `deleted_tasks`, `prospects`, `ideas`, `touches`, `agency_month`, `briefs`, `audit_log`, `reminder_rules`, `notifications`, `scoring_config`, `finance_rules`.
+
+**Deviations from the spec's column list, and why**
+
+| Spec | Built | Reason |
+|---|---|---|
+| `staff.hourly_rate, hours_week, weekly_pay, payment_method` | separate `staff_pay` table (1:1) | RLS is row-level. "Staff read everything except pay fields" needs the pay fields in their own owner-only table. |
+| `tasks.group` | `tasks.task_group` | `group` is a reserved word. |
+| `audit_log.by` | `audit_log.actor` | `by` is a reserved word. |
+| `leads.created_at` | kept as the GHL creation time; row insert time is `inserted_at` | speed-to-lead needs GHL's timestamp, not ours. |
+| `clients` | + `legacy_ref` | section 9. |
+| soft delete on 3 tables | `deleted_at` on every user-editable business table | rule 7: no hard deletes anywhere. A trigger rejects `DELETE` on every table. |
+| `integration_sync_status` | + `schedule_minutes` | staleness = older than 2× schedule, so the schedule has to be stored. |
+| — | `webhook_events(source, event_id unique)` | idempotency for inbound webhooks. |
+| — | `lead_calls(lead_id, ghl_message_id, at, direction, status, duration, staff_id)` | call attempts need rows to drill into; `leads.call_attempts` / `first_call_at` are maintained from it. |
+| — | `person_scores_snapshot`, `job_runs` | daily snapshot job output; job history. |
+
+**Functions**
+- `app_staff_id()`, `app_is_owner()`, `app_is_privileged()` — who is asking (security definer).
+- `business_minutes_between(a, b)`, `add_business_minutes(ts, n)` — 09:00–17:00 ET, Mon–Fri.
+- `tech_job_due_at(type, requested_at)` — launch +48h; fix +30 business minutes.
+- `score_colour(key, value)` — green / amber / red from `scoring_config`.
+
+**Triggers**
+- `set_updated_at` on every table.
+- `audit_row` on business tables: one `audit_log` row per changed field (insert logs one row).
+- `forbid_delete` on every table.
+- `tasks_rules`: only the owner adds to the owner's list (or source = pushpin); media buyer tasks must be ads / call_centre; automated creates refused on trigram similarity ≥ 0.6 against `deleted_tasks`; soft delete copies into `deleted_tasks`; non-owners may only change status fields on their own tasks.
+- `tech_jobs_defaults`: sets `due_at` from type + `requested_at`.
+- `leads_test_filter`: sets `is_test` on insert.
+- `launches_stage_guard`: `live_at` refused unless all six QC flags are true.
+
+**Views (derived — sync jobs never write these)**
+- `source_freshness` — per source: age, fresh / late / stale.
+- `client_performance_daily` — per client per ET day: spend (Cortana), leads / booked / confirmed (GHL, non-test), shows / closes / revenue (outcome webhook), ratios.
+- `client_monthly`, `client_mtd` — month roll-up: CPL, cost per booked, booking / confirmation / show / close rate, ROAS, rev share. `client_mtd` is the current month.
+- `renewals` — last and next renewal, amount, status.
+- `tech_job_sla`, `launch_sla` — Genexa time = elapsed − paused, overdue flag.
+- `person_scores_weekly` — long format: staff, week, card, metric, value, numerator, denominator, colour, baseline. Built as a union of per-metric views; each scorecard phase (3, 4, 6) adds its metrics.
+- `client_health` — one row per client per failing rule + rolled-up colour.
+- `agency_month_live` — section 5.1 numbers, owner only.
+
+**Definitions fixed here so every page agrees**
+- Booking rate = booked ÷ leads. Confirmation rate = confirmed ÷ booked. All by the date the event happened.
+- Show rate = showed ÷ (showed + no-show), by month of `scheduled_for`. Appointments with no outcome logged are counted separately as "outcomes pending" and never count as no-shows.
+- Close rate = closed-won (month of `closed_at`) ÷ shows in that month.
+- Renewal paid = a classified payment from 5 days before that renewal date up to 5 days before the following one. Overdue = the most recent renewal date has passed with no such payment.
+- Next renewal amount = `monthly_fee` × months in cycle (30 → 1, 90 → 3).
+
+**RLS**
+- Owner: read / write everything.
+- Staff: read everything except `staff_pay`, `finance_transactions`, `finance_rules`, `agency_month`, `agency_month_live`, `audit_log`.
+- Staff write: own `eods`; status of own `tasks`; `tech_jobs` they own, plus insert (request form); `sla_pauses` on jobs they own; `exceptions` they own (action taken, snooze, resolve); `launches` they own; `touches` they log; `notifications` acknowledgement.
+- Sync jobs, webhooks and the MCP endpoint use the service role on the server only.
+
+## 3. API routes and jobs
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `POST /api/webhooks/outcome` | `WEBHOOK_SECRET` | upsert `appointments` + `sales`, idempotent on `event_id` |
+| `POST /api/webhooks/onboarding` | `WEBHOOK_SECRET` | create `clients` (onboarding) + `launches` |
+| `POST /api/webhooks/ghl` | `WEBHOOK_SECRET` | contact created, call, appointment created / updated |
+| `POST /api/webhooks/slack` | Slack signing secret | Done / Snooze 1h buttons |
+| `POST /api/jobs/[job]` | `CRON_SECRET` | every job below |
+| `POST /api/mcp` | `MCP_BEARER_TOKEN` | section 8 tools |
+| `GET /auth/confirm` | — | magic-link callback |
+
+Jobs are scheduled in Supabase (`pg_cron` + `pg_net` → `/api/jobs/<name>`). Vercel Hobby only allows daily crons, so Vercel cron is not used.
+
+| Job | Schedule (ET) | Writes |
+|---|---|---|
+| `cortana-sync` | hourly 08–22, full refresh 02:00 | `ad_metrics_daily`, `ad_metrics_ad_daily` |
+| `ghl-poll` | every 15 min | `leads`, `lead_calls`, `appointments` |
+| `whop-sync` | hourly | `payments` |
+| `mercury-sync` | daily 06:00 | `finance_transactions` |
+| `fathom-sync` | hourly | `touches`, `clients.last_contact_us`, `prospects` |
+| `exceptions` | every 15 min | `exceptions` |
+| `outcome-chaser` | hourly | `appointments`, `tasks`, notifications |
+| `reminders` | every 5 min | `notifications` + Slack |
+| `weekly-client-report` | Mon 09:00 | emails |
+| `daily-snapshot` | 00:05 | `person_scores_snapshot`, `agency_month` on the 1st |
+
+Every job writes `integration_sync_status` (attempt, success, rows, error) and a `job_runs` row.
+
+## 4. Environment
+
+Section 2 of the brief, plus: `CRON_SECRET` (pg_cron → jobs), `APP_URL` (links in Slack messages), `CORTANA_BASE_URL`. An email sender for the weekly client report is needed in Phase 9.
+
+## 5. Phases
+
+- [ ] **1 Foundation** — project, magic-link auth, roles + RLS, schema + views, audit triggers, seed script, layout + sidebar, role landing. Done when every seed row loads, each role sees only what it should, typecheck / lint / tests pass.
+- [ ] **2 Cortana + exceptions engine** — fixtures, sync, sync status, ad + tech rules, Slack DM on open. Done when 12 clinics' spend for yesterday matches Cortana to the cent and a stale-source test proves rules don't fire.
+- [ ] **3 Tech page** — jobs, request form, SLA + pauses, tech EOD, scorecard. Done when tests cover Friday 16:50 → Monday 09:20, a pause is removed from Genexa time, and Rockwall shows overdue.
+- [ ] **4 Media Buying page** — account + ad tables over 3 windows, SOP stage, verdicts, fatigue, media EOD, scorecard.
+- [ ] **5 Overview v1** — freshness bar, bottlenecks, people cards, clients strip.
+- [ ] **6 GHL + Call Centre** — fixtures, webhooks + poll, test-lead filter, page, CSR EOD, leaderboard, live queue. Done when one real lead's speed to lead matches GHL by hand.
+- [ ] **7 Clients + Launches** — list, lanes, profile, kanban + QC gate, onboarding webhook, locations editor.
+- [ ] **8 Money + outcomes** — Whop, renewals, guarantees, outcome webhook + chaser, Mercury + finance rules, agency_month, Overview numbers.
+- [ ] **9 Tasks, Pipeline, Ideas + Slack reminders** — task rules, reminder engine (7a), buttons, quiet hours, escalation, weekly report.
+- [ ] **10 MCP endpoint** — tools, auth, rule enforcement, `MCP.md`, tests per tool.
+- [ ] **11 Hardening** — drill-down everywhere, empty / stale / error states, mobile, 50-clinic load test, README.
+
+## 6. Open questions (not blocking Phase 1 code)
+
+1. `billing_cycle = legacy`: what is the renewal interval and the "months in cycle" for money at risk? Until answered, legacy clients have no renewal date and no money at risk.
+2. Media buyer "book-wide 7d cost per booked vs previous 7d": the brief gives green for flat / down and amber for +10–25%. Up 0–10% is undefined; built as green.

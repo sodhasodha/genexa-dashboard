@@ -1,0 +1,1 @@
+{"error":{"code":"VALIDATION_ERROR","message":"Invalid query parameters","details":[{"received":"adset","code":"invalid_enum_value","options":["source","campaign","medium","ad"],"path":["groupBy"],"message":"Invalid enum value. Expected 'source' | 'campaign' | 'medium' | 'ad', received 'adset'"}]}}

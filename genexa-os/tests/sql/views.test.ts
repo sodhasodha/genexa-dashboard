@@ -1,0 +1,199 @@
+import { beforeAll, describe, expect, it } from "vitest";
+import type { PGlite } from "@electric-sql/pglite";
+import { AUTH, asUser, freshDb, seedStaff, type TestPeople } from "./db";
+
+let db: PGlite;
+let people: TestPeople;
+const one = async <T>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows[0];
+const client = async (name: string, extra = "", vals = "") =>
+  (await one<{ id: string }>(`insert into clients (name, stage ${extra}) values ('${name}', 'live' ${vals}) returning id`)).id;
+
+beforeAll(async () => {
+  db = await freshDb();
+  people = await seedStaff(db);
+});
+
+describe("client_mtd", () => {
+  it("rolls up each source and computes ratios from sums; test leads and pending outcomes never count", async () => {
+    const id = await client("Perf Clinic");
+    // Cortana: $300 + $200 this month.
+    await db.query(
+      `insert into ad_metrics_daily (client_id, date, spend, impressions, clicks) values
+         ($1, app_today(), 300, 10000, 150), ($1, date_trunc('month', app_today())::date, 200, 10000, 50)`,
+      [id],
+    );
+    // GHL: 10 real leads (4 booked, 3 confirmed) + 1 test lead that booked.
+    for (let i = 0; i < 10; i++) {
+      await db.query(
+        `insert into leads (client_id, ghl_contact_id, name, created_at, booked_at, confirmed_at)
+         values ($1, $2, $3, now(), $4, $5)`,
+        [id, `l${i}`, `Patient ${i}`, i < 4 ? new Date() : null, i < 3 ? new Date() : null],
+      );
+    }
+    await db.query(`insert into leads (client_id, ghl_contact_id, name, created_at, booked_at) values ($1, 'lt', 'Test Person', now(), now())`, [id]);
+    // Outcomes: 2 showed, 1 no-show, 1 past appointment with nothing logged. One sale of $8,000.
+    const leadIds = (await db.query<{ id: string }>(`select id from leads where client_id = $1 and not is_test order by ghl_contact_id limit 4`, [id])).rows;
+    const att = ["showed", "showed", "no_show", "scheduled"];
+    const appts: string[] = [];
+    for (const [i, l] of leadIds.entries()) {
+      appts.push(
+        (
+          await one<{ id: string }>(
+            `insert into appointments (lead_id, client_id, scheduled_for, attendance) values ($1, $2, now() - interval '1 minute', $3) returning id`,
+            [l.id, id, att[i]],
+          )
+        ).id,
+      );
+    }
+    await db.query(`insert into sales (appointment_id, client_id, close_status, amount, closed_at) values ($1, $2, 'closed_won', 8000, now())`, [appts[0], id]);
+    await db.query(`insert into sales (appointment_id, client_id, close_status, amount) values ($1, $2, 'follow_up', null)`, [appts[1], id]);
+
+    const m = await one<Record<string, string>>(`select * from client_mtd where client_id = $1`, [id]);
+    expect(Number(m.spend)).toBe(500);
+    expect(Number(m.leads)).toBe(10);
+    expect(Number(m.booked)).toBe(4);
+    expect(Number(m.confirmed)).toBe(3);
+    expect(Number(m.shows)).toBe(2);
+    expect(Number(m.no_shows)).toBe(1);
+    expect(Number(m.outcomes_pending)).toBe(1);
+    expect(Number(m.closes)).toBe(1);
+    expect(Number(m.revenue)).toBe(8000);
+    expect(Number(m.cpl)).toBe(50);
+    expect(Number(m.cost_per_booked)).toBe(125);
+    expect(Number(m.booking_rate)).toBeCloseTo(0.4);
+    expect(Number(m.confirmation_rate)).toBeCloseTo(0.75);
+    expect(Number(m.show_rate)).toBeCloseTo(2 / 3);
+    expect(Number(m.close_rate)).toBeCloseTo(0.5);
+    expect(Number(m.ctr)).toBeCloseTo(0.01);
+    expect(Number(m.roas)).toBe(16);
+    expect(Number(m.rev_share)).toBe(400);
+  });
+
+  it("shows null, not zero, where a source has no rows", async () => {
+    const id = await client("Leads Only Clinic");
+    await db.query(`insert into leads (client_id, ghl_contact_id, name, created_at) values ($1, 'a', 'Pat A', now())`, [id]);
+    const m = await one<Record<string, string | null>>(`select * from client_mtd where client_id = $1`, [id]);
+    expect(Number(m.leads)).toBe(1);
+    expect(m.spend).toBeNull();
+    expect(m.cpl).toBeNull();
+    expect(m.revenue).toBeNull();
+    expect(m.roas).toBeNull();
+    expect(m.show_rate).toBeNull();
+  });
+});
+
+describe("renewals", () => {
+  const status = async (id: string) =>
+    one<{ status: string | null; renewal_amount: string | null; days_until: number | null; renewal_date: string | null }>(
+      `select status, renewal_amount, days_until, renewal_date::text from renewals where client_id = $1`,
+      [id],
+    );
+
+  it("not started without a launch date", async () => {
+    const id = await client("R0", ", billing_cycle, monthly_fee", ", '30', 3000");
+    expect((await status(id)).status).toBe("not_started");
+  });
+
+  it("upcoming, then due within 7 days", async () => {
+    const a = await client("R1", ", billing_cycle, monthly_fee, launch_date", ", '30', 3000, app_today() - 10");
+    const sa = await status(a);
+    expect(sa.status).toBe("upcoming");
+    expect(sa.days_until).toBe(20);
+    expect(Number(sa.renewal_amount)).toBe(3000);
+    const b = await client("R2", ", billing_cycle, monthly_fee, launch_date", ", '30', 3000, app_today() - 25");
+    const sb = await status(b);
+    expect(sb.status).toBe("due_7d");
+    expect(sb.days_until).toBe(5);
+  });
+
+  it("overdue when the last renewal date passed unpaid; amount = monthly fee x months in cycle", async () => {
+    const id = await client("R3", ", billing_cycle, monthly_fee, launch_date", ", '90', 2000, app_today() - 100");
+    const s = await status(id);
+    expect(s.status).toBe("overdue");
+    expect(s.days_until).toBe(-10);
+    expect(Number(s.renewal_amount)).toBe(6000);
+  });
+
+  it("a classified payment near the renewal date clears it; an unclassified one does not", async () => {
+    const id = await client("R4", ", billing_cycle, monthly_fee, launch_date", ", '30', 3000, app_today() - 40");
+    expect((await status(id)).status).toBe("overdue");
+    await db.query(`insert into payments (client_id, whop_payment_id, amount, paid_at, product_title) values ($1, 'r4a', 3000, now() - interval '9 days', null)`, [id]);
+    expect((await status(id)).status).toBe("overdue");
+    await db.query(`insert into payments (client_id, whop_payment_id, amount, paid_at, product_title) values ($1, 'r4b', 3000, now() - interval '9 days', 'Growth Plan')`, [id]);
+    const s = await status(id);
+    expect(s.status).toBe("upcoming");
+    expect(s.days_until).toBe(20);
+  });
+
+  it("paid early (within 5 days before the date) shows paid", async () => {
+    const id = await client("R5", ", billing_cycle, monthly_fee, launch_date", ", '30', 3000, app_today() - 27");
+    await db.query(`insert into payments (client_id, whop_payment_id, amount, paid_at, product_title) values ($1, 'r5', 3000, now() - interval '1 day', 'Growth Plan')`, [id]);
+    expect((await status(id)).status).toBe("paid");
+  });
+
+  it("legacy billing has no renewal date or amount, and churned clients are left out", async () => {
+    const id = await client("R6", ", billing_cycle, monthly_fee, launch_date", ", 'legacy', 1500, app_today() - 400");
+    const s = await status(id);
+    expect(s.status).toBeNull();
+    expect(s.renewal_date).toBeNull();
+    expect(s.renewal_amount).toBeNull();
+    await db.query(`update clients set stage = 'churned' where id = $1`, [id]);
+    expect(await status(id)).toBeUndefined();
+  });
+});
+
+describe("source_freshness", () => {
+  it("is stale when the last success is older than 2x the schedule", async () => {
+    await db.query(`update integration_sync_status set last_success_at = now() - interval '30 minutes' where source = 'cortana'`);
+    await db.query(`update integration_sync_status set last_success_at = now() - interval '90 minutes' where source = 'whop'`);
+    await db.query(`update integration_sync_status set last_success_at = now() - interval '121 minutes' where source = 'fathom'`);
+    const rows = await db.query<{ source: string; freshness: string; is_stale: boolean }>(`select source, freshness, is_stale from source_freshness`);
+    const by = Object.fromEntries(rows.rows.map((r) => [r.source, r]));
+    expect(by.cortana.freshness).toBe("fresh");
+    expect(by.whop.freshness).toBe("late");
+    expect(by.whop.is_stale).toBe(false);
+    expect(by.fathom.freshness).toBe("stale");
+    expect(by.fathom.is_stale).toBe(true);
+    expect(by.ghl.freshness).toBe("never");
+    expect(by.ghl.is_stale).toBe(true);
+  });
+});
+
+describe("person_scores_weekly: EODs", () => {
+  it("scores on EODs missed so far, per the thresholds in scoring_config", async () => {
+    // Last full week: tech filed 4 of 5 -> amber; media buyer 5 of 5 -> green; CSR 3 of 7 -> red.
+    const lastWeek = `app_week_start(app_today()) - 7`;
+    const file = async (staff: string, offsets: number[]) => {
+      for (const o of offsets) {
+        await db.query(`insert into eods (staff_id, date) values ($1, ${lastWeek} + $2::int)`, [staff, o]);
+      }
+    };
+    await file(people.sameer, [0, 1, 2, 3]);
+    await file(people.aditya, [0, 1, 2, 3, 4]);
+    await file(people.amanda, [0, 1, 2]);
+    const rows = await db.query<{ staff_id: string; value: string; denominator: string; colour: string }>(
+      `select staff_id, value, denominator, colour from person_scores_weekly where metric = 'eods' and week_start = ${lastWeek}`,
+    );
+    const by = Object.fromEntries(rows.rows.map((r) => [r.staff_id, r]));
+    expect([Number(by[people.sameer].value), Number(by[people.sameer].denominator), by[people.sameer].colour]).toEqual([4, 5, "amber"]);
+    expect([Number(by[people.aditya].value), Number(by[people.aditya].denominator), by[people.aditya].colour]).toEqual([5, 5, "green"]);
+    expect([Number(by[people.amanda].value), Number(by[people.amanda].denominator), by[people.amanda].colour]).toEqual([3, 7, "red"]);
+    expect(by[people.ryan]).toBeUndefined();
+  });
+
+  it("changing a threshold in scoring_config changes the colour", async () => {
+    await db.query(`update scoring_config set amber = 4 where key = 'csr_eods_missed'`);
+    const r = await one<{ colour: string }>(
+      `select colour from person_scores_weekly where metric = 'eods' and staff_id = $1 and week_start = app_week_start(app_today()) - 7`,
+      [people.amanda],
+    );
+    expect(r.colour).toBe("amber");
+  });
+
+  it("is readable by staff through RLS", async () => {
+    await asUser(db, AUTH.amanda, async () => {
+      const r = await one<{ n: number }>(`select count(*)::int as n from person_scores_weekly`);
+      expect(r.n).toBeGreaterThan(0);
+    });
+  });
+});
