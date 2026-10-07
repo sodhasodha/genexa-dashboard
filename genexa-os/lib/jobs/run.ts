@@ -5,6 +5,8 @@ import { createCortanaClient } from "@/lib/integrations/cortana/client";
 import { syncCortana, syncCortanaEvents } from "@/lib/integrations/cortana/sync";
 import { createWhopClient } from "@/lib/integrations/whop/client";
 import { syncGhlAppointments, type GhlKeys } from "@/lib/integrations/ghl/sync";
+import { syncMercury } from "@/lib/integrations/mercury/sync";
+import { JOBS_PAYROLL } from "@/lib/jobs/payroll";
 import { syncWhop } from "@/lib/integrations/whop/sync";
 import { addDays, etToday } from "@/lib/time";
 import { runExceptionsEngine } from "@/lib/exceptions/engine";
@@ -42,6 +44,12 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
     const r = await syncGhlAppointments({ db: createAdminClient(), keys: JSON.parse(requireEnv("GHL_API_KEYS_JSON")) as GhlKeys });
     return { ok: r.ok, summary: r };
   },
+  // Bank transactions (through the static-IP proxy), then the finance rules.
+  "mercury-sync": async () => {
+    const r = await syncMercury({ db: createAdminClient(), apiKey: requireEnv("MERCURY_API_KEY"), proxyUrl: process.env.FIXIE_URL, since: "2026-08-01" });
+    return { ok: r.ok, summary: r };
+  },
+  ...JOBS_PAYROLL,
   exceptions: async () => {
     const r = await runExceptionsEngine(createAdminClient());
     return { ok: true, summary: r };

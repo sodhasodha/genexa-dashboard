@@ -262,3 +262,23 @@ describe("appointments: outcomes copied from Cortana, consults tomorrow", () => 
     expect([Number(r.consults), Number(r.confirmed)]).toEqual([2, 1]);
   });
 });
+
+describe("finance rules", () => {
+  it("categorises by the first matching rule, respects direction, and never overrides a person", async () => {
+    await db.query(`insert into finance_transactions (mercury_id, posted_at, amount, counterparty) values
+      ('r1', now(), -500, 'Facebook'), ('r2', now(), 3000, 'Whop'), ('r3', now(), -2000, 'Whop'),
+      ('r4', now(), -900, 'Wise'), ('r5', now(), -77, 'Mystery Vendor LLC'), ('r6', now(), -40, 'Amazon'), ('r7', now(), -1000, 'Mercury Credit')`);
+    await db.query(`update finance_transactions set category = 'software', included = true, categorised_by = 'manual' where mercury_id = 'r6'`);
+    await db.query(`select apply_finance_rules()`);
+    const rows = await db.query<{ mercury_id: string; category: string; included: boolean }>(`select mercury_id, category, included from finance_transactions where mercury_id like 'r_' order by mercury_id`);
+    expect(rows.rows.map((r) => `${r.mercury_id}:${r.category}:${r.included}`)).toEqual([
+      "r1:ads:true", "r2:revenue:true", "r3:unclassified:true", // money OUT to Whop is not a payout
+      "r4:payroll:true", "r5:unclassified:true", "r6:software:true", // a person's choice stands
+      "r7:excluded:false",
+    ]);
+    // A vendor rule added from the review queue beats the defaults and applies to the rest.
+    await db.query(`insert into finance_rules (priority, match_field, pattern, category, included) values (5, 'counterparty', 'Mystery Vendor LLC', 'software', true)`);
+    await db.query(`select apply_finance_rules()`);
+    expect((await one<{ category: string }>(`select category from finance_transactions where mercury_id = 'r5'`)).category).toBe("software");
+  });
+});

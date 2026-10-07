@@ -1,0 +1,70 @@
+{
+ "transactions": [
+  {
+   "id": "2ffc2448-8d4b-11f1-8102-6f3c93708a59",
+   "amount": 1000.0,
+   "status": "sent",
+   "kind": "creditCardCredit",
+   "postedAt": "2026-08-01T01:49:09.23132Z",
+   "createdAt": "2026-08-01T01:49:09.213737Z",
+   "counterpartyName": "Whop",
+   "bankDescription": "WHOP*CAMERONCONSUL",
+   "mercuryCategory": "Entertainment"
+  },
+  {
+   "id": "f0a68c92-8ec2-11f1-99dc-d96d2b7f881d",
+   "amount": -231.0,
+   "status": "sent",
+   "kind": "debitCardTransaction",
+   "postedAt": "2026-08-03T06:31:11.53486Z",
+   "createdAt": "2026-08-02T22:38:53.725016Z",
+   "counterpartyName": "Wise",
+   "bankDescription": "Wise",
+   "mercuryCategory": "Fees"
+  },
+  {
+   "id": "d6843aa2-9a44-11f1-82e4-410cc7aa2a95",
+   "amount": -206.0,
+   "status": "sent",
+   "kind": "creditCardTransaction",
+   "postedAt": "2026-08-18T09:44:12.638525Z",
+   "createdAt": "2026-08-17T14:06:27.249386Z",
+   "counterpartyName": "Facebook",
+   "bankDescription": "FACEBK *CUPUVZ53D2",
+   "mercuryCategory": "Advertising"
+  },
+  {
+   "id": "6f725980-8d4b-11f1-81b5-c7e9a5c55f27",
+   "amount": -8769.96,
+   "status": "sent",
+   "kind": "other",
+   "postedAt": "2026-08-01T01:50:56.21506Z",
+   "createdAt": "2026-08-01T01:50:55.624877Z",
+   "counterpartyName": "Mercury Credit",
+   "bankDescription": "IO AUTOPAY",
+   "mercuryCategory": null
+  },
+  {
+   "id": "5518eff2-8f78-11f1-9f25-ff4149e2d94d",
+   "amount": -100.0,
+   "status": "sent",
+   "kind": "creditCardTransaction",
+   "postedAt": "2026-08-04T03:57:11.708176Z",
+   "createdAt": "2026-08-03T20:17:21.176702Z",
+   "counterpartyName": "HighLevel",
+   "bankDescription": "HIGHLEVEL INC.",
+   "mercuryCategory": "Software"
+  },
+  {
+   "id": "f7318832-9a7a-11f1-98a5-490d88144f55",
+   "amount": -242.0,
+   "status": "failed",
+   "kind": "debitCardTransaction",
+   "postedAt": null,
+   "createdAt": "2026-08-17T20:33:54.873839Z",
+   "counterpartyName": "Redacted Payee",
+   "bankDescription": "redacted",
+   "mercuryCategory": null
+  }
+ ]
+}

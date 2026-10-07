@@ -74,6 +74,8 @@ const EXPENSE: Record<string, { category: string; included: boolean }> = {
   coaching: { category: "coaching", included: false },
   personal: { category: "personal", included: false },
   other: { category: "other", included: true },
+  revenue: { category: "revenue", included: true },
+  not_business: { category: "excluded", included: false },
 };
 
 /**
@@ -88,13 +90,14 @@ export async function categoriseExpense(formData: FormData) {
   if (!choice) return;
   const supabase = await createClient();
   const { data: tx } = await supabase.from("finance_transactions").select("counterparty").eq("id", id).single();
-  await supabase.from("finance_transactions").update(choice).eq("id", id);
+  await supabase.from("finance_transactions").update({ ...choice, categorised_by: "manual" }).eq("id", id);
   const vendor = tx?.counterparty?.trim();
   if (vendor) {
     const { data: rule } = await supabase.from("finance_rules").select("id").eq("match_field", "counterparty").eq("pattern", vendor).maybeSingle();
     if (rule) await supabase.from("finance_rules").update({ ...choice, enabled: true }).eq("id", rule.id);
-    else await supabase.from("finance_rules").insert({ match_field: "counterparty", pattern: vendor, ...choice, note: "Set from the Overview" });
-    await supabase.from("finance_transactions").update(choice).eq("counterparty", vendor).eq("category", "unclassified");
+    else await supabase.from("finance_rules").insert({ match_field: "counterparty", pattern: vendor, priority: 5, ...choice, note: "Set from the Overview" });
+    // The new rule now covers the vendor's other uncategorised transactions, and future ones.
+    await supabase.rpc("apply_finance_rules");
   }
   done();
 }

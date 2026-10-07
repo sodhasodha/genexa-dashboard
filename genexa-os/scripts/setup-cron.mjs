@@ -23,6 +23,8 @@ const SCHEDULES = [
   ["genexa-cortana-events", "35 * * * *", "cortana-events", 290000], // funnel + outcomes, hourly, offset from the ad sync
   ["genexa-whop-sync", "20 * * * *", "whop-sync", 120000],
   ["genexa-ghl-appointments", "50 * * * *", "ghl-appointments", 290000], // consult times only; runs after the Cortana events sync
+  ["genexa-mercury-sync", "0 10 * * *", "mercury-sync", 120000], // daily 06:00 ET
+  ["genexa-pay-run", "0 17 * * 0", "pay-run", 120000], // Sunday 18:00 UK in summer time (17:00 UTC); 17:00 UK in winter
   ["genexa-exceptions", "*/15 * * * *", "exceptions", 60000],
 ];
 

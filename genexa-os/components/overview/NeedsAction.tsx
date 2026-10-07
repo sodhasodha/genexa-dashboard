@@ -55,6 +55,8 @@ function FixButtons({ item, clients, isOwner }: { item: ReviewItem; clients: { i
         {["Labor", "Ads", "Software", "Coaching", "Personal", "Other"].map((l) => (
           <button key={l} name="category" value={l.toLowerCase()} className={btn}>{l}</button>
         ))}
+        <button name="category" value="revenue" className={btn}>Revenue</button>
+        <button name="category" value="not_business" className={btn}>Not Genexa</button>
       </form>
     );
   }
