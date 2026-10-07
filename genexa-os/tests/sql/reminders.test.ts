@@ -72,9 +72,9 @@ describe("seeded rules", () => {
       expect(by[key]?.enabled, key).toBe(true);
     }
     expect(by.unconfirmed_tomorrow).toMatchObject({ enabled: false });
-    expect(by.unconfirmed_tomorrow.timing).toContain("enable once GHL appointments are syncing");
+    expect(by.unconfirmed_tomorrow.timing).toContain("Retired");
     expect(by.outcome_overdue.enabled).toBe(false);
-    expect(by.outcome_overdue.timing).toContain("enable once GHL appointments are syncing");
+    expect(by.outcome_overdue.timing).toContain("Retired");
     expect(by.lead_not_called).toMatchObject({ enabled: false, timing: "waiting for Hot Prospector" });
   });
 });
@@ -663,30 +663,13 @@ describe("patient reminders (seeded off)", () => {
     expect((await notes(`rule_key in ('unconfirmed_tomorrow', 'outcome_overdue', 'lead_not_called')`)).rows).toEqual([]);
   });
 
-  it("once enabled: first name + clinic + link only, never a surname, phone or email", async () => {
-    await enable("unconfirmed_tomorrow");
-    await enable("outcome_overdue");
-    await run(await at(0, "14:30")); // before 15:00 ET: only the outcome chasers
-    expect(to("amanda").filter((m) => m.text.startsWith("Unconfirmed"))).toEqual([]);
+  it("the CSR outcome and unconfirmed reminders are retired: they cannot be enabled, so nothing is ever sent", async () => {
+    await expect(enable("unconfirmed_tomorrow")).rejects.toThrow(/reminder_rules_retired/);
+    await expect(enable("outcome_overdue")).rejects.toThrow(/reminder_rules_retired/);
     await run(await at(0, "15:30"));
     await run(await at(0, "15:35"));
-
-    const unconfirmed = to("amanda").filter((m) => m.text.startsWith("Unconfirmed for tomorrow"));
-    expect(unconfirmed.length).toBe(1);
-    expect(unconfirmed[0].text).toContain("1 consult not confirmed");
-    expect(unconfirmed[0].text).toContain("Pivot Clinic (1)");
-    expect(unconfirmed[0].text).toContain("Jane");
-
-    // Clients are in a separate Slack workspace: nothing is ever queued for a clinic's channel.
+    expect(to("amanda")).toEqual([]);
     expect(sent.filter((m) => m.target === "C_PIVOT")).toEqual([]);
-    const csr = to("amanda").filter((m) => m.text.startsWith("Outcome not logged"));
-    expect(csr.length).toBe(1);
-    expect(to("marjorie")).toEqual([]); // other pod
-
-    expect(sent.length).toBeGreaterThanOrEqual(2);
-    const everything = JSON.stringify(sent) + JSON.stringify((await db.query(`select payload from notifications`)).rows);
-    for (const secret of ["Smithson", "Doe", "Khalidi", "mail.invalid", "jane.smithson", "omar.k"]) {
-      expect(everything, secret).not.toContain(secret);
-    }
+    expect((await notes(`rule_key in ('unconfirmed_tomorrow', 'outcome_overdue')`)).rows).toEqual([]);
   });
 });

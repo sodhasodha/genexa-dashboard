@@ -238,7 +238,7 @@ export function NeedsAction({
       ) : (
         <div className="border-t border-line">
           <div className="flex flex-wrap gap-1 px-3 py-2">
-            {REVIEW_KINDS.map((k) => (
+            {REVIEW_KINDS.filter((k) => isOwner || k.kind !== "unlogged_outcome").map((k) => (
               <Link key={k.kind} href={href("review", k.kind)} className={tab(queue === k.kind)}>
                 {k.label} <span className={counts[k.kind] > 0 ? "text-warn" : "text-muted"}>{counts[k.kind]}</span>
               </Link>

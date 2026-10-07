@@ -119,7 +119,31 @@ export async function getDrill(metric: string, period: Period): Promise<DrillTab
         rows: (data ?? []).map((r) => [when(r.posted_at), r.counterparty, r.category, fmt(r.amount, "money"), r.included ? "yes" : "no"]),
       };
     }
-    case "mrr":
+    case "mrr": {
+      const [{ data, error }, { data: prefix }, { data: names }] = await Promise.all([
+        db.from("whop_memberships").select("client_id, product_title, status, valid, cancel_at_period_end, renewal_price, billing_period_days, renewal_period_end").gt("billing_period_days", 0).not("renewal_price", "is", null),
+        db.from("app_settings").select("value").eq("key", "whop_mrr_product_prefix").maybeSingle(),
+        db.from("clients").select("id, name"),
+      ]);
+      if (error) throw new Error(error.message);
+      const name = new Map((names ?? []).map((c) => [c.id, c.name]));
+      const now = new Date().toISOString();
+      const want = String(prefix?.value ?? "").toLowerCase();
+      const counted = (data ?? [])
+        .filter((m) => String(m.product_title ?? "").toLowerCase().startsWith(want))
+        .filter((m) => m.valid || (m.renewal_period_end !== null && m.renewal_period_end > now))
+        .map((m) => ({ ...m, monthly: (Number(m.renewal_price) / Number(m.billing_period_days)) * 30 }))
+        .sort((a, b) => b.monthly - a.monthly);
+      return {
+        title: "MRR · Whop recurring plans",
+        note: "Every renewing Whop plan still inside a paid period, as a 30-day figure. A cancelled plan counts until its paid period ends.",
+        columns: ["Clinic", "Plan", "Price", "Every", "Monthly", "Status", "Paid until"],
+        rows: counted.map((m) => [
+          m.client_id ? name.get(m.client_id) ?? null : "Not matched to a client yet", m.product_title, fmt(Number(m.renewal_price), "money"), `${m.billing_period_days} days`,
+          fmt(m.monthly, "money"), m.valid ? (m.cancel_at_period_end ? "cancelling" : "active") : "cancelled, still paid", m.renewal_period_end ? when(m.renewal_period_end) : null,
+        ]),
+      };
+    }
     case "clients": {
       const [{ data, error }, { data: clients }] = await Promise.all([
         db.from("client_fees").select("client_id, name, stage, billing_cycle, cycle_fee, record_monthly, whop_monthly, whop_plans, monthly_fee, source").order("monthly_fee", { ascending: false, nullsFirst: false }),

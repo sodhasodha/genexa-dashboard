@@ -80,8 +80,6 @@ export async function syncGhlAppointments(opts: { db: SupabaseClient; keys: GhlK
         log(`FAIL ${client.name}: ${(err as Error).message}`);
       }
     }
-    const carried = await db.rpc("appointments_carry_nudges");
-    if (carried.error) throw new Error(`appointments_carry_nudges: ${carried.error.message}`);
     const applied = await db.rpc("appointments_apply_outcomes");
     if (applied.error) throw new Error(`appointments_apply_outcomes: ${applied.error.message}`);
     result.outcomes_applied = Number(applied.data ?? 0);

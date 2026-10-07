@@ -92,11 +92,10 @@ export async function getOverview(period: Period) {
   const money: Tile[] = [
     tile("cash_collected", "Cash collected", "money", ["whop"], c.cash_collected, p.cash_collected, "good"),
     {
-      ...tile("mrr", "MRR", "money", [], mrr, null, "good"),
-      note: `${fromWhop} of ${(fees.data ?? []).length} clients priced from Whop`,
-      sub: recurringNow !== null && recurringThen !== null
-        ? `Whop recurring ${usd(recurringNow)} · ${usd(recurringThen)} at end of last month`
-        : `Target ${usd(cfg.get("mrr_target") ?? 0)}`,
+      // MRR is Whop's recurring figure: every renewing plan still inside a paid period.
+      ...tile("mrr", "MRR", "money", ["whop"], recurringNow, recurringThen, "good"),
+      note: `From Whop. ${fromWhop} of ${(fees.data ?? []).length} clients matched to a plan`,
+      sub: recurringThen !== null ? `${usd(recurringThen)} at end of last month` : `Target ${usd(cfg.get("mrr_target") ?? 0)}`,
     },
     tile("clinic_revenue", "Clinic revenue generated", "money", ["cortana"], c.clinic_revenue, ev(p.clinic_revenue), "good"),
     tile("rev_share", "Rev share owed", "money", ["cortana"],
@@ -136,7 +135,7 @@ export async function getOverview(period: Period) {
   if (!teamCost.error && teamCost.data !== null) profit[0] = { ...profit[0], sub: `Team pay is ${Number(teamCost.data).toFixed(1)}% of cash collected` };
   money[2] = noEvents(money[2]);
   money[3] = noEvents(money[3]);
-  return { money, profit, delivery, mrr, mrrTarget: cfg.get("mrr_target") ?? null };
+  return { money, profit, delivery, mrr: recurringNow ?? mrr, mrrTarget: cfg.get("mrr_target") ?? null };
 }
 
 export type Bottleneck = {
@@ -265,7 +264,8 @@ async function getTriageItems(supabase: Awaited<ReturnType<typeof createClient>>
 
 export async function getReview(): Promise<{ counts: Record<ReviewKind, number>; items: ReviewItem[]; total: number }> {
   const supabase = await createClient();
-  const [{ data, error }, triage, calls] = await Promise.all([
+  const [{ data: owner }, { data, error }, triage, calls] = await Promise.all([
+    supabase.rpc("app_is_owner"),
     supabase
       .from("data_review_open")
       .select("kind, record_table, record_id, client_id, title, detail, occurred_at, item_key")
@@ -275,7 +275,9 @@ export async function getReview(): Promise<{ counts: Record<ReviewKind, number>;
     getUnmatchedCalls(supabase),
   ]);
   if (error) throw new Error(`data_review_open: ${error.message}`);
-  const items = [...triage, ...((data ?? []) as ReviewItem[]), ...calls];
+  // Unlogged outcomes are the owner's queue only: nobody on the team chases them.
+  const open = ((data ?? []) as ReviewItem[]).filter((i) => owner === true || i.kind !== "unlogged_outcome");
+  const items = [...triage, ...open, ...calls];
   const counts = Object.fromEntries(REVIEW_KINDS.map((k) => [k.kind, items.filter((i) => i.kind === k.kind).length])) as Record<ReviewKind, number>;
   return { counts, items, total: items.length };
 }

@@ -15,7 +15,7 @@ export default async function DataReviewPage({ searchParams }: PageProps<"/data-
         <p className="text-xs text-muted">Records that need a person, so the numbers stay clean. {review.total} open.</p>
       </div>
       <div className="flex flex-wrap gap-1">
-        {REVIEW_KINDS.map((k) => (
+        {REVIEW_KINDS.filter((k) => me.role === "owner" || k.kind !== "unlogged_outcome").map((k) => (
           <Link key={k.kind} href={`/data-review?queue=${k.kind}`} className={`rounded-md px-3 py-1.5 text-xs ${queue === k.kind ? "bg-raised font-medium text-ink" : "text-muted hover:text-ink"}`}>
             {k.label} <span className={review.counts[k.kind] > 0 ? "text-warn" : "text-muted"}>{review.counts[k.kind]}</span>
           </Link>
