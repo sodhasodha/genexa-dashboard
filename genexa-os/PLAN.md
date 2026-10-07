@@ -142,15 +142,15 @@ Section 2 of the brief, plus: `CRON_SECRET` (pg_cron → jobs), `APP_URL` (links
 ## 5. Phases
 
 - [x] **1 Foundation** — project, magic-link auth, roles + RLS, schema + views, audit triggers, Monday import, layout + sidebar, role landing. Done when every seed row loads, each role sees only what it should, typecheck / lint / tests pass.
-- [ ] **1b Team page** — staff list with each person's shift (start, end, timezone, working days) entered by the owner, and a coverage view: who is on, hour by hour in ET, with gaps flagged. Built before any reminder is sent, because every reminder is held to the recipient's shift.
-- [ ] **2 Cortana + exceptions engine** — fixtures, sync, sync status, ad + tech rules, Slack DM on open. Done when 12 clinics' spend for yesterday matches Cortana to the cent and a stale-source test proves rules don't fire.
-- [ ] **3 Tech page** — jobs, request form, SLA + pauses, tech EOD, scorecard. Done when tests cover Friday 16:50 → Monday 09:20, a pause is removed from Genexa time, and Rockwall shows overdue.
-- [ ] **4 Media Buying page** — account + ad tables over 3 windows, SOP stage, verdicts, fatigue, media EOD, scorecard.
-- [ ] **5 Overview v1** — freshness bar, bottlenecks, people cards, clients strip.
-- [ ] **6 GHL + Call Centre** — fixtures, webhooks + poll, test-lead filter, page, CSR EOD, leaderboard, live queue. Done when one real lead's speed to lead matches GHL by hand.
-- [ ] **7 Clients + Launches** — list, lanes, profile, kanban + QC gate, onboarding webhook, locations editor.
-- [ ] **8 Money + outcomes** — Whop, renewals, guarantees, outcome webhook + chaser, Mercury + finance rules, agency_month, Overview numbers.
-- [ ] **9 Tasks, Pipeline, Ideas + Slack reminders** — task rules, reminder engine (7a), buttons, quiet hours, escalation, weekly report.
+- [x] **1b Team page** — staff list with each person's shift (start, end, timezone, working days) entered by the owner, and a coverage view: who is on, hour by hour in ET, with gaps flagged. Built before any reminder is sent, because every reminder is held to the recipient's shift.
+- [x] **2 Cortana + exceptions engine** — fixtures, sync, sync status, ad + tech rules, Slack DM on open. Done when 12 clinics' spend for yesterday matches Cortana to the cent and a stale-source test proves rules don't fire.
+- [x] **3 Tech page** — jobs, request form, SLA + pauses, tech EOD, scorecard. Done when tests cover Friday 16:50 → Monday 09:20, a pause is removed from Genexa time, and Rockwall shows overdue.
+- [x] **4 Media Buying page** — account + ad tables over 3 windows, SOP stage, verdicts, fatigue, media EOD, scorecard.
+- [x] **5 Overview v1** — freshness bar, bottlenecks, people cards, clients strip.
+- [ ] **6 GHL + Call Centre** — blocked on a source for calls. Checked 7 Oct 2026: GHL conversations for Pivotal, Beyond and Multivita hold SMS, email and activity entries but no call records, and Cortana's calls endpoint is empty. GHL does hold appointments (consult time, status, and the user who moved a booking to the Confirmed calendar). — fixtures, webhooks + poll, test-lead filter, page, CSR EOD, leaderboard, live queue. Done when one real lead's speed to lead matches GHL by hand.
+- [x] **7 Clients + Launches** (onboarding webhook not built) — list, lanes, profile, kanban + QC gate, onboarding webhook, locations editor.
+- [ ] **8 Money + outcomes** — done: Whop direct sync, renewals from Whop, fees and MRR from Whop, Overview numbers. Not done: Mercury (no key), agency_month freeze, outcome chaser (needs appointment times). — Whop, renewals, guarantees, outcome webhook + chaser, Mercury + finance rules, agency_month, Overview numbers.
+- [ ] **9 Tasks, Pipeline, Ideas + Slack reminders** — done: Tasks, Pipeline, Ideas pages, EOD forms, exception DMs held to shift. Not done: the reminder engine (section 7a), Slack Done / Snooze buttons, weekly client report. — task rules, reminder engine (7a), buttons, quiet hours, escalation, weekly report.
 - [ ] **10 MCP endpoint** — tools, auth, rule enforcement, `MCP.md`, tests per tool.
 - [ ] **11 Hardening** — drill-down everywhere, empty / stale / error states, mobile, 50-clinic load test, README.
 
