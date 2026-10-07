@@ -53,8 +53,10 @@ export async function addProspect(formData: FormData) {
   const parsed = ProspectFields.safeParse(fields(formData));
   if (!parsed.success) back("error=invalid");
   const supabase = await createClient();
-  const { error } = await supabase.from("prospects").insert(parsed.data);
-  if (error) back("error=save");
+  const { contact, ...prospect } = parsed.data;
+  const { data: created, error } = await supabase.from("prospects").insert(prospect).select("id").single();
+  if (error || !created) back("error=save");
+  if (contact) await supabase.from("prospect_contacts").insert({ prospect_id: created.id, contact });
   back("saved=added");
 }
 
@@ -65,8 +67,11 @@ export async function editProspect(formData: FormData) {
   const parsed = ProspectFields.safeParse(fields(formData));
   if (!id.success || !parsed.success) back("error=invalid");
   const supabase = await createClient();
-  const { data, error } = await supabase.from("prospects").update(parsed.data).eq("id", id.data).is("deleted_at", null).select("id");
+  const { contact, ...prospect } = parsed.data;
+  const { data, error } = await supabase.from("prospects").update(prospect).eq("id", id.data).is("deleted_at", null).select("id");
   if (error || !data || data.length === 0) back("error=save");
+  const { error: contactError } = await supabase.from("prospect_contacts").upsert({ prospect_id: id.data, contact }, { onConflict: "prospect_id" });
+  if (contactError) back("error=save");
   back("saved=edited");
 }
 

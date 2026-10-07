@@ -22,6 +22,7 @@ const SCHEDULES = [
   ["genexa-cortana-full", "30 6 * * *", "cortana-full", 290000], // 02:30 ET (01:30 in winter): re-read the last 4 days
   ["genexa-cortana-events", "35 * * * *", "cortana-events", 290000], // funnel + outcomes, hourly, offset from the ad sync
   ["genexa-whop-sync", "20 * * * *", "whop-sync", 120000],
+  ["genexa-ghl-appointments", "50 * * * *", "ghl-appointments", 290000], // consult times only; runs after the Cortana events sync
   ["genexa-exceptions", "*/15 * * * *", "exceptions", 60000],
 ];
 

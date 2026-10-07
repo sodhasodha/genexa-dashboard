@@ -4,6 +4,7 @@ import { requireEnv } from "@/lib/env";
 import { createCortanaClient } from "@/lib/integrations/cortana/client";
 import { syncCortana, syncCortanaEvents } from "@/lib/integrations/cortana/sync";
 import { createWhopClient } from "@/lib/integrations/whop/client";
+import { syncGhlAppointments, type GhlKeys } from "@/lib/integrations/ghl/sync";
 import { syncWhop } from "@/lib/integrations/whop/sync";
 import { addDays, etToday } from "@/lib/time";
 import { runExceptionsEngine } from "@/lib/exceptions/engine";
@@ -35,6 +36,11 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
   "whop-sync": async () => {
     const r = await syncWhop({ db: createAdminClient(), whop: createWhopClient({ apiKey: requireEnv("WHOP_API_KEY") }), since: "2026-08-01" });
     return { ok: r.ok, summary: { ...r, unmatched: r.unmatched.length } };
+  },
+  // GHL consult calendars -> appointments, then outcomes copied across from Cortana.
+  "ghl-appointments": async () => {
+    const r = await syncGhlAppointments({ db: createAdminClient(), keys: JSON.parse(requireEnv("GHL_API_KEYS_JSON")) as GhlKeys });
+    return { ok: r.ok, summary: r };
   },
   exceptions: async () => {
     const r = await runExceptionsEngine(createAdminClient());

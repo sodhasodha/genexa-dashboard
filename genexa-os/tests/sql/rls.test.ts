@@ -195,3 +195,20 @@ describe("not logged in / not on the team", () => {
     });
   });
 });
+
+describe("prospect contact details are owner only", () => {
+  it("staff can read a prospect but never its contact details; the owner can", async () => {
+    const p = (await db.query<{ id: string }>(`insert into prospects (name, stage) values ('Dr Prospect', 'chase') returning id`)).rows[0].id;
+    await db.query(`insert into prospect_contacts (prospect_id, contact) values ($1, 'dr@example.org / 555-0100')`, [p]);
+    const cols = await db.query(`select 1 from information_schema.columns where table_name = 'prospects' and column_name = 'contact'`);
+    expect(cols.rows.length).toBe(0);
+    await asUser(db, AUTH.amanda, async () => {
+      expect(await count("prospects")).toBeGreaterThanOrEqual(1);
+      expect(await count("prospect_contacts")).toBe(0);
+      await expect(db.query(`insert into prospect_contacts (prospect_id, contact) values ($1, 'x')`, [p])).rejects.toThrow(/row-level security|duplicate/);
+    });
+    await asUser(db, AUTH.ryan, async () => {
+      expect(await count("prospect_contacts")).toBe(1);
+    });
+  });
+});

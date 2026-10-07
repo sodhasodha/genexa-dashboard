@@ -220,3 +220,45 @@ describe("fees, MRR from Whop and dismissals", () => {
     expect(then - before).toBe(900 + 500 + 1000);
   });
 });
+
+describe("appointments: outcomes copied from Cortana, consults tomorrow", () => {
+  it("marks a consult from the same person's Cortana event, show beating no-show, and leaves others waiting", async () => {
+    const c = await id(`insert into clients (name, stage) values ('Appt Clinic', 'live') returning id`);
+    const appt = (key: string | null, when: string, contact: string) =>
+      id(`insert into appointments (client_id, ghl_contact_id, contact_key, contact_first_name, scheduled_for, calendar_kind) values ($1, $2, $3, 'Pat', ${when}, 'confirmed') returning id`, [c, contact, key]);
+    const shown = await appt("p:aaa", "now() - interval '2 days'", "g1");
+    const noShow = await appt("p:bbb", "now() - interval '2 days'", "g2");
+    const waiting = await appt("p:ccc", "now() - interval '2 days'", "g3");
+    const old = await appt("p:aaa", "now() - interval '60 days'", "g1");
+    await db.query(
+      `insert into cortana_events (client_id, cortana_entry_id, event, occurred_at, contact_id, contact_key) values
+         ($1, 'o1', 'appointment_no_show', now() - interval '40 hours', 'x1', 'p:aaa'),
+         ($1, 'o2', 'appointment_shown', now() - interval '30 hours', 'x1', 'p:aaa'),
+         ($1, 'o3', 'appointment_no_show', now() - interval '30 hours', 'x2', 'p:bbb'),
+         ($1, 'o4', 'lead', now() - interval '30 hours', 'x3', 'p:ccc')`,
+      [c],
+    );
+    const n = await one<{ n: number }>(`select appointments_apply_outcomes() as n`);
+    expect(n.n).toBe(2);
+    const att = async (a: string) => (await one<{ attendance: string; attendance_logged_by: string | null }>(`select attendance, attendance_logged_by from appointments where id = $1`, [a]));
+    expect(await att(shown)).toEqual({ attendance: "showed", attendance_logged_by: "clinic" });
+    expect((await att(noShow)).attendance).toBe("no_show");
+    expect((await att(waiting)).attendance).toBe("scheduled");
+    expect((await att(old)).attendance).toBe("scheduled"); // an event weeks later is not that consult's outcome
+    const queue = await db.query<{ title: string }>(`select title from data_review_open where kind = 'unlogged_outcome' and client_id = $1`, [c]);
+    expect(queue.rows.map((r) => r.title)).toEqual(["Pat · Appt Clinic"]); // the 60-day-old one has aged out of the queue
+  });
+
+  it("counts tomorrow's consults per clinic with how many are confirmed", async () => {
+    const c = await id(`insert into clients (name, stage) values ('Tomorrow Clinic', 'live') returning id`);
+    const at = `((app_today() + 1 + time '10:00') at time zone 'America/New_York')`;
+    await db.query(
+      `insert into appointments (client_id, ghl_contact_id, scheduled_for, calendar_kind, attendance) values
+         ($1, 't1', ${at}, 'confirmed', 'scheduled'), ($1, 't2', ${at}, 'unconfirmed', 'scheduled'),
+         ($1, 't3', ${at}, 'unconfirmed', 'cancelled'), ($1, 't4', ${at} + interval '2 days', 'confirmed', 'scheduled')`,
+      [c],
+    );
+    const r = await one<{ consults: string; confirmed: string }>(`select consults, confirmed from consults_tomorrow where client_id = $1`, [c]);
+    expect([Number(r.consults), Number(r.confirmed)]).toEqual([2, 1]);
+  });
+});

@@ -200,12 +200,17 @@ export type PersonCard = {
   id: string; name: string; role: string; pod: string | null; status: string;
   colour: "green" | "amber" | "red" | null;
   metrics: { label: string; value: string; colour: string | null }[];
+  /** Metrics that cannot be measured yet because their source is not connected. */
+  waiting: string[];
   openItems: number;
   oldest: string | null;
 };
 
 // How each metric reads on a card. "ratio" shows value/denominator; "pct" a percentage; "count" a plain number.
 const METRIC: Record<string, { label: string; as: "ratio" | "pct" | "count" }> = {
+  attendance_pct: { label: "On time", as: "pct" },
+  late_count: { label: "Late", as: "count" },
+  no_shows: { label: "No-shows", as: "count" },
   eods: { label: "EODs this week", as: "ratio" },
   launch_sla_pct: { label: "Launches in SLA", as: "pct" },
   fix_sla_pct: { label: "Fixes in SLA", as: "pct" },
@@ -229,6 +234,8 @@ export async function getPeople(): Promise<PersonCard[]> {
     supabase.from("tasks").select("owner_id, title, created_at").is("deleted_at", null).neq("status", "done").order("created_at"),
   ]);
   for (const r of [staff, scores, exceptions, tasks]) if (r.error) throw new Error(`people: ${r.error.message}`);
+  const { data: hp } = await supabase.from("source_freshness").select("freshness").eq("source", "hot_prospector").maybeSingle();
+  const callsConnected = !!hp && hp.freshness !== "never";
   type Score = { staff_id: string; metric: string; value: number | null; denominator: number | null; colour: string | null };
   return (staff.data ?? []).map((s) => {
     const mine = ((scores.data ?? []) as Score[]).filter((x) => x.staff_id === s.id);
@@ -238,8 +245,11 @@ export async function getPeople(): Promise<PersonCard[]> {
     const oldestEx = ex[0] ? { at: ex[0].first_detected_at as string, text: ex[0].reason as string } : null;
     const oldestTask = tk[0] ? { at: tk[0].created_at as string, text: tk[0].title as string } : null;
     const oldest = [oldestEx, oldestTask].filter((x): x is { at: string; text: string } => !!x).sort((a, b) => a.at.localeCompare(b.at))[0];
+    // CSR call metrics have no source until Hot Prospector is connected: shown as waiting, never as red.
+    const waiting = s.role === "csr" && !callsConnected ? ["Speed to lead", "Book rate", "Confirmation rate", "Show rate"] : [];
     return {
       id: s.id as string, name: s.name as string, role: s.role as string, pod: s.pod as string | null, status: s.status as string,
+      waiting,
       colour: worst as PersonCard["colour"],
       // Only metrics that have something to measure this week are shown.
       metrics: mine.filter((m) => m.value !== null && (m.denominator === null || Number(m.denominator) > 0)).map((m) => {

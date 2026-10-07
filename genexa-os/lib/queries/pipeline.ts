@@ -90,7 +90,8 @@ export async function getPipeline(withContact: boolean): Promise<PipelineStage[]
   const [list, late] = await Promise.all([
     supabase
       .from("prospects")
-      .select(withContact ? `${columns}, contact` : columns)
+      // Contact details live in their own owner-only table; RLS returns nothing to anyone else.
+      .select(withContact ? `${columns}, prospect_contacts(contact)` : columns)
       .is("deleted_at", null)
       .order("follow_up_date", { nullsFirst: false })
       .order("name"),
@@ -100,10 +101,10 @@ export async function getPipeline(withContact: boolean): Promise<PipelineStage[]
   if (late.error) throw new Error(`prospect_follow_ups: ${late.error.message}`);
   const overdue = new Map((late.data ?? []).map((r) => [r.id as string, r.days_overdue as number]));
 
-  type Raw = Omit<Prospect, "contact" | "call_label" | "follow_up_label" | "days_overdue" | "deal_label" | "fathom_link"> & { contact?: string | null };
+  type Raw = Omit<Prospect, "contact" | "call_label" | "follow_up_label" | "days_overdue" | "deal_label" | "fathom_link"> & { prospect_contacts?: { contact: string | null } | { contact: string | null }[] | null };
   const prospects = ((list.data ?? []) as unknown as Raw[]).map((r): Prospect => ({
     ...r,
-    contact: r.contact ?? null,
+    contact: (Array.isArray(r.prospect_contacts) ? r.prospect_contacts[0]?.contact : r.prospect_contacts?.contact) ?? null,
     call_label: formatDay(r.call_date),
     follow_up_label: formatDay(r.follow_up_date),
     days_overdue: overdue.get(r.id) ?? null,

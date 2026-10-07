@@ -20,11 +20,14 @@ export function PeopleCards({ people }: { people: PersonCard[] }) {
               {p.status === "at_risk" ? <span className="ml-auto rounded bg-bad-bg px-1.5 py-0.5 text-xs text-bad">at risk</span> : null}
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
-              {p.metrics.length === 0 ? <span className="text-stale">no scores yet</span> : null}
+              {p.metrics.length === 0 && p.waiting.length === 0 ? <span className="text-stale">no scores yet</span> : null}
               {p.metrics.map((m) => (
                 <span key={m.label} className={`rounded px-1.5 py-0.5 ${m.colour ? PILL[m.colour] : "bg-stale-bg text-stale"}`}>{m.label} {m.value}</span>
               ))}
             </div>
+            {p.waiting.length > 0 ? (
+              <div className="mt-1.5 text-xs text-stale">{p.waiting.join(" · ")}: waiting for Hot Prospector</div>
+            ) : null}
             <div className="mt-2 truncate text-xs text-muted" title={p.oldest ?? undefined}>
               {p.openItems} open · {p.oldest ? `oldest: ${p.oldest}` : "nothing open"}
             </div>

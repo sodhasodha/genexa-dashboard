@@ -13,7 +13,7 @@ export type SourceFreshness = {
 
 const SOURCE_NAMES: Record<string, string> = {
   cortana: "Cortana",
-  ghl: "GHL",
+  ghl: "GHL appointments",
   whop: "Whop",
   mercury: "Mercury",
   fathom: "Fathom",
@@ -26,7 +26,7 @@ export async function getSourceFreshness(): Promise<SourceFreshness[]> {
     .from("source_freshness")
     .select("source, freshness, minutes_since_success, error")
     // The client dashboard is no longer a source of its own: its outcomes reach the app through Cortana.
-    .neq("source", "client_dashboard")
+    .not("source", "in", "(client_dashboard,hot_prospector)")
     .order("source");
   if (error) throw new Error(`source_freshness: ${error.message}`);
   return (data ?? []).map((row) => ({

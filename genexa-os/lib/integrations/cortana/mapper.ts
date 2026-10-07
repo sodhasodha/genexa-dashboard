@@ -1,6 +1,7 @@
 // Typed mapper for Cortana's attribution endpoint. Pure functions, no I/O.
 // Field names come from real responses in fixtures/cortana/.
 import { z } from "zod";
+import { contactKey } from "@/lib/contactKey";
 
 const num = z.number().nullable().optional();
 const Conversion = z.object({ uniqueCount: z.number().nullable().optional(), revenue: z.number().nullable().optional() }).loose();
@@ -184,6 +185,7 @@ export const ConversionEntry = z
         name: z.string().nullable().optional(),
         firstName: z.string().nullable().optional(),
         email: z.string().nullable().optional(),
+        phone: z.string().nullable().optional(),
       })
       .loose()
       .nullable()
@@ -228,6 +230,8 @@ export type EventRow = {
   campaign_name: string | null;
   ad_id: string | null;
   ad_name: string | null;
+  /** One-way hash of the contact's phone or email, to match the same person in GHL. */
+  contact_key: string | null;
 };
 
 /** A Cortana entry as a stored event, or null for event types the app does not count. Keeps the first name only. */
@@ -248,5 +252,6 @@ export function mapEvent(entry: ConversionEntry, staff: { name: string; email: s
     campaign_name: entry.attributionCampaign ?? null,
     ad_id: entry.attributionAdId ?? null,
     ad_name: entry.attributionAd ?? null,
+    contact_key: contactKey(entry.contact),
   };
 }

@@ -6,7 +6,7 @@ import { AdsTable } from "@/components/media/AdsTable";
 import { ClinicDaily } from "@/components/media/ClinicDaily";
 import { Scorecards } from "@/components/media/Scorecard";
 import { requireStaff } from "@/lib/auth/staff";
-import { AD_LIMIT, WINDOWS, getAccounts, getAdExceptions, getAds, getClinicDaily, getNotConnected, getScorecards, getThresholds, parseWindow } from "@/lib/queries/media";
+import { AD_PAGE_SIZE, WINDOWS, getAccounts, getAdExceptions, getAds, getClinicDaily, getNotConnected, getScorecards, getThresholds, parseWindow } from "@/lib/queries/media";
 import { etToday } from "@/lib/time";
 
 export default async function MediaBuyingPage({ searchParams }: PageProps<"/media-buying">) {
@@ -23,12 +23,19 @@ export default async function MediaBuyingPage({ searchParams }: PageProps<"/medi
   ]);
   // Only a clinic on the accounts list can be opened.
   const clinic = clientParam.success ? (accounts.find((a) => a.client_id === clientParam.data) ?? null) : null;
-  const [ads, daily] = await Promise.all([
-    clinic && (clinic.campaign_scoped || clinic.unverified) ? Promise.resolve([]) : getAds(clinic?.client_id ?? null, adPeriod),
+  // Per-ad table: active ads by default, 50 a page.
+  const allAds = params.ads === "all";
+  const adPage = Number(typeof params.adpage === "string" ? params.adpage : "1") || 1;
+  const [adList, daily] = await Promise.all([
+    clinic && (clinic.campaign_scoped || clinic.unverified)
+      ? Promise.resolve({ rows: [], total: 0, page: 1, pages: 1 })
+      : getAds(clinic?.client_id ?? null, adPeriod, { activeOnly: !allAds, page: adPage }),
     clinic ? getClinicDaily(clinic.client_id, windowKey, today) : Promise.resolve(null),
   ]);
 
+  const ads = adList.rows;
   const href = (w: string, client: string | null, hash = "") => `/media-buying?window=${w}${client ? `&client=${client}` : ""}${hash}`;
+  const adsHref = (all: boolean, page: number) => `/media-buying?window=${windowKey}${clinic ? `&client=${clinic.client_id}` : ""}${all ? "&ads=all" : ""}${page > 1 ? `&adpage=${page}` : ""}#ads`;
   const range = accounts.find((a) => !a.unverified && a.window_from && a.window_to);
   const adsUnavailable = !clinic ? null
     : clinic.unverified ? "Unverified: this clinic's ads are left out until its Cortana business is confirmed."
@@ -76,11 +83,22 @@ export default async function MediaBuyingPage({ searchParams }: PageProps<"/medi
         </select>
         <button className="cursor-pointer rounded border border-line bg-raised px-2 py-1 hover:border-muted">Show</button>
       </form>
+      <div id="ads" className="flex flex-wrap items-center gap-3 text-xs">
+        <div className="flex overflow-hidden rounded-md border border-line">
+          <Link href={adsHref(false, 1)} className={`px-3 py-1.5 ${!allAds ? "bg-accent font-medium text-white" : "bg-panel text-muted hover:text-ink"}`}>Active ads</Link>
+          <Link href={adsHref(true, 1)} className={`px-3 py-1.5 ${allAds ? "bg-accent font-medium text-white" : "bg-panel text-muted hover:text-ink"}`}>All ads</Link>
+        </div>
+        <span className="text-muted">
+          {adList.total === 0 ? "No ads" : `Ads ${(adList.page - 1) * AD_PAGE_SIZE + 1}–${Math.min(adList.page * AD_PAGE_SIZE, adList.total)} of ${adList.total}`}
+        </span>
+        {adList.page > 1 ? <Link href={adsHref(allAds, adList.page - 1)} className="rounded border border-line bg-raised px-2 py-1 hover:border-muted">← Previous</Link> : null}
+        {adList.page < adList.pages ? <Link href={adsHref(allAds, adList.page + 1)} className="rounded border border-line bg-raised px-2 py-1 hover:border-muted">Next →</Link> : null}
+      </div>
       <AdsTable
         rows={ads} periodLabel={adPeriod === "all" ? "all time" : windowKey === "3d" ? "7 days (Cortana has no 3-day ad figures)" : "7 days"}
         thresholds={thresholds} showClinic={!clinic} unavailable={adsUnavailable}
         scopedNames={clinic ? [] : accounts.filter((a) => a.campaign_scoped && !a.unverified).map((a) => a.name)}
-        truncatedAt={!clinic && ads.length >= AD_LIMIT ? AD_LIMIT : null}
+        truncatedAt={null}
       />
     </div>
   );

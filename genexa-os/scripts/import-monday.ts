@@ -332,7 +332,15 @@ async function main() {
 
   // --- prospects ---------------------------------------------------------------
   const prospectRows = prospectsBoard.items_page.items.map((i) => mapProspect(prospectsBoard, i, unmapped)).filter((x) => x !== null);
-  note("prospects", await upsertByRef("prospects", prospectRows), prospectRows.length);
+  // Contact details go to the owner-only prospect_contacts table, never onto the prospect row.
+  const prospectResult = await upsertByRef("prospects", prospectRows.map(({ contact: _c, ...p }) => { void _c; return p; }));
+  note("prospects", prospectResult, prospectRows.length);
+  for (const p of prospectRows) {
+    const id = prospectResult.ids.get(p.legacy_ref);
+    if (!id || !p.contact) continue;
+    const { data: has } = await db.from("prospect_contacts").select("id").eq("prospect_id", id).maybeSingle();
+    if (!has) await db.from("prospect_contacts").insert({ prospect_id: id, contact: p.contact });
+  }
 
   // --- deleted tasks (last, so the import's own inserts are never refused by them) ----
   const deletedRows = mapDeletedItems(deletedLog).map((d) => ({ ...d, owner_id: adityaId }));

@@ -149,23 +149,28 @@ export type AdRow = {
   spend: number | null; leads: number | null; booked: number | null; cost_per_booked: number | null; frequency: number | null; ctr: number | null;
   spend_7d: number | null; fatigue: boolean | null; fatigue_reason: string | null;
 };
-export const AD_LIMIT = 300;
+export const AD_PAGE_SIZE = 50;
 
 /** Active ads first, then 7d spend, largest first. The figures shown follow the window (7d or all-time). */
-export async function getAds(clientId: string | null, period: "7d" | "all"): Promise<AdRow[]> {
+export async function getAds(
+  clientId: string | null, period: "7d" | "all", opts: { activeOnly: boolean; page: number },
+): Promise<{ rows: AdRow[]; total: number; page: number; pages: number }> {
   const supabase = await createClient();
+  const page = Math.max(1, Math.floor(opts.page) || 1);
   let query = supabase
     .from("media_ad_metrics")
-    .select("*")
+    .select("*", { count: "exact" })
     .order("is_active", { ascending: false })
     .order("spend_7d", { ascending: false, nullsFirst: false })
     .order("ad_id")
-    .limit(AD_LIMIT);
+    .range((page - 1) * AD_PAGE_SIZE, page * AD_PAGE_SIZE - 1);
   if (clientId) query = query.eq("client_id", clientId);
-  const { data, error } = await query;
+  if (opts.activeOnly) query = query.eq("is_active", true);
+  const { data, error, count } = await query;
   if (error) throw new Error(`media_ad_metrics: ${error.message}`);
+  const total = count ?? 0;
   const s = period === "7d" ? "_7d" : "_all";
-  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+  const rows = ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     client_id: r.client_id as string,
     client_name: r.client_name as string,
     ad_id: r.ad_id as string,
@@ -182,6 +187,7 @@ export async function getAds(clientId: string | null, period: "7d" | "all"): Pro
     fatigue: r.fatigue as boolean | null,
     fatigue_reason: r.fatigue_reason as string | null,
   }));
+  return { rows, total, page, pages: Math.max(1, Math.ceil(total / AD_PAGE_SIZE)) };
 }
 
 // ---------------------------------------------------------------------------

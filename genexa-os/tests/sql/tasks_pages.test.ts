@@ -133,15 +133,16 @@ describe("task rules through a staff login", () => {
 describe("prospect_follow_ups", () => {
   it("lists only late follow-ups still being worked, with days overdue, most overdue first", async () => {
     await db.query(
-      `insert into prospects (name, stage, follow_up_date, promised, contact) values
-         ('Late chase', 'chase', app_today() - 2, 'Send case studies', 'late@clinic.test'),
-         ('Very late contract', 'contract_out', app_today() - 10, 'Resend contract', null),
-         ('Due today', 'chase', app_today(), null, null),
-         ('Future', 'chase', app_today() + 5, null, null),
-         ('No date', 'chase', null, null, null),
-         ('Late but paid', 'paid', app_today() - 30, null, null),
-         ('Late but dead', 'dead', app_today() - 30, null, null)`,
+      `insert into prospects (name, stage, follow_up_date, promised) values
+         ('Late chase', 'chase', app_today() - 2, 'Send case studies'),
+         ('Very late contract', 'contract_out', app_today() - 10, 'Resend contract'),
+         ('Due today', 'chase', app_today(), null),
+         ('Future', 'chase', app_today() + 5, null),
+         ('No date', 'chase', null, null),
+         ('Late but paid', 'paid', app_today() - 30, null),
+         ('Late but dead', 'dead', app_today() - 30, null)`,
     );
+    await db.query(`insert into prospect_contacts (prospect_id, contact) select id, 'late@clinic.test' from prospects where name = 'Late chase'`);
     await db.query(`insert into prospects (name, stage, follow_up_date, deleted_at) values ('Late but deleted', 'chase', app_today() - 4, now())`);
     const rows = (await db.query<{ name: string; days_overdue: number; promised: string | null }>(
       `select name, days_overdue, promised from prospect_follow_ups order by days_overdue desc`,

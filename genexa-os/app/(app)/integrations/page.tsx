@@ -3,7 +3,7 @@ import { requireStaff } from "@/lib/auth/staff";
 import { formatAge } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
-const NAME: Record<string, string> = { cortana: "Cortana (ads, funnel, outcomes per clinic)", ghl: "GHL (call attempts, first call, who called)", whop: "Whop direct (payments, memberships, renewals)", mercury: "Mercury (expenses, profit)", fathom: "Fathom (client and sales calls)" };
+const NAME: Record<string, string> = { cortana: "Cortana (ads, funnel, outcomes per clinic)", ghl: "GHL (appointments only: consult times and status)", hot_prospector: "Hot Prospector (calls) — not set up yet", whop: "Whop direct (payments, memberships, renewals)", mercury: "Mercury (expenses, profit)", fathom: "Fathom (client and sales calls)" };
 const STATE: Record<string, string> = { fresh: "Fresh", late: "Late", stale: "Stale", never: "Not connected" };
 
 export default async function IntegrationsPage() {

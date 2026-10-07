@@ -1,0 +1,268 @@
+{
+ "events": [
+  {
+   "appointmentStatus": "confirmed",
+   "appoinmentStatus": "confirmed",
+   "statusId": "AQoV54ir1CDUtF6HTmUm",
+   "state": "active",
+   "assignedUserId": "UyFyd2ZxFO0ZRxaU3osV",
+   "address": "redacted",
+   "calendarId": "sOrRF8BRfix1BIWGxdn5",
+   "contactId": "contact_0",
+   "dateAdded": "2026-09-22T19:08:38.000Z",
+   "dateUpdated": "2026-09-22T19:08:38.000Z",
+   "endTime": "2026-09-25T12:30:00-06:00",
+   "id": "EHEQ30t5jty8B6YIkMda",
+   "locationId": "PoxnUvIXN2EawQyGr9ou",
+   "startTime": "2026-09-25T11:30:00-06:00",
+   "title": "redacted",
+   "assignedResources": [],
+   "isRecurring": false,
+   "createdBy": {
+    "source": "booking_widget",
+    "userId": null
+   },
+   "appointmentMeta": {
+    "slotType": "default",
+    "defaultFormDetails": {
+     "firstName": "Maria",
+     "lastName": "Redacted",
+     "email": "patient0@example.org",
+     "phone": "+15550000000"
+    }
+   },
+   "deleted": false
+  },
+  {
+   "appointmentStatus": "confirmed",
+   "appoinmentStatus": "confirmed",
+   "statusId": "AQoV54ir1CDUtF6HTmUm",
+   "state": "active",
+   "assignedUserId": "UyFyd2ZxFO0ZRxaU3osV",
+   "address": "redacted",
+   "calendarId": "sOrRF8BRfix1BIWGxdn5",
+   "contactId": "contact_1",
+   "dateAdded": "2026-09-22T18:46:36.000Z",
+   "dateUpdated": "2026-09-22T18:46:36.000Z",
+   "endTime": "2026-09-30T11:00:00-06:00",
+   "id": "MCZlM2yJR0eQIJ5BNyS7",
+   "locationId": "PoxnUvIXN2EawQyGr9ou",
+   "startTime": "2026-09-30T10:00:00-06:00",
+   "title": "redacted",
+   "assignedResources": [],
+   "isRecurring": false,
+   "createdBy": {
+    "source": "booking_widget",
+    "userId": null
+   },
+   "appointmentMeta": {
+    "slotType": "default",
+    "defaultFormDetails": {
+     "firstName": "John",
+     "lastName": "Redacted",
+     "email": "patient1@example.org",
+     "phone": "+15550000001"
+    }
+   },
+   "deleted": false
+  },
+  {
+   "appointmentStatus": "confirmed",
+   "appoinmentStatus": "confirmed",
+   "statusId": "AQoV54ir1CDUtF6HTmUm",
+   "state": "active",
+   "assignedUserId": "UyFyd2ZxFO0ZRxaU3osV",
+   "address": "redacted",
+   "calendarId": "sOrRF8BRfix1BIWGxdn5",
+   "contactId": "contact_2",
+   "dateAdded": "2026-09-24T22:13:23.000Z",
+   "dateUpdated": "2026-09-24T22:13:23.000Z",
+   "endTime": "2026-09-30T12:00:00-06:00",
+   "id": "zguJ0rbM2dJ1b1tuZpmi",
+   "locationId": "PoxnUvIXN2EawQyGr9ou",
+   "startTime": "2026-09-30T11:00:00-06:00",
+   "title": "redacted",
+   "assignedResources": [],
+   "isRecurring": false,
+   "createdBy": {
+    "source": "booking_widget",
+    "userId": null
+   },
+   "appointmentMeta": {
+    "slotType": "default",
+    "defaultFormDetails": {
+     "firstName": "Ana",
+     "lastName": "Redacted",
+     "email": "patient2@example.org",
+     "phone": "+15550000002"
+    }
+   },
+   "deleted": false
+  },
+  {
+   "appointmentStatus": "confirmed",
+   "appoinmentStatus": "confirmed",
+   "statusId": "AQoV54ir1CDUtF6HTmUm",
+   "state": "active",
+   "assignedUserId": "UyFyd2ZxFO0ZRxaU3osV",
+   "address": "redacted",
+   "calendarId": "sOrRF8BRfix1BIWGxdn5",
+   "contactId": "contact_3",
+   "dateAdded": "2026-09-25T22:39:27.000Z",
+   "dateUpdated": "2026-09-25T22:39:27.000Z",
+   "endTime": "2026-09-30T16:00:00-06:00",
+   "id": "2T9u8r2b1elANMMwgqOs",
+   "locationId": "PoxnUvIXN2EawQyGr9ou",
+   "startTime": "2026-09-30T15:00:00-06:00",
+   "title": "redacted",
+   "assignedResources": [],
+   "isRecurring": false,
+   "createdBy": {
+    "source": "booking_widget",
+    "userId": null
+   },
+   "appointmentMeta": {
+    "slotType": "default",
+    "defaultFormDetails": {
+     "firstName": "Lee",
+     "lastName": "Redacted",
+     "email": "patient3@example.org",
+     "phone": "+15550000003"
+    }
+   },
+   "deleted": false
+  },
+  {
+   "appointmentStatus": "confirmed",
+   "appoinmentStatus": "confirmed",
+   "statusId": "AQoV54ir1CDUtF6HTmUm",
+   "state": "active",
+   "assignedUserId": "UyFyd2ZxFO0ZRxaU3osV",
+   "address": "redacted",
+   "calendarId": "sOrRF8BRfix1BIWGxdn5",
+   "contactId": "contact_4",
+   "dateAdded": "2026-09-25T21:35:04.000Z",
+   "dateUpdated": "2026-09-25T21:35:04.000Z",
+   "endTime": "2026-09-30T17:00:00-06:00",
+   "id": "bZRA8UOnJsVM2qHUNacc",
+   "locationId": "PoxnUvIXN2EawQyGr9ou",
+   "startTime": "2026-09-30T16:00:00-06:00",
+   "title": "redacted",
+   "assignedResources": [],
+   "isRecurring": false,
+   "createdBy": {
+    "source": "booking_widget",
+    "userId": null
+   },
+   "appointmentMeta": {
+    "slotType": "default",
+    "defaultFormDetails": {
+     "firstName": "Maria",
+     "lastName": "Redacted",
+     "email": "patient4@example.org",
+     "phone": "+15550000004"
+    }
+   },
+   "deleted": false
+  },
+  {
+   "appointmentStatus": "cancelled",
+   "appoinmentStatus": "cancelled",
+   "statusId": "L8wNni92qD9ZoBZlH2md",
+   "state": "cancelled",
+   "assignedUserId": "UyFyd2ZxFO0ZRxaU3osV",
+   "address": "redacted",
+   "calendarId": "sOrRF8BRfix1BIWGxdn5",
+   "contactId": "contact_5",
+   "dateAdded": "2026-09-22T15:56:39.000Z",
+   "dateUpdated": "2026-10-01T14:13:29.000Z",
+   "endTime": "2026-10-02T10:30:00-06:00",
+   "id": "eLZXdSY3qETVTbWGanj2",
+   "locationId": "PoxnUvIXN2EawQyGr9ou",
+   "startTime": "2026-10-02T09:30:00-06:00",
+   "title": "redacted",
+   "assignedResources": [],
+   "isRecurring": false,
+   "createdBy": {
+    "source": "booking_widget",
+    "userId": null
+   },
+   "appointmentMeta": {
+    "slotType": "default",
+    "defaultFormDetails": {
+     "firstName": "John",
+     "lastName": "Redacted",
+     "email": "patient5@example.org",
+     "phone": "+15550000005"
+    }
+   },
+   "deleted": false
+  },
+  {
+   "appointmentStatus": "confirmed",
+   "appoinmentStatus": "confirmed",
+   "statusId": "AQoV54ir1CDUtF6HTmUm",
+   "state": "active",
+   "assignedUserId": "UyFyd2ZxFO0ZRxaU3osV",
+   "address": "redacted",
+   "calendarId": "sOrRF8BRfix1BIWGxdn5",
+   "contactId": "contact_6",
+   "dateAdded": "2026-09-29T21:11:12.000Z",
+   "dateUpdated": "2026-09-29T21:11:12.000Z",
+   "endTime": "2026-10-02T13:00:00-06:00",
+   "id": "5zJH2DK67WUBZAyQX9ii",
+   "locationId": "PoxnUvIXN2EawQyGr9ou",
+   "startTime": "2026-10-02T12:00:00-06:00",
+   "title": "redacted",
+   "assignedResources": [],
+   "isRecurring": false,
+   "createdBy": {
+    "source": "booking_widget",
+    "userId": null
+   },
+   "appointmentMeta": {
+    "slotType": "default",
+    "defaultFormDetails": {
+     "firstName": "Ana",
+     "lastName": "Redacted",
+     "email": "patient6@example.org",
+     "phone": "+15550000006"
+    }
+   },
+   "deleted": false
+  },
+  {
+   "appointmentStatus": "confirmed",
+   "appoinmentStatus": "confirmed",
+   "statusId": "AQoV54ir1CDUtF6HTmUm",
+   "state": "active",
+   "assignedUserId": "UyFyd2ZxFO0ZRxaU3osV",
+   "address": "redacted",
+   "calendarId": "sOrRF8BRfix1BIWGxdn5",
+   "contactId": "contact_7",
+   "dateAdded": "2026-10-03T22:02:46.000Z",
+   "dateUpdated": "2026-10-03T22:02:46.000Z",
+   "endTime": "2026-10-07T10:00:00-06:00",
+   "id": "Zpz4P2gAQW9UQsTgAZUh",
+   "locationId": "PoxnUvIXN2EawQyGr9ou",
+   "startTime": "2026-10-07T09:00:00-06:00",
+   "title": "redacted",
+   "assignedResources": [],
+   "isRecurring": false,
+   "createdBy": {
+    "source": "booking_widget",
+    "userId": null
+   },
+   "appointmentMeta": {
+    "slotType": "default",
+    "defaultFormDetails": {
+     "firstName": "Lee",
+     "lastName": "Redacted",
+     "email": "patient7@example.org",
+     "phone": "+15550000007"
+    }
+   },
+   "deleted": false
+  }
+ ]
+}
