@@ -1,6 +1,7 @@
 import { updateShift } from "@/lib/actions/team";
 import { requireStaff } from "@/lib/auth/staff";
 import { getCoverage, getTeam, type CoverageHour } from "@/lib/queries/team";
+import { AttendanceSections } from "./AttendanceSections";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TIMEZONES = ["America/New_York", "America/Chicago", "America/Los_Angeles", "Europe/London", "Asia/Manila", "Asia/Kolkata", "Asia/Karachi", "Asia/Dubai"];
@@ -106,6 +107,13 @@ export default async function TeamPage({ searchParams }: PageProps<"/team">) {
           </datalist>
         </div>
       </section>
+
+      <AttendanceSections
+        team={team}
+        isOwner={isOwner}
+        error={typeof params.att_error === "string" ? params.att_error : undefined}
+        saved={typeof params.att_saved === "string" ? params.att_saved : undefined}
+      />
 
       <section>
         <h2 className="mb-1 font-semibold">CSR coverage this week (ET)</h2>
