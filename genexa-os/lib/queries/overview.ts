@@ -204,7 +204,19 @@ export type PersonCard = {
   oldest: string | null;
 };
 
-const METRIC_LABEL: Record<string, string> = { eods: "EODs this week" };
+// How each metric reads on a card. "ratio" shows value/denominator; "pct" a percentage; "count" a plain number.
+const METRIC: Record<string, { label: string; as: "ratio" | "pct" | "count" }> = {
+  eods: { label: "EODs this week", as: "ratio" },
+  launch_sla_pct: { label: "Launches in SLA", as: "pct" },
+  fix_sla_pct: { label: "Fixes in SLA", as: "pct" },
+  broken_week1: { label: "Broken in week 1", as: "count" },
+  paused_pct: { label: "Jobs paused", as: "pct" },
+  exceptions_24h_pct: { label: "Ad exceptions cleared in 24h", as: "pct" },
+  accounts_over_cpb: { label: "Accounts over cost-per-booked line", as: "count" },
+  book_cpb_change_pct: { label: "Book cost per booked vs last 7d", as: "pct" },
+  zero_spend_accounts: { label: "Accounts at $0 spend", as: "count" },
+  accounts_flagged_3d: { label: "Accounts flagged 3+ days", as: "count" },
+};
 const RANK: Record<string, number> = { red: 3, amber: 2, green: 1 };
 
 /** One card per person: worst metric wins. Only metrics with data are shown. */
@@ -222,18 +234,23 @@ export async function getPeople(): Promise<PersonCard[]> {
     const mine = ((scores.data ?? []) as Score[]).filter((x) => x.staff_id === s.id);
     const ex = (exceptions.data ?? []).filter((x) => x.owner_id === s.id);
     const tk = (tasks.data ?? []).filter((x) => x.owner_id === s.id);
-    const worst = mine.filter((m) => m.denominator === null || Number(m.denominator) > 0).map((m) => m.colour).filter((x): x is string => !!x).sort((a, b) => RANK[b] - RANK[a])[0] ?? null;
+    const worst = mine.filter((m) => m.value !== null && (m.denominator === null || Number(m.denominator) > 0)).map((m) => m.colour).filter((x): x is string => !!x).sort((a, b) => RANK[b] - RANK[a])[0] ?? null;
     const oldestEx = ex[0] ? { at: ex[0].first_detected_at as string, text: ex[0].reason as string } : null;
     const oldestTask = tk[0] ? { at: tk[0].created_at as string, text: tk[0].title as string } : null;
     const oldest = [oldestEx, oldestTask].filter((x): x is { at: string; text: string } => !!x).sort((a, b) => a.at.localeCompare(b.at))[0];
     return {
       id: s.id as string, name: s.name as string, role: s.role as string, pod: s.pod as string | null, status: s.status as string,
       colour: worst as PersonCard["colour"],
-      metrics: mine.filter((m) => m.denominator === null || Number(m.denominator) > 0).map((m) => ({
-        label: METRIC_LABEL[m.metric] ?? m.metric,
-        value: m.denominator !== null ? `${Number(m.value ?? 0)}/${Number(m.denominator)}` : String(m.value ?? ""),
-        colour: m.colour,
-      })),
+      // Only metrics that have something to measure this week are shown.
+      metrics: mine.filter((m) => m.value !== null && (m.denominator === null || Number(m.denominator) > 0)).map((m) => {
+        const spec = METRIC[m.metric] ?? { label: m.metric, as: "count" as const };
+        const v = Number(m.value);
+        return {
+          label: spec.label,
+          value: spec.as === "ratio" ? `${v}/${Number(m.denominator)}` : spec.as === "pct" ? `${v > 0 && m.metric === "book_cpb_change_pct" ? "+" : ""}${Math.round(v)}%` : String(v),
+          colour: m.colour,
+        };
+      }),
       openItems: ex.length + tk.length,
       oldest: oldest ? `${oldest.text} (${(formatAge((Date.now() - new Date(oldest.at).getTime()) / 60_000) ?? "").replace(" ago", "")})` : null,
     };

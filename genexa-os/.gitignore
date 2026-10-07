@@ -50,3 +50,4 @@ next-env.d.ts
 /supabase/.temp
 /fixtures/whop/raw
 /fixtures/cortana/raw
+/fixtures/ghl/raw
