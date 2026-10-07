@@ -121,12 +121,18 @@ export async function getDrill(metric: string, period: Period): Promise<DrillTab
     }
     case "mrr":
     case "clients": {
-      const { data, error } = await db.from("clients").select("name, stage, pod, billing_cycle, cycle_fee, monthly_fee, launch_date").is("deleted_at", null).neq("stage", "churned").order("monthly_fee", { ascending: false, nullsFirst: false });
+      const [{ data, error }, { data: clients }] = await Promise.all([
+        db.from("client_fees").select("client_id, name, stage, billing_cycle, cycle_fee, record_monthly, whop_monthly, whop_plans, monthly_fee, source").order("monthly_fee", { ascending: false, nullsFirst: false }),
+        db.from("clients").select("id, pod, launch_date").is("deleted_at", null),
+      ]);
       if (error) throw new Error(error.message);
+      const extra = new Map((clients ?? []).map((c) => [c.id, c]));
+      const SOURCE: Record<string, string> = { whop: "Whop plan", confirmed: "Confirmed by owner", record: "Client record" };
       return {
         title: "MRR · clients that are not churned",
-        columns: ["Clinic", "Stage", "Pod", "Billing cycle", "Fee per cycle", "Monthly fee", "Launch date"],
-        rows: (data ?? []).map((r) => [r.name, r.stage, r.pod?.replace("pod_", "Pod ") ?? null, r.billing_cycle ? (r.billing_cycle === "legacy" ? "Legacy (30 days)" : `${r.billing_cycle} days`) : null, fmt(r.cycle_fee, "money"), fmt(r.monthly_fee, "money"), r.launch_date]),
+        note: "A matched client's fee is their live Whop plan as a 30-day figure. A fee the owner confirmed is kept. Otherwise it is the fee on the client record.",
+        columns: ["Clinic", "Stage", "Pod", "Monthly fee used", "From", "Whop plan", "Fee on record", "Launch date"],
+        rows: (data ?? []).map((r) => [r.name, r.stage, extra.get(r.client_id)?.pod?.replace("pod_", "Pod ") ?? null, fmt(r.monthly_fee, "money"), SOURCE[r.source] ?? r.source, r.whop_plans, r.record_monthly === null ? null : `${fmt(r.record_monthly, "money")}/month`, extra.get(r.client_id)?.launch_date ?? null]),
         total: fmt((data ?? []).reduce((a, r) => a + Number(r.monthly_fee ?? 0), 0), "money"),
       };
     }

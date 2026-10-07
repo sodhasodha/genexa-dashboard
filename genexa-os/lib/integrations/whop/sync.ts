@@ -66,14 +66,35 @@ export async function syncWhop(opts: { db: SupabaseClient; whop: WhopClient; sin
     }
 
     const synced_at = new Date().toISOString();
+    // Decisions a person made are kept: a payment or membership pinned to a client, and a label given to an untitled payment.
+    const [pinned, pinnedMembers] = await Promise.all([
+      db.from("payments").select("whop_payment_id, client_id, client_locked, title_override").or("client_locked.eq.true,title_override.not.is.null"),
+      db.from("whop_memberships").select("whop_membership_id, client_id").eq("client_locked", true),
+    ]);
+    if (pinned.error) throw new Error(`payments: ${pinned.error.message}`);
+    if (pinnedMembers.error) throw new Error(`whop_memberships: ${pinnedMembers.error.message}`);
+    const pin = new Map((pinned.data ?? []).map((p) => [p.whop_payment_id as string, p]));
+    const memberPin = new Map((pinnedMembers.data ?? []).map((m) => [m.whop_membership_id as string, m.client_id as string | null]));
     if (rows.length > 0) {
       const { error } = await db.from("payments").upsert(
-        rows.map(({ row }) => ({ ...row, client_id: (row.whop_user_id && clientOf.get(row.whop_user_id)) || null, synced_at })),
+        rows.map(({ row }) => {
+          const kept = pin.get(row.whop_payment_id);
+          return {
+            ...row,
+            product_title: row.product_title ?? kept?.title_override ?? null,
+            client_id: kept?.client_locked ? kept.client_id : (row.whop_user_id && clientOf.get(row.whop_user_id)) || null,
+            synced_at,
+          };
+        }),
         { onConflict: "whop_payment_id" },
       );
       if (error) throw new Error(`payments: ${error.message}`);
     }
-    const memberRows = memberships.map((m) => ({ ...mapMembership(m, catalog), client_id: (m.user && clientOf.get(m.user)) || null, synced_at }));
+    const memberRows = memberships.map((m) => ({
+      ...mapMembership(m, catalog),
+      client_id: memberPin.has(m.id) ? (memberPin.get(m.id) ?? null) : (m.user && clientOf.get(m.user)) || null,
+      synced_at,
+    }));
     const kept = memberRows.filter((m) => !(m.product_title && excluded.some((x) => x.toLowerCase() === (m.product_title as string).toLowerCase())));
     if (kept.length > 0) {
       const { error } = await db.from("whop_memberships").upsert(kept, { onConflict: "whop_membership_id" });

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { assignPayment, categoriseExpense, markLeadReal, resolveException, setAttendance, snoozeException } from "@/lib/actions/overview";
+import { assignPayment, categoriseExpense, classifyPayment, dismissReviewItem, markLeadReal, resolveException, resolveFeeMismatch, setAttendance, snoozeException } from "@/lib/actions/overview";
 import { formatValue } from "@/lib/format";
 import { REVIEW_KINDS, type Bottleneck, type ReviewItem, type ReviewKind } from "@/lib/queries/overview";
 
@@ -26,6 +26,25 @@ function FixButtons({ item, clients, isOwner }: { item: ReviewItem; clients: { i
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <button className={btn}>Match</button>
+      </form>
+    );
+  }
+  if (item.kind === "unclassified_payment") {
+    return (
+      <form action={classifyPayment} className="flex flex-wrap gap-1">
+        <input type="hidden" name="id" value={item.record_id} />
+        {[["rev_share", "Rev share"], ["retainer", "Retainer"], ["setup", "Set-up fee"], ["other", "Other income"]].map(([v, l]) => (
+          <button key={v} name="label" value={v} className={btn}>{l}</button>
+        ))}
+      </form>
+    );
+  }
+  if (item.record_table === "client_fees") {
+    return (
+      <form action={resolveFeeMismatch} className="flex gap-1">
+        <input type="hidden" name="id" value={item.record_id} />
+        <button name="choice" value="whop" className={btn}>Use Whop fee</button>
+        <button name="choice" value="keep" className={btn}>Keep fee on record</button>
       </form>
     );
   }
@@ -56,12 +75,23 @@ export function ReviewList({ items, clients, isOwner }: { items: ReviewItem[]; c
   return (
     <ul className="divide-y divide-line">
       {items.map((item) => (
-        <li key={`${item.kind}:${item.record_id}:${item.title}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+        <li key={item.item_key} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
           <div className="min-w-0">
             <div className="truncate text-sm">{item.title}</div>
             <div className="truncate text-xs text-muted">{item.detail}</div>
           </div>
-          <FixButtons item={item} clients={clients} isOwner={isOwner} />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <FixButtons item={item} clients={clients} isOwner={isOwner} />
+            {isOwner ? (
+              <form action={dismissReviewItem} className="flex gap-1">
+                <input type="hidden" name="item_key" value={item.item_key} />
+                <input type="hidden" name="kind" value={item.kind} />
+                <input type="hidden" name="title" value={item.title} />
+                <input name="reason" required placeholder="Reason" aria-label="Reason for dismissing" className="w-28 rounded border border-line px-1.5 py-1 text-xs" />
+                <button className={btn}>Dismiss</button>
+              </form>
+            ) : null}
+          </div>
         </li>
       ))}
     </ul>

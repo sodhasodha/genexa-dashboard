@@ -26,6 +26,7 @@ type Totals = {
   expenses: number | null; bank_revenue: number | null;
 };
 const n = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+const usd = (v: number) => v.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const SOURCE_NAME: Record<string, string> = { cortana: "Cortana", ghl: "GHL", whop: "Whop", mercury: "Mercury" };
 
 export async function getOverview(period: Period) {
@@ -34,7 +35,7 @@ export async function getOverview(period: Period) {
     supabase.rpc("overview_period", { p_from: period.from, p_to: period.to }).single(),
     supabase.rpc("overview_period", { p_from: period.prevFrom, p_to: period.prevTo }).single(),
     supabase.from("source_freshness").select("source, freshness"),
-    supabase.from("clients").select("stage, monthly_fee").is("deleted_at", null),
+    supabase.from("clients").select("id, stage").is("deleted_at", null),
     supabase.from("scoring_config").select("key, value").in("key", ["rev_share_rate", "mrr_target"]),
     supabase.from("ad_metrics_daily").select("date").order("date").limit(1).maybeSingle(),
   ]);
@@ -70,14 +71,32 @@ export async function getOverview(period: Period) {
   };
   const ratio = (a: number | null, b: number | null) => (a === null || b === null || b === 0 ? null : a / b);
 
-  const live = (clients.data ?? []).filter((x) => x.stage !== "churned");
-  const mrr = live.reduce((a, x) => a + Number(x.monthly_fee ?? 0), 0);
+  // MRR: each client's effective monthly fee (Whop plan when matched, confirmed or recorded fee otherwise).
+  const fees = await supabase.from("client_fees").select("monthly_fee, source");
+  if (fees.error) throw new Error(`client_fees: ${fees.error.message}`);
+  const mrr = (fees.data ?? []).reduce((a, x) => a + Number(x.monthly_fee ?? 0), 0);
+  const fromWhop = (fees.data ?? []).filter((x) => x.source === "whop").length;
+  // Month-on-month uses one method for both months: recurring Whop memberships now vs at the end of last month.
+  const lastMonthEnd = new Date(Date.UTC(Number(period.to.slice(0, 4)), Number(period.to.slice(5, 7)) - 1, 0)).toISOString().slice(0, 10);
+  const [whopNow, whopThen] = await Promise.all([
+    supabase.rpc("whop_mrr_at", { p_day: period.to }),
+    supabase.rpc("whop_mrr_at", { p_day: lastMonthEnd }),
+  ]);
+  const whopKnown = freshness.get("whop") !== "never" && !whopNow.error && !whopThen.error;
+  const recurringNow = whopKnown ? Number(whopNow.data) : null;
+  const recurringThen = whopKnown ? Number(whopThen.data) : null;
   const stage = (s: string) => (clients.data ?? []).filter((x) => x.stage === s).length;
   const net = (t: Totals) => (t.bank_revenue === null && t.expenses === null ? null : (t.bank_revenue ?? 0) - (t.expenses ?? 0));
 
   const money: Tile[] = [
     tile("cash_collected", "Cash collected", "money", ["whop"], c.cash_collected, p.cash_collected, "good"),
-    { ...tile("mrr", "MRR", "money", [], mrr, null, "good"), note: "No earlier month recorded yet", sub: `Target ${(cfg.get("mrr_target") ?? 0).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}` },
+    {
+      ...tile("mrr", "MRR", "money", [], mrr, null, "good"),
+      note: `${fromWhop} of ${(fees.data ?? []).length} clients priced from Whop`,
+      sub: recurringNow !== null && recurringThen !== null
+        ? `Whop recurring ${usd(recurringNow)} · ${usd(recurringThen)} at end of last month`
+        : `Target ${usd(cfg.get("mrr_target") ?? 0)}`,
+    },
     tile("clinic_revenue", "Clinic revenue generated", "money", ["cortana"], c.clinic_revenue, ev(p.clinic_revenue), "good"),
     tile("rev_share", "Rev share owed", "money", ["cortana"],
       c.clinic_revenue === null || revShare === null ? null : c.clinic_revenue * revShare,
@@ -149,22 +168,23 @@ export async function getBottlenecks(): Promise<{ rows: Bottleneck[]; atRisk: nu
 export const REVIEW_KINDS = [
   { kind: "unlogged_outcome", label: "Unlogged outcomes" },
   { kind: "unmatched_payment", label: "Unmatched payments" },
+  { kind: "unclassified_payment", label: "Unclassified payments" },
   { kind: "uncategorised_expense", label: "Uncategorised expenses" },
   { kind: "eod_issue", label: "EOD issues" },
   { kind: "test_lead", label: "Test leads" },
   { kind: "anomaly", label: "Data anomalies" },
 ] as const;
 export type ReviewKind = (typeof REVIEW_KINDS)[number]["kind"];
-export type ReviewItem = { kind: ReviewKind; record_table: string; record_id: string; client_id: string | null; title: string; detail: string };
+export type ReviewItem = { kind: ReviewKind; record_table: string; record_id: string; client_id: string | null; title: string; detail: string; item_key: string };
 
 export async function getReview(): Promise<{ counts: Record<ReviewKind, number>; items: ReviewItem[]; total: number }> {
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("data_review_items")
-    .select("kind, record_table, record_id, client_id, title, detail, occurred_at")
+    .from("data_review_open")
+    .select("kind, record_table, record_id, client_id, title, detail, occurred_at, item_key")
     .order("occurred_at", { ascending: false })
     .limit(500);
-  if (error) throw new Error(`data_review_items: ${error.message}`);
+  if (error) throw new Error(`data_review_open: ${error.message}`);
   const items = (data ?? []) as ReviewItem[];
   const counts = Object.fromEntries(REVIEW_KINDS.map((k) => [k.kind, items.filter((i) => i.kind === k.kind).length])) as Record<ReviewKind, number>;
   return { counts, items, total: items.length };
@@ -238,32 +258,42 @@ export type Trajectory = {
   daysInMonth: number;
 };
 
-/** MRR by month (frozen snapshots + the live current month) and this month's cumulative cash. */
-export async function getTrajectory(today: string, mrrNow: number, target: number | null): Promise<Trajectory> {
+/**
+ * Recurring MRR by month from Whop memberships (month end; today for the current
+ * month), one method for every month, plus this month's cumulative cash.
+ */
+export async function getTrajectory(today: string, target: number | null): Promise<Trajectory> {
   const supabase = await createClient();
   const monthStart = `${today.slice(0, 8)}01`;
-  const [snaps, pays, fresh, settings] = await Promise.all([
-    supabase.from("agency_month").select("month, snapshot").order("month"),
-    supabase.from("payments").select("amount, paid_at, classified").gte("paid_at", `${monthStart}T04:00:00Z`).order("paid_at"),
+  const [pays, fresh, settings] = await Promise.all([
+    supabase.from("payments").select("amount, paid_at, classified, status").gte("paid_at", `${monthStart}T04:00:00Z`).order("paid_at"),
     supabase.from("source_freshness").select("source, freshness").eq("source", "whop").maybeSingle(),
     supabase.from("app_settings").select("value").eq("key", "mrr_target_date").maybeSingle(),
   ]);
+  const whopKnown = fresh.data?.freshness !== "never" && fresh.data?.freshness !== undefined;
   const targetDate = typeof settings.data?.value === "string" ? settings.data.value : null;
-  const recorded = new Map((snaps.data ?? []).map((s) => [String(s.month).slice(0, 7), n((s.snapshot as { mrr?: number })?.mrr)]));
-  const months: Trajectory["months"] = [];
+  const keys: string[] = [];
   const end = targetDate ? targetDate.slice(0, 7) : today.slice(0, 7);
-  let [y, m] = [Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 5];
-  while (m < 1) { m += 12; y -= 1; }
-  for (let i = 0; i < 24; i++) {
+  // History starts in August 2026, the first month Genexa's Whop data is complete.
+  let [y, m] = [2026, 8];
+  for (let i = 0; i < 36; i++) {
     const key = `${y}-${String(m).padStart(2, "0")}`;
-    const current = key === today.slice(0, 7);
-    months.push({ month: key, mrr: current ? mrrNow : (recorded.get(key) ?? null), current });
+    keys.push(key);
     if (key >= end) break;
     m += 1;
     if (m > 12) { m = 1; y += 1; }
   }
+  const months: Trajectory["months"] = await Promise.all(
+    keys.map(async (key) => {
+      const current = key === today.slice(0, 7);
+      if (!whopKnown || key > today.slice(0, 7)) return { month: key, mrr: null, current };
+      const lastDay = new Date(Date.UTC(Number(key.slice(0, 4)), Number(key.slice(5, 7)), 0)).toISOString().slice(0, 10);
+      const { data, error } = await supabase.rpc("whop_mrr_at", { p_day: current ? today : lastDay });
+      return { month: key, mrr: error ? null : Number(data), current };
+    }),
+  );
   const byDay = new Map<number, number>();
-  for (const p of (pays.data ?? []).filter((x) => x.classified)) {
+  for (const p of (pays.data ?? []).filter((x) => x.classified && x.status === "paid")) {
     const day = Number(new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", day: "2-digit" }).format(new Date(p.paid_at as string)));
     byDay.set(day, (byDay.get(day) ?? 0) + Number(p.amount));
   }
@@ -274,7 +304,7 @@ export async function getTrajectory(today: string, mrrNow: number, target: numbe
     cash.push({ day: d, total: running });
   }
   return {
-    months, cash, cashKnown: fresh.data?.freshness !== "never" && fresh.data?.freshness !== undefined,
+    months, cash, cashKnown: whopKnown,
     target, targetDate,
     daysInMonth: new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0)).getUTCDate(),
   };

@@ -157,3 +157,66 @@ describe("staff_on_shift", () => {
     expect(await on(people.sameer, "(app_today() + time '18:00') at time zone 'America/New_York'")).toBe(false);
   });
 });
+
+describe("fees, MRR from Whop and dismissals", () => {
+  const member = (clientId: string | null, price: number, days: number, opts: { valid?: boolean; started?: string; ends?: string } = {}) =>
+    db.query(
+      `insert into whop_memberships (whop_membership_id, client_id, status, valid, billing_period_days, renewal_price, started_at, renewal_period_end, product_title)
+       values (gen_random_uuid()::text, $1, 'active', $2, $3, $4, ${opts.started ?? "now() - interval '100 days'"}, ${opts.ends ?? "now() + interval '10 days'"}, 'Genexa Scaling: Patient Protocol')`,
+      [clientId, opts.valid ?? true, days, price],
+    );
+  const fee = (id: string) => one<{ monthly_fee: string; source: string; mismatch: boolean; whop_monthly: string | null }>(`select monthly_fee, source, mismatch, whop_monthly from client_fees where client_id = $1`, [id]);
+
+  it("takes a matched client's fee from Whop, compares monthly figures, and honours a confirmed fee", async () => {
+    const a = await id(`insert into clients (name, stage, billing_cycle, cycle_fee) values ('Fee A', 'live', '30', 2000) returning id`);
+    expect(await fee(a)).toMatchObject({ source: "record", mismatch: false });
+    expect(Number((await fee(a)).monthly_fee)).toBe(2000);
+    await member(a, 1500, 30);
+    let f = await fee(a);
+    expect([Number(f.monthly_fee), f.source, f.mismatch]).toEqual([1500, "whop", true]);
+    // $2,000 every 45 days is the same money as $4,000 every 90: no mismatch.
+    const q = await id(`insert into clients (name, stage, billing_cycle, cycle_fee) values ('Fee Q', 'onboarding', '90', 4000) returning id`);
+    await member(q, 2000, 45);
+    f = await fee(q);
+    expect([Number(f.monthly_fee), f.mismatch]).toEqual([1333.33, false]);
+    // Two locations on two memberships add up.
+    const v = await id(`insert into clients (name, stage, billing_cycle, cycle_fee) values ('Fee V', 'live', '30', 3000) returning id`);
+    await member(v, 2000, 30);
+    await member(v, 1000, 30);
+    expect((await fee(v)).mismatch).toBe(false);
+    // An owner-confirmed fee wins and is not listed as a mismatch.
+    await db.query(`update clients set fee_locked = true where id = $1`, [a]);
+    f = await fee(a);
+    expect([Number(f.monthly_fee), f.source, f.mismatch]).toEqual([2000, "confirmed", false]);
+  });
+
+  it("lists a fee mismatch for review, and a dismissal hides an item without deleting anything", async () => {
+    const c = await id(`insert into clients (name, stage, billing_cycle, cycle_fee, launch_date, cortana_business_id) values ('Fee M', 'live', '30', 2000, app_today(), 'm') returning id`);
+    await member(c, 1200, 30);
+    const open = async () => (await db.query<{ title: string; item_key: string; record_table: string }>(`select title, item_key, record_table from data_review_open where client_id = $1`, [c])).rows;
+    let rows = await open();
+    expect(rows.map((r) => r.title)).toEqual(["Fee M · fee on record $2000.00/month, Whop charges $1200.00/month"]);
+    expect(rows[0].record_table).toBe("client_fees");
+    await db.query(`insert into data_review_dismissals (item_key, kind, title, reason, dismissed_by) values ($1, 'anomaly', $2, 'Discount agreed for October', $3)`, [rows[0].item_key, rows[0].title, people.ryan]);
+    expect(await open()).toEqual([]);
+    // A different amount is a new item and shows again.
+    await db.query(`update whop_memberships set renewal_price = 1000 where client_id = $1`, [c]);
+    rows = await open();
+    expect(rows.length).toBe(1);
+    await expect(db.query(`delete from data_review_dismissals`)).rejects.toThrow(/Hard deletes/);
+    await expect(db.query(`insert into data_review_dismissals (item_key, kind, title, reason) values ('k', 'anomaly', 't', '  ')`)).rejects.toThrow();
+  });
+
+  it("recurring MRR on a past day counts memberships that had started and not yet ended", async () => {
+    const before = Number((await one<{ v: string }>(`select whop_mrr_at(app_today() - 30) as v`)).v);
+    await member(null, 900, 30, { started: "now() - interval '60 days'" }); // live then and now
+    await member(null, 600, 30, { started: "now() - interval '5 days'" }); // not started 30 days ago
+    await member(null, 300, 30, { valid: false, started: "now() - interval '90 days'", ends: "now() - interval '40 days'" }); // ended before
+    await member(null, 500, 30, { valid: false, started: "now() - interval '90 days'", ends: "now() - interval '10 days'" }); // ended after
+    await member(null, 3000, 90, { started: "now() - interval '60 days'" }); // $1,000 a month
+    // Another business's product on the same Whop account is not Genexa MRR.
+    await db.query(`insert into whop_memberships (whop_membership_id, status, valid, billing_period_days, renewal_price, started_at, product_title) values ('other-biz', 'active', true, 30, 9999, now() - interval '60 days', 'Irrigation Growth Plan')`);
+    const then = Number((await one<{ v: string }>(`select whop_mrr_at(app_today() - 30) as v`)).v);
+    expect(then - before).toBe(900 + 500 + 1000);
+  });
+});

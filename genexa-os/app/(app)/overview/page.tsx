@@ -16,7 +16,7 @@ export default async function OverviewPage({ searchParams }: PageProps<"/overvie
   const [overview, bottlenecks, review, clients, people, strip] = await Promise.all([
     getOverview(period), getBottlenecks(), getReview(), getClientOptions(), getPeople(), getClientsStrip(),
   ]);
-  const trajectory = await getTrajectory(today, overview.mrr, overview.mrrTarget);
+  const trajectory = await getTrajectory(today, overview.mrrTarget);
   const queue = (REVIEW_KINDS.find((k) => k.kind === params.queue)?.kind ?? REVIEW_KINDS.find((k) => review.counts[k.kind] > 0)?.kind ?? "anomaly") as ReviewKind;
   const panel = params.panel === "review" ? "review" : "bottlenecks";
 

@@ -21,7 +21,7 @@ export function Trajectory({ data }: { data: Data }) {
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
-          <h3 className="mb-1 text-xs text-muted">MRR by month</h3>
+          <h3 className="mb-1 text-xs text-muted">Recurring MRR by month (Whop memberships)</h3>
           <LineChart
             ariaLabel="MRR by month against the goal"
             color="var(--color-series-1)"
@@ -35,9 +35,11 @@ export function Trajectory({ data }: { data: Data }) {
               emphasised: m.current,
             }))}
           />
-          {recordedMonths <= 1 ? (
-            <p className="mt-1 text-xs text-muted">Only this month is recorded so far. Each month is frozen on the 1st and added here.</p>
-          ) : null}
+          <p className="mt-1 text-xs text-muted">
+            {recordedMonths === 0
+              ? "no data · Whop not connected yet"
+              : "Month-end totals of renewing Whop memberships. Clients paying by one-off link count in the MRR tile but not here."}
+          </p>
         </div>
         <div>
           <h3 className="mb-1 text-xs text-muted">Cash collected this month, cumulative</h3>

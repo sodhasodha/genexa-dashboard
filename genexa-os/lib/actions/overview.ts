@@ -107,3 +107,47 @@ export async function markLeadReal(formData: FormData) {
   await supabase.from("leads").update({ is_test: false, test_reviewed: true }).eq("id", id);
   done();
 }
+
+/** Hide a review item, with a reason. Nothing is deleted; the dismissal is its own audited record. */
+export async function dismissReviewItem(formData: FormData) {
+  const me = await requireOwner();
+  const reason = String(formData.get("reason") ?? "").trim();
+  const itemKey = String(formData.get("item_key") ?? "");
+  if (!reason || !itemKey) return;
+  const supabase = await createClient();
+  await supabase.from("data_review_dismissals").insert({
+    item_key: itemKey, kind: String(formData.get("kind") ?? ""), title: String(formData.get("title") ?? ""), reason, dismissed_by: me.id,
+  });
+  done();
+}
+
+/** Fee mismatch: either adopt what Whop charges, or confirm the fee on record. */
+export async function resolveFeeMismatch(formData: FormData) {
+  await requireOwner();
+  const clientId = Id.parse(formData.get("id"));
+  const choice = String(formData.get("choice"));
+  const supabase = await createClient();
+  if (choice === "keep") {
+    await supabase.from("clients").update({ fee_locked: true, fee_note: "Fee on record confirmed by the owner" }).eq("id", clientId);
+  } else if (choice === "whop") {
+    const { data: fee } = await supabase.from("client_fees").select("whop_monthly, billing_cycle").eq("client_id", clientId).single();
+    if (fee?.whop_monthly !== null && fee?.whop_monthly !== undefined) {
+      const months = fee.billing_cycle === "90" ? 3 : 1;
+      await supabase.from("clients").update({ cycle_fee: Math.round(Number(fee.whop_monthly) * months * 100) / 100, fee_locked: false, fee_note: "Fee taken from Whop" }).eq("id", clientId);
+    }
+  }
+  done();
+}
+
+const LABELS: Record<string, string> = { rev_share: "Rev share", retainer: "Retainer", setup: "Set-up fee", other: "Other income" };
+
+/** Say what an untitled Whop payment was, so it counts as cash collected. */
+export async function classifyPayment(formData: FormData) {
+  await requireOwner();
+  const id = Id.parse(formData.get("id"));
+  const label = LABELS[String(formData.get("label"))];
+  if (!label) return;
+  const supabase = await createClient();
+  await supabase.from("payments").update({ title_override: label, product_title: label }).eq("id", id);
+  done();
+}

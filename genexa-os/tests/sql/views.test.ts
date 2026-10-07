@@ -64,6 +64,22 @@ describe("client_mtd (all patient-side numbers from Cortana)", () => {
     expect(Number(m.rev_share)).toBe(400);
   });
 
+  it("counts a patient once per period even when they book on two different days", async () => {
+    const id = await client("Twice Clinic");
+    await ev(id, "lead", "p1", { daysAgo: 0 });
+    await ev(id, "unconfirmed_appointment_booked", "p1", { daysAgo: 0 });
+    await db.query(
+      `insert into cortana_events (client_id, cortana_entry_id, event, occurred_at, contact_id) values
+         ($1, 'tw1', 'unconfirmed_appointment_booked', (app_today() - 1 + time '12:00') at time zone 'America/New_York', 'p1'),
+         ($1, 'tw2', 'unconfirmed_appointment_booked', (app_today() - 1 + time '13:00') at time zone 'America/New_York', 'p2')`,
+      [id],
+    );
+    const byDay = await one<{ n: string }>(`select sum(booked) as n from client_performance_daily where client_id = $1 and day >= app_today() - 1`, [id]);
+    expect(Number(byDay.n)).toBe(3); // p1 yesterday, p2 yesterday, p1 today
+    const period = await one<{ booked: string }>(`select booked from client_funnel_period(app_today() - 1, app_today()) where client_id = $1`, [id]);
+    expect(Number(period.booked)).toBe(2); // two patients
+  });
+
   it("shows null, not zero, where there is no ad row or no revenue", async () => {
     const id = await client("Leads Only Clinic");
     await ev(id, "lead", "a");
