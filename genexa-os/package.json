@@ -17,7 +17,8 @@
     "setup:cron": "node --env-file=.env.local scripts/setup-cron.mjs",
     "sync:whop": "tsx --env-file=.env.local scripts/sync-whop.ts",
     "sync:ghl": "tsx --env-file=.env.local scripts/sync-ghl.ts",
-    "sync:mercury": "tsx --env-file=.env.local scripts/sync-mercury.ts"
+    "sync:mercury": "tsx --env-file=.env.local scripts/sync-mercury.ts",
+    "router:backfill": "tsx --env-file=.env.local scripts/router-backfill.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

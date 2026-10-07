@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { assignPayment, categoriseExpense, classifyPayment, dismissReviewItem, markLeadReal, resolveException, resolveFeeMismatch, setAttendance, snoozeException } from "@/lib/actions/overview";
+import { decideClientRequest } from "@/lib/actions/router";
 import { formatValue } from "@/lib/format";
 import { REVIEW_KINDS, type Bottleneck, type ReviewItem, type ReviewKind } from "@/lib/queries/overview";
 
@@ -72,7 +73,57 @@ function FixButtons({ item, clients, isOwner }: { item: ReviewItem; clients: { i
   return item.client_id ? <Link href={`/clients/${item.client_id}`} className={btn}>Open client</Link> : null;
 }
 
-export function ReviewList({ items, clients, isOwner }: { items: ReviewItem[]; clients: { id: string; name: string }[]; isOwner: boolean }) {
+const OWNER_NAME: Record<string, string> = { tech: "Tech", ads: "Ads", ryan: "Ryan" };
+
+/** Triage: client requests the router could not place. The owner assigns each one, or says it is not a request. */
+function TriageList({ items, isOwner }: { items: ReviewItem[]; isOwner: boolean }) {
+  return (
+    <div>
+      <p className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2 text-xs text-muted">
+        Client messages the router was not sure about. Assigning one creates the work for that person.
+        <Link href="/router" className="underline hover:text-ink">How accurate is the router?</Link>
+      </p>
+      {items.length === 0 ? <p className="px-4 py-6 text-sm text-muted">Nothing to review here.</p> : null}
+      <ul className="divide-y divide-line">
+        {items.map((item) => {
+          const t = item.triage;
+          const guess = !t || t.is_request === null
+            ? "Not classified"
+            : `${t.is_request ? `Request${t.owner ? ` for ${OWNER_NAME[t.owner] ?? t.owner}` : ", no owner"}` : "Not a request"}${t.urgency === "urgent" ? " · urgent" : ""}${t.confidence !== null ? ` · ${Math.round(t.confidence * 100)}% confident` : ""}`;
+          return (
+            <li key={item.item_key} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+              <div className="min-w-0 max-w-3xl">
+                <div className="text-sm font-medium">
+                  {item.title}
+                  {t ? <span className="ml-2 text-xs font-normal text-muted">#{t.channel_kind}{t.mode === "backfill" ? " · from backfill" : ""}</span> : null}
+                </div>
+                <p className="whitespace-pre-wrap break-words text-sm">{item.detail}</p>
+                <div className="mt-1 text-xs text-muted">
+                  Router&apos;s guess: {guess}{t?.guess_title ? ` · “${t.guess_title}”` : ""}
+                  {t?.reason ? <span className="text-warn"> · {t.reason}</span> : null}
+                  {t ? <> · <a href={t.permalink} target="_blank" rel="noreferrer" className="underline hover:text-ink">Open in Slack</a></> : null}
+                </div>
+              </div>
+              {isOwner ? (
+                <form action={decideClientRequest} className="flex flex-wrap items-center gap-1">
+                  <input type="hidden" name="id" value={item.record_id} />
+                  <span className="text-xs text-muted">Assign →</span>
+                  {Object.entries(OWNER_NAME).map(([value, label]) => (
+                    <button key={value} name="owner" value={value} className={btn}>{label}</button>
+                  ))}
+                  <button name="decision" value="not_request" className={btn}>Not a request</button>
+                </form>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+export function ReviewList({ items, clients, isOwner, queue }: { items: ReviewItem[]; clients: { id: string; name: string }[]; isOwner: boolean; queue?: ReviewKind }) {
+  if (queue === "triage" || (items.length > 0 && items.every((i) => i.kind === "triage"))) return <TriageList items={items} isOwner={isOwner} />;
   if (items.length === 0) return <p className="px-4 py-6 text-sm text-muted">Nothing to review here.</p>;
   return (
     <ul className="divide-y divide-line">
@@ -173,7 +224,7 @@ export function NeedsAction({
             ))}
           </div>
           <div className="border-t border-line">
-            <ReviewList items={items.filter((i) => i.kind === queue)} clients={clients} isOwner={isOwner} />
+            <ReviewList items={items.filter((i) => i.kind === queue)} clients={clients} isOwner={isOwner} queue={queue} />
           </div>
         </div>
       )}
