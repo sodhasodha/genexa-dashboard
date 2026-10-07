@@ -25,6 +25,10 @@ const SCHEDULES = [
   ["genexa-ghl-appointments", "50 * * * *", "ghl-appointments", 290000], // consult times only; runs after the Cortana events sync
   ["genexa-mercury-sync", "0 10 * * *", "mercury-sync", 120000], // daily 06:00 ET
   ["genexa-pay-run", "0 17 * * 0", "pay-run", 120000], // Sunday 18:00 UK in summer time (17:00 UTC); 17:00 UK in winter
+  ["genexa-attendance", "*/5 * * * *", "attendance", 60000], // late / no-show status and alerts
+  ["genexa-reminders", "2-59/5 * * * *", "reminders", 120000], // every 5 minutes, offset from attendance
+  ["genexa-daily-snapshot", "5 4 * * *", "daily-snapshot", 120000], // 00:05 ET (23:05 in winter)
+  ["genexa-weekly-client-report", "0 13 * * 1", "weekly-client-report", 240000], // Monday 09:00 ET (08:00 in winter)
   ["genexa-exceptions", "*/15 * * * *", "exceptions", 60000],
 ];
 

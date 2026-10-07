@@ -7,6 +7,9 @@ import { createWhopClient } from "@/lib/integrations/whop/client";
 import { syncGhlAppointments, type GhlKeys } from "@/lib/integrations/ghl/sync";
 import { syncMercury } from "@/lib/integrations/mercury/sync";
 import { JOBS_PAYROLL } from "@/lib/jobs/payroll";
+import { JOBS_ATTENDANCE } from "@/lib/jobs/attendance";
+import { JOBS_REMINDERS } from "@/lib/jobs/reminders";
+import { JOBS_MISC } from "@/lib/jobs/misc";
 import { syncWhop } from "@/lib/integrations/whop/sync";
 import { addDays, etToday } from "@/lib/time";
 import { runExceptionsEngine } from "@/lib/exceptions/engine";
@@ -50,6 +53,9 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
     return { ok: r.ok, summary: r };
   },
   ...JOBS_PAYROLL,
+  ...JOBS_ATTENDANCE,
+  ...JOBS_REMINDERS,
+  ...JOBS_MISC,
   exceptions: async () => {
     const r = await runExceptionsEngine(createAdminClient());
     return { ok: true, summary: r };

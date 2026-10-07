@@ -41,7 +41,7 @@ export default async function OverviewPage({ searchParams }: PageProps<"/overvie
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {overview.profit.map((t) => <Tile key={t.key} tile={t} prevLabel={period.prevLabel} large />)}
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
         {overview.delivery.map((t) => <Tile key={t.key} tile={t} prevLabel={period.prevLabel} />)}
       </div>
 

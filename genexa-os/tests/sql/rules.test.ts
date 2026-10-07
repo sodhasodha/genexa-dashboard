@@ -180,3 +180,12 @@ describe("exceptions dedupe", () => {
     await db.query(`insert into exceptions (type, severity, reason, dedupe_key) values ('zero_spend', 'red', 'r', 'zero_spend:c1')`);
   });
 });
+
+describe("client Slack channels", () => {
+  it("no notification can ever be queued for a client's channel", async () => {
+    await db.query(`insert into clients (name, slack_general_id, slack_scheduling_id) values ('Slack Clinic', 'CGENERAL1', 'CSCHED1')`);
+    await db.query(`insert into notifications (rule_key, channel, window_key) values ('outcome_overdue', 'CGENERAL1', 'a'), ('weekly_scorecard', 'CSCHED1', 'b'), ('pod_note', 'CTEAMPOD1', 'c')`);
+    const rows = await db.query<{ channel: string }>(`select channel from notifications where channel like 'C%' order by channel`);
+    expect(rows.rows.map((r) => r.channel)).toEqual(["CTEAMPOD1"]);
+  });
+});

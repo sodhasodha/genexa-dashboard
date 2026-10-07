@@ -318,7 +318,8 @@ describe("daily-snapshot job", () => {
     expect(first.ok).toBe(true);
     expect(first.summary.scores).toEqual({ week_start: week, rows: expected });
     expect(await snapshotRows()).toBe(expected);
-    expect(await count("person_scores_snapshot where staff_id = $1 and week_start = $2 and card = 'tech'", [people.sameer, week])).toBe(4);
+    // The four tech metrics, plus any attendance metrics on the same card.
+    expect(await count("person_scores_snapshot where staff_id = $1 and week_start = $2 and card = 'tech' and metric in ('launch_sla_pct', 'fix_sla_pct', 'broken_week1', 'paused_pct')", [people.sameer, week])).toBe(4);
     const mismatched = await count(
       `person_scores_snapshot s join person_scores_weekly w using (staff_id, week_start, card, metric)
        where s.value is distinct from w.value or s.colour is distinct from w.colour or s.numerator is distinct from w.numerator`);

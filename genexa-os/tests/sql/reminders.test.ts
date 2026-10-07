@@ -561,11 +561,12 @@ describe("owner rules", () => {
 
   it("prospect_follow_up: the morning of the date and daily while overdue; never after it is closed", async () => {
     const today = `(now() at time zone 'Europe/London')::date`;
-    await db.query(`insert into prospects (name, contact, promised, follow_up_date, stage) values
-      ('Due Clinic', 'dr@due.test 555-0100', 'Send the case study', ${today}, 'chase'),
-      ('Late Clinic', null, 'Call back', ${today} - 2, 'contract_out'),
-      ('Future Clinic', null, null, ${today} + 1, 'chase'),
-      ('Dead Clinic', null, null, ${today} - 9, 'dead')`);
+    await db.query(`insert into prospects (name, promised, follow_up_date, stage) values
+      ('Due Clinic', 'Send the case study', ${today}, 'chase'),
+      ('Late Clinic', 'Call back', ${today} - 2, 'contract_out'),
+      ('Future Clinic', null, ${today} + 1, 'chase'),
+      ('Dead Clinic', null, ${today} - 9, 'dead')`);
+    await db.query(`insert into prospect_contacts (prospect_id, contact) select id, 'dr@due.test 555-0100' from prospects where name = 'Due Clinic'`);
     await run(await london(0, "07:10"));
     const dm = to("ryan").filter((m) => m.text.startsWith("Prospect follow-up"));
     expect(dm.length).toBe(1);
@@ -676,15 +677,13 @@ describe("patient reminders (seeded off)", () => {
     expect(unconfirmed[0].text).toContain("Pivot Clinic (1)");
     expect(unconfirmed[0].text).toContain("Jane");
 
-    const channel = sent.filter((m) => m.target === "C_PIVOT");
-    expect(channel.length).toBe(1);
-    expect(channel[0].text).toContain("Omar");
-    expect(channel[0].text).toContain(`${APP}/data-review?queue=unlogged_outcome`);
+    // Clients are in a separate Slack workspace: nothing is ever queued for a clinic's channel.
+    expect(sent.filter((m) => m.target === "C_PIVOT")).toEqual([]);
     const csr = to("amanda").filter((m) => m.text.startsWith("Outcome not logged"));
     expect(csr.length).toBe(1);
     expect(to("marjorie")).toEqual([]); // other pod
 
-    expect(sent.length).toBeGreaterThanOrEqual(3);
+    expect(sent.length).toBeGreaterThanOrEqual(2);
     const everything = JSON.stringify(sent) + JSON.stringify((await db.query(`select payload from notifications`)).rows);
     for (const secret of ["Smithson", "Doe", "Khalidi", "mail.invalid", "jane.smithson", "omar.k"]) {
       expect(everything, secret).not.toContain(secret);

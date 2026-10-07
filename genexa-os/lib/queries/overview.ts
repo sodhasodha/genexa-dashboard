@@ -121,7 +121,18 @@ export async function getOverview(period: Period) {
     tile("show_rate", "Show rate", "percent", ["cortana"],
       ratio(c.shows, (c.shows ?? 0) + (c.no_shows ?? 0)), eventsPrevComplete ? ratio(p.shows, (p.shows ?? 0) + (p.no_shows ?? 0)) : null, "good"),
   ];
-  const delivery = deliveryRaw.map((t) => (t.key === "ad_spend" ? t : noEvents(t)));
+  // Consults booked for tomorrow, from GHL appointments (consult times only).
+  const tomorrow = await supabase.from("consults_tomorrow").select("consults, confirmed");
+  const consults = (tomorrow.data ?? []).reduce((a, r) => a + Number(r.consults), 0);
+  const confirmed = (tomorrow.data ?? []).reduce((a, r) => a + Number(r.confirmed), 0);
+  const consultsTile: Tile = {
+    ...tile("consults_tomorrow", "Consults tomorrow", "count", ["ghl"], consults, null, "neutral"),
+    note: `${confirmed} confirmed · ${consults - confirmed} not yet`,
+  };
+  const delivery = [...deliveryRaw.map((t) => (t.key === "ad_spend" ? t : noEvents(t))), consultsTile];
+  // Team cost as a share of cash collected, from approved pay runs (owner only; null for everyone else).
+  const teamCost = await supabase.rpc("team_cost_pct", { p_from: period.from, p_to: period.to });
+  if (!teamCost.error && teamCost.data !== null) profit[0] = { ...profit[0], sub: `Team pay is ${Number(teamCost.data).toFixed(1)}% of cash collected` };
   money[2] = noEvents(money[2]);
   money[3] = noEvents(money[3]);
   return { money, profit, delivery, mrr, mrrTarget: cfg.get("mrr_target") ?? null };
@@ -146,7 +157,7 @@ export async function getBottlenecks(): Promise<{ rows: Bottleneck[]; atRisk: nu
   if (error) throw new Error(`exceptions: ${error.message}`);
   const ids = (data ?? []).map((d) => d.id);
   const { data: notes } = ids.length
-    ? await supabase.from("notifications").select("record_id").in("record_id", ids).not("sent_at", "is", null)
+    ? await supabase.from("notifications").select("record_id").in("record_id", ids).not("sent_at", "is", null).not("slack_ts", "is", null)
     : { data: [] as { record_id: string }[] };
   const one = <T,>(v: T | T[] | null): T | null => (Array.isArray(v) ? (v[0] ?? null) : v);
   const rows = (data ?? []).map((d) => ({

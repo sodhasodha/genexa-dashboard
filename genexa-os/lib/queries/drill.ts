@@ -136,6 +136,17 @@ export async function getDrill(metric: string, period: Period): Promise<DrillTab
         total: fmt((data ?? []).reduce((a, r) => a + Number(r.monthly_fee ?? 0), 0), "money"),
       };
     }
+    case "consults_tomorrow": {
+      const { data, error } = await db.from("consults_tomorrow").select("name, consults, confirmed").order("consults", { ascending: false });
+      if (error) throw new Error(error.message);
+      return {
+        title: "Consults booked for tomorrow (ET)",
+        note: "From each clinic's GHL consult calendars. Cancelled consults are left out.",
+        columns: ["Clinic", "Consults", "Confirmed", "Not yet confirmed"],
+        rows: (data ?? []).map((r) => [r.name, String(r.consults), String(r.confirmed), String(Number(r.consults) - Number(r.confirmed))]),
+        total: `${(data ?? []).reduce((a, r) => a + Number(r.consults), 0)} consults`,
+      };
+    }
     default:
       return null;
   }
