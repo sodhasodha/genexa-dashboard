@@ -284,35 +284,44 @@ describe("finance rules", () => {
 });
 
 describe("outcome nudges", () => {
-  it("counts consults 24h+ past with no outcome per live clinic, for the General channel, with the link", async () => {
+  it("counts only consults that are definitely unlogged, per live clinic, for the General channel", async () => {
     const c = await id(`insert into clients (name, stage, slack_scheduling_id, slack_general_id, timezone) values ('Nudge Clinic', 'live', 'CNUDGESCHED', 'CNUDGEGEN', 'America/Chicago') returning id`);
     const off = await id(`insert into clients (name, stage, slack_general_id) values ('Paused Clinic', 'paused', 'CPAUSED') returning id`);
-    const clean = await id(`insert into clients (name, stage, slack_general_id) values ('Clean Clinic', 'live', 'CCLEAN') returning id`);
-    const appt = (clientId: string, contact: string, when: string, attendance = "scheduled") =>
-      db.query(`insert into appointments (client_id, ghl_contact_id, contact_first_name, scheduled_for, attendance) values ($1, $2, $2, ${when}, $3)`, [clientId, contact, attendance]);
-    await appt(c, "ann", "now() - interval '30 hours'");
-    await appt(c, "bob", "now() - interval '20 days'"); // backlog counts
-    await appt(c, "dan", "now() - interval '3 hours'"); // under 24h
-    await appt(c, "eve", "now() - interval '40 days'"); // older than the queue shows
-    await appt(c, "fay", "now() - interval '4 days'", "showed"); // logged
-    await appt(off, "gus", "now() - interval '2 days'");
-    await appt(clean, "hal", "now() - interval '2 days'", "no_show");
-    const due = () => one<{ channel: string; timezone: string; overdue_count: number; link: string | null; local_dow: number; local_hour: number }>(
-      `select channel, timezone, overdue_count, link, local_dow, local_hour from outcome_nudges_due where client_id = $1`, [c]);
-    const d = await due();
-    expect(d).toMatchObject({ channel: "CNUDGEGEN", timezone: "America/Chicago", overdue_count: 2, link: null });
+    const silent = await id(`insert into clients (name, stage, slack_general_id) values ('Silent Clinic', 'live', 'CSILENT') returning id`);
+    const appt = (clientId: string, name: string, key: string | null, when: string, attendance = "scheduled") =>
+      db.query(`insert into appointments (client_id, ghl_contact_id, contact_first_name, contact_key, scheduled_for, attendance) values ($1, $2, $2, $3, ${when}, $4)`, [clientId, name, key, attendance]);
+    const event = (clientId: string, name: string, key: string, ev: string, when: string) =>
+      db.query(`insert into cortana_events (client_id, cortana_entry_id, contact_id, event, occurred_at, contact_first_name, contact_key) values ($1, $2, $5, $3, ${when}, $4, $5)`, [clientId, `${name}-${ev}-${Math.random()}`, ev, name, key]);
+    // The clinic's outcomes do reach us: one logged in the last 30 days.
+    await event(c, "Zed", "p:z", "appointment_shown", "now() - interval '6 days'");
+    await appt(c, "Ann", "p:1", "now() - interval '30 hours'"); await event(c, "Ann", "p:1", "lead", "now() - interval '9 days'"); // definite
+    await appt(c, "Bob", "p:2", "now() - interval '20 days'"); await event(c, "Bob", "p:2", "appointment_booked", "now() - interval '25 days'"); // definite (backlog)
+    await appt(c, "Cat", null, "now() - interval '3 days'"); // no phone or email: cannot be matched
+    await appt(c, "Dan", "p:4", "now() - interval '3 days'"); // Cortana does not know this phone
+    await appt(c, "Eve", "p:5", "now() - interval '4 days'"); await event(c, "Eve", "p:5", "lead", "now() - interval '9 days'");
+    await event(c, "eve Smith", "p:other", "appointment_shown", "now() - interval '3 days'"); // same first name logged under another number
+    await appt(c, "Fay", "p:6", "now() - interval '3 hours'"); // under 24h
+    await appt(c, "Gil", "p:7", "now() - interval '4 days'", "showed"); // logged
+    await appt(off, "Hal", "p:8", "now() - interval '2 days'");
+    // A clinic with no outcome from Cortana in 30 days: we cannot tell "never logs" from "not reaching us".
+    await appt(silent, "Ian", "p:9", "now() - interval '2 days'"); await event(silent, "Ian", "p:9", "lead", "now() - interval '9 days'");
+
+    const due = (clientId: string) => one<{ channel: string; timezone: string; overdue_count: number; uncertain_count: number; link: string | null; local_dow: number }>(
+      `select channel, timezone, overdue_count, uncertain_count, link, local_dow from outcome_nudges_due where client_id = $1`, [clientId]);
+    const d = await due(c);
+    expect(d).toMatchObject({ channel: "CNUDGEGEN", timezone: "America/Chicago", overdue_count: 2, uncertain_count: 3, link: null });
     expect(d.local_dow).toBeGreaterThanOrEqual(1);
     expect(d.local_dow).toBeLessThanOrEqual(7);
-    // The same number the owner sees in the Unlogged outcomes queue.
+    expect(await due(silent)).toMatchObject({ overdue_count: 0, uncertain_count: 1 });
+    expect(await due(off)).toBeUndefined();
+    // The owner's queue still shows every open consult, certain or not.
     const queue = await one<{ n: number }>(`select count(*)::int as n from data_review_open where kind = 'unlogged_outcome' and client_id = $1`, [c]);
-    expect(queue.n).toBe(2);
-    // Clinics that are not live, or have nothing overdue, are not in the list at all.
-    expect((await db.query(`select 1 from outcome_nudges_due where client_id = any($1)`, [[off, clean]])).rows.length).toBe(0);
+    expect(queue.n).toBe(5);
 
     await db.query(`insert into app_settings (key, value) values ('client_outcome_link', '"https://example.test/default"') on conflict (key) do update set value = excluded.value`);
-    expect((await due()).link).toBe("https://example.test/default");
+    expect((await due(c)).link).toBe("https://example.test/default");
     await db.query(`update clients set outcome_link = 'https://example.test/own' where id = $1`, [c]);
-    expect((await due()).link).toBe("https://example.test/own");
+    expect((await due(c)).link).toBe("https://example.test/own");
 
     await db.query(`insert into notifications (rule_key, channel, record_id, window_key) values ('outcome_nudge', 'CNUDGEGEN', $1, 'w1'), ('weekly_scorecard', 'CNUDGEGEN', $1, 'w1')`, [c]);
     const queued = await db.query<{ rule_key: string }>(`select rule_key from notifications where channel = 'CNUDGEGEN'`);

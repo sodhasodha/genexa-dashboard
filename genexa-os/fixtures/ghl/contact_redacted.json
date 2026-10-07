@@ -1,0 +1,29 @@
+{
+  "contact": {
+    "id": "REDACTEDcontact0001",
+    "dateAdded": "2026-09-20T14:02:11.000Z",
+    "type": "lead",
+    "locationId": "REDACTEDlocation",
+    "firstName": "Jeremy",
+    "firstNameLowerCase": "jeremy",
+    "email": "patient@example.invalid",
+    "emailLowerCase": "patient@example.invalid",
+    "phone": "+15555550123",
+    "country": "US",
+    "timezone": "America/New_York",
+    "attributionSource": {},
+    "createdBy": {},
+    "companyName": null,
+    "source": "REDACTED",
+    "fullNameLowerCase": "jeremy redacted",
+    "lastName": "Redacted",
+    "lastNameLowerCase": "redacted",
+    "lastAttributionSource": {},
+    "additionalPhones": [],
+    "tags": [],
+    "dateUpdated": "2026-09-29T10:00:00.000Z",
+    "customFields": [],
+    "additionalEmails": []
+  },
+  "traceId": "REDACTED"
+}

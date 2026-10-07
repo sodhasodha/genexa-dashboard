@@ -35,7 +35,7 @@ export const NUDGE_ISODOW = 1;
 export async function runOutcomeNudges(opts: { db?: SupabaseClient; send?: NudgeSender; hour?: number; isodow?: number } = {}) {
   const db = opts.db ?? createAdminClient();
   const send = opts.send ?? postToClientChannel;
-  const summary = { enabled: true, clinics_due: 0, sent: 0, outcomes: 0, not_their_time: 0, already_sent: 0, no_channel: [] as string[], no_link: [] as string[], failed: [] as string[] };
+  const summary = { enabled: true, clinics_due: 0, sent: 0, outcomes: 0, not_their_time: 0, already_sent: 0, nothing_definite: [] as string[], no_channel: [] as string[], no_link: [] as string[], failed: [] as string[] };
   const { data: setting } = await db.from("app_settings").select("value").eq("key", "client_outcome_nudges").maybeSingle();
   const { data: rule } = await db.from("reminder_rules").select("enabled").eq("key", "outcome_nudge").maybeSingle();
   if (setting?.value !== true || rule?.enabled === false) return { ok: true, summary: { ...summary, enabled: false } };
@@ -44,6 +44,8 @@ export async function runOutcomeNudges(opts: { db?: SupabaseClient; send?: Nudge
   if (error) throw new Error(`outcome_nudges_due: ${error.message}`);
   for (const row of data ?? []) {
     if (Number(row.local_dow) !== (opts.isodow ?? NUDGE_ISODOW) || Number(row.local_hour) !== (opts.hour ?? NUDGE_HOUR)) { summary.not_their_time++; continue; }
+    // Only consults that are definitely unlogged are counted; a clinic with none gets no message.
+    if (Number(row.overdue_count) === 0) { summary.nothing_definite.push(row.name as string); continue; }
     summary.clinics_due++;
     if (!row.channel) { summary.no_channel.push(row.name as string); continue; }
     // Never send "log them here:" with nowhere to go.

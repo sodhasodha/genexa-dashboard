@@ -2,7 +2,7 @@
 // confirmed) for the last 21 days and the next 14, and writes `appointments`.
 // Nothing about calls is read: the call centre is moving to Hot Prospector.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { GhlCalendarsResponse, GhlEventsResponse, calendarKind, mapAppointments, type CalendarKind, type GhlEvent } from "./mapper";
+import { GhlCalendarsResponse, GhlEventsResponse, calendarKind, contactIdentity, mapAppointments, type CalendarKind, type GhlEvent } from "./mapper";
 
 const BASE = "https://services.leadconnectorhq.com";
 export type GhlKeys = Record<string, { location_id: string; api_key: string }>;
@@ -48,6 +48,24 @@ export async function syncGhlAppointments(opts: { db: SupabaseClient; keys: GhlK
           for (const event of page.events) events.push({ event, kind: cal.kind });
         }
         const rows = mapAppointments(events);
+        // A booking made by hand in GHL has no form, so no phone on it. Without one it can never be matched to
+        // the outcome the clinic logs, so the key comes from the contact record: once, then it is remembered.
+        const missing = rows.filter((r) => !r.contact_key);
+        if (missing.length > 0) {
+          const { data: known } = await db.from("appointments").select("ghl_contact_id, contact_key").eq("client_id", client.id).not("contact_key", "is", null)
+            .in("ghl_contact_id", [...new Set(missing.map((r) => r.ghl_contact_id))]);
+          const keyOf = new Map((known ?? []).map((k) => [k.ghl_contact_id as string, k.contact_key as string]));
+          let lookups = 0;
+          for (const row of missing) {
+            if (!keyOf.has(row.ghl_contact_id) && lookups < 60) {
+              lookups++;
+              const identity = await get(apiKey, `/contacts/${row.ghl_contact_id}`).then(contactIdentity).catch(() => null);
+              if (identity?.contact_key) keyOf.set(row.ghl_contact_id, identity.contact_key);
+              if (identity?.first_name && !row.contact_first_name) row.contact_first_name = identity.first_name;
+            }
+            row.contact_key = keyOf.get(row.ghl_contact_id) ?? null;
+          }
+        }
         const synced_at = new Date().toISOString();
         if (rows.length > 0) {
           // attendance is deliberately not written here: outcomes come from Cortana, and must not be reset.

@@ -33,6 +33,19 @@ export const GhlEvent = z
 export type GhlEvent = z.infer<typeof GhlEvent>;
 export const GhlEventsResponse = z.object({ events: z.array(GhlEvent) }).loose();
 
+/** GET /contacts/{id}. Only the first name and the phone or email (hashed at once) are read. */
+export const GhlContactResponse = z
+  .object({
+    contact: z.object({ firstName: z.string().nullable().optional(), email: z.string().nullable().optional(), phone: z.string().nullable().optional() }).loose(),
+  })
+  .loose();
+
+/** The matching key and first name from a contact record, for bookings made by hand with no form on them. */
+export function contactIdentity(raw: unknown): { contact_key: string | null; first_name: string | null } {
+  const { contact } = GhlContactResponse.parse(raw);
+  return { contact_key: contactKey({ phone: contact.phone, email: contact.email }), first_name: contact.firstName?.trim().split(/\s+/)[0] || null };
+}
+
 export type CalendarKind = "unconfirmed" | "confirmed";
 
 /** Which of a clinic's calendars hold consults. Anything else (intro calls etc.) is ignored. */

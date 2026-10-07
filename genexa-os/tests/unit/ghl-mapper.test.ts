@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { GhlEventsResponse, calendarKind, mapAppointments } from "@/lib/integrations/ghl/mapper";
+import { GhlEventsResponse, calendarKind, contactIdentity, mapAppointments } from "@/lib/integrations/ghl/mapper";
 import { contactKey } from "@/lib/contactKey";
+import contactFixture from "../../fixtures/ghl/contact_redacted.json";
 import fixture from "../../fixtures/ghl/calendar_events_redacted.json";
 
 const events = GhlEventsResponse.parse(fixture).events;
@@ -49,5 +50,17 @@ describe("contactKey", () => {
     expect(contactKey({ email: " A@B.com " })).toBe(contactKey({ email: "a@b.com" }));
     expect(contactKey({ phone: "123" })).toBeNull();
     expect(contactKey(null)).toBeNull();
+  });
+});
+
+describe("contactIdentity", () => {
+  it("reads only a first name and a hashed phone from a GHL contact record", () => {
+    const id = contactIdentity(contactFixture);
+    expect(id.first_name).toBe("Jeremy");
+    expect(id.contact_key).toBe(contactKey({ phone: "(555) 555-0123" }));
+    expect(JSON.stringify(id)).not.toMatch(/5555550123|example\.invalid|Redacted/);
+  });
+  it("gives no key when the contact has neither phone nor email", () => {
+    expect(contactIdentity({ contact: { firstName: "Ann" } })).toEqual({ contact_key: null, first_name: "Ann" });
   });
 });
