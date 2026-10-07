@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { appUrl } from "@/lib/env";
 import { lookupUserIdByEmail, postMessage, slackConfigured } from "@/lib/slack/client";
+import { deliverReminders, supabaseRpc } from "@/lib/reminders/engine";
 
 export type EngineResult = {
   opened: number;
@@ -42,62 +43,18 @@ export async function runExceptionsEngine(db: SupabaseClient): Promise<EngineRes
     }
   }
   if (slackConfigured()) {
-    const { data: pending } = await db
-      .from("notifications")
-      .select("id, staff_id, record_id")
-      .eq("rule_key", "exception_opened")
-      .is("sent_at", null)
-      .order("created_at")
-      .limit(200);
-    const ids = (pending ?? []).map((p) => p.record_id).filter((x): x is string => !!x);
-    const { data: exceptions } = ids.length
-      ? await db.from("exceptions").select("id, type, status, severity, reason, money_at_risk").in("id", ids)
-      : { data: [] };
-    const { data: rules } = await db.from("exception_rules").select("type, urgent");
-    const urgent = new Set((rules ?? []).filter((r) => r.urgent).map((r) => r.type));
-    const onShift = new Map<string, boolean>();
-    const slackIds = new Map<string, string | null>();
-    let n = 0;
-    for (const note of pending ?? []) {
-      const ex = exceptions?.find((e) => e.id === note.record_id);
-      if (!ex || !note.staff_id) continue;
-      if (ex.status === "resolved") {
-        // Cleared before the owner's shift: nothing to tell them. Mark it so it is not picked up again.
-        await db.from("notifications").update({ sent_at: new Date().toISOString(), channel: "skipped:resolved" }).eq("id", note.id);
-        continue;
-      }
-      if (!urgent.has(ex.type)) {
-        if (!onShift.has(note.staff_id)) {
-          const { data: on } = await db.rpc("staff_on_shift", { p_staff: note.staff_id });
-          onShift.set(note.staff_id, on === true);
-        }
-        if (!onShift.get(note.staff_id)) {
-          held++;
-          continue;
-        }
-      }
-      if (!slackIds.has(note.staff_id)) {
-        const { data: owner } = await db.from("staff").select("email, slack_user_id").eq("id", note.staff_id).single();
-        let slackId = owner?.slack_user_id ?? null;
-        if (!slackId && owner?.email) {
-          slackId = await lookupUserIdByEmail(owner.email);
-          if (slackId) await db.from("staff").update({ slack_user_id: slackId }).eq("id", note.staff_id);
-        }
-        slackIds.set(note.staff_id, slackId);
-      }
-      const slackId = slackIds.get(note.staff_id);
-      if (!slackId) {
-        held++;
-        continue;
-      }
-      if (n++ > 0) await new Promise((r) => setTimeout(r, 1100)); // Slack allows about one message a second
-      const money = Number(ex.money_at_risk ?? 0) > 0 ? ` · $${Number(ex.money_at_risk).toLocaleString("en-US")} at risk` : "";
-      const sent = await postMessage(slackId, `${ex.severity === "red" ? "🔴" : "🟠"} ${ex.reason}${money}\n${appUrl()}/overview?exception=${ex.id}`);
-      if (sent.ok) {
-        await db.from("notifications").update({ sent_at: new Date().toISOString(), slack_ts: sent.ts, channel: sent.channel }).eq("id", note.id);
-        notified++;
-      }
-    }
+    // Delivery is the reminder engine's (reminders_deliverable, 0027): the same
+    // rules as above, with Done / Snooze 1h buttons on each exception.
+    const delivered = await deliverReminders({
+      rpc: supabaseRpc(db),
+      send: postMessage,
+      lookupUserIdByEmail,
+      appUrl: appUrl(),
+      rule: "exception_opened",
+      pauseMs: 1100, // Slack allows about one message a second
+    });
+    notified = delivered.sent;
+    held = delivered.held;
   }
 
   const result: EngineResult = {

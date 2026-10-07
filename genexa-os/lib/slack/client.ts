@@ -21,6 +21,22 @@ export async function postMessage(channelOrUser: string, text: string, blocks?: 
   return r.ok ? { ok: true, ts: r.ts, channel: r.channel } : { ok: false, error: r.error ?? "unknown_error" };
 }
 
+/**
+ * Answer a button press through the response_url Slack sent with it. Only Slack's
+ * own hooks host is ever called, so a payload cannot point this anywhere else.
+ */
+export async function respondToInteraction(responseUrl: string, body: object): Promise<boolean> {
+  let url: URL;
+  try {
+    url = new URL(responseUrl);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.hostname !== "hooks.slack.com") return false;
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json; charset=utf-8" }, body: JSON.stringify(body) });
+  return res.ok;
+}
+
 export async function lookupUserIdByEmail(email: string): Promise<string | null> {
   if (!slackConfigured()) return null;
   const res = await fetch(`https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`, {
