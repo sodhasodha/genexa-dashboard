@@ -167,8 +167,12 @@ describe("source_freshness", () => {
 
 describe("person_scores_weekly: EODs", () => {
   it("scores on EODs missed so far, per the thresholds in scoring_config", async () => {
-    // Last full week: tech filed 4 of 5 -> amber; media buyer 5 of 5 -> green; CSR 3 of 7 -> red.
     const lastWeek = `app_week_start(app_today()) - 7`;
+    // Before a go-live date is set nobody is scored.
+    const before = await db.query(`select 1 from person_scores_weekly where metric = 'eods' and week_start = ${lastWeek}`);
+    expect(before.rows.length).toBe(0);
+    await db.query(`update app_settings set value = to_jsonb((app_today() - 60)::text) where key = 'go_live_date'`);
+    // Last full week: tech filed 4 of 5 -> amber; media buyer 5 of 5 -> green; CSR 3 of 7 -> red.
     const file = async (staff: string, offsets: number[]) => {
       for (const o of offsets) {
         await db.query(`insert into eods (staff_id, date) values ($1, ${lastWeek} + $2::int)`, [staff, o]);

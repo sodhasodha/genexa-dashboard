@@ -31,7 +31,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
                 className="rounded border border-line px-3 py-2"
               />
             </label>
-            <button type="submit" className="cursor-pointer rounded bg-ink px-3 py-2 font-medium text-white">
+            <button type="submit" className="cursor-pointer rounded bg-accent px-3 py-2 font-medium text-white">
               Email me a sign-in link
             </button>
           </form>

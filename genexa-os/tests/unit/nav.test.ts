@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NAV, landingPath } from "@/lib/auth/nav";
+import { NAV_GROUPS, landingPath } from "@/lib/auth/nav";
 
 describe("role-based landing", () => {
   it("sends each role to its page", () => {
@@ -9,9 +9,15 @@ describe("role-based landing", () => {
     expect(landingPath({ id: "abc", role: "csr" })).toBe("/call-centre?csr=abc");
   });
 
-  it("has the brief's nine pages in order, plus Team", () => {
-    expect(NAV.map((n) => n.label)).toEqual([
-      "Overview", "Clients", "Launches", "Call Centre", "Media Buying", "Tech", "Team", "Tasks", "Pipeline", "Ideas",
+  it("groups the sidebar into Pacing, Team, Clients, Work and System", () => {
+    expect(NAV_GROUPS.map((g) => g.title)).toEqual(["Pacing", "Team", "Clients", "Work", "System"]);
+    expect(NAV_GROUPS.map((g) => g.items.map((i) => i.label))).toEqual([
+      ["Overview", "Today", "Week", "Month"],
+      ["Call Centre", "Media Buying", "Tech", "Team"],
+      ["Clients", "Launches", "Pipeline"],
+      ["Tasks", "Ideas"],
+      ["Integrations", "Data review"],
     ]);
   });
+
 });

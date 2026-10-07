@@ -87,7 +87,7 @@ export default async function TeamPage({ searchParams }: PageProps<"/team">) {
                             </label>
                           ))}
                         </span>
-                        <button type="submit" className="cursor-pointer rounded bg-ink px-2 py-1 text-xs font-medium text-white">Save</button>
+                        <button type="submit" className="cursor-pointer rounded bg-accent px-2 py-1 text-xs font-medium text-white">Save</button>
                       </form>
                     ) : t.shift_start && t.shift_end ? (
                       <span>

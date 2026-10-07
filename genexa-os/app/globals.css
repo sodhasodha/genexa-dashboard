@@ -1,21 +1,31 @@
 @import "tailwindcss";
 
+/* Dark theme. Surfaces, text and chart colours follow one palette; the two
+   series colours were checked for colour-blind separation on --color-panel. */
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --color-ink: #16181d;
-  --color-muted: #6b7280;
-  --color-line: #e5e7eb;
-  --color-panel: #ffffff;
-  --color-canvas: #f6f7f9;
-  --color-good: #15803d;
-  --color-good-bg: #dcfce7;
-  --color-warn: #b45309;
-  --color-warn-bg: #fef3c7;
-  --color-bad: #b91c1c;
-  --color-bad-bg: #fee2e2;
-  --color-stale: #6b7280;
-  --color-stale-bg: #eceef1;
+  --color-canvas: #111110;
+  --color-panel: #1a1a19;
+  --color-raised: #232321;
+  --color-line: #2e2e2b;
+  --color-ink: #ffffff;
+  --color-muted: #a9a89e;
+  --color-accent: #3987e5;
+  --color-series-1: #3987e5;
+  --color-series-2: #199e70;
+  --color-good: #4cc38a;
+  --color-good-bg: #12301f;
+  --color-warn: #e2a336;
+  --color-warn-bg: #33270d;
+  --color-bad: #f0706f;
+  --color-bad-bg: #3a1716;
+  --color-stale: #a9a89e;
+  --color-stale-bg: #262624;
+}
+
+html {
+  color-scheme: dark;
 }
 
 body {
@@ -23,4 +33,15 @@ body {
   color: var(--color-ink);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   font-size: 14px;
+}
+
+input,
+select,
+textarea {
+  background: var(--color-raised);
+  color: var(--color-ink);
+}
+
+summary {
+  cursor: pointer;
 }
