@@ -1,15 +1,21 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { respondToInteraction } from "@/lib/slack/client";
 import { workspaceByTeamId, workspaceFromSignature } from "@/lib/slack/workspaces";
 import { supabaseRpc } from "@/lib/reminders/engine";
 import { handleInteraction, parseInteractionBody, type InteractionReply } from "@/lib/reminders/interaction";
+import { messageFromEventBody } from "@/lib/router/events";
+import { ingestClientMessage } from "@/lib/router/ingest";
+import { processRequest } from "@/lib/router/process";
+import { classifierConfigured, ingestDeps, processDeps } from "@/lib/router/runtime";
 
 // Slack requests from both workspaces arrive here, each signed with its own
 // install's secret. Team workspace: the Done / Snooze 1h buttons on reminders.
-// Client workspace: listen-only. Nothing it sends can trigger a message back
-// (the request router that will read its messages is not built yet).
-export const maxDuration = 10;
+// Client workspace: message events from clients' channels feed the request
+// router. The only thing that can ever go back there is a thread reply, and only
+// while client_workspace_thread_replies is on (lib/slack/workspaces.ts).
+// The time limit covers the classification that runs after Slack has its answer.
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   // The signature covers the exact bytes Slack sent, so the body is read raw.
@@ -21,20 +27,41 @@ export async function POST(request: NextRequest) {
   });
   if (!workspace) return NextResponse.json({ error: "unauthorised" }, { status: 401 });
 
-  // Events API handshake and events (JSON bodies). Accepted from either workspace and acknowledged;
-  // no event is acted on yet.
+  // Events API handshake and events (JSON bodies).
   if (request.headers.get("content-type")?.includes("application/json")) {
+    let event: { type?: string; challenge?: string; team_id?: string };
     try {
-      const event = JSON.parse(body) as { type?: string; challenge?: string; team_id?: string };
-      if (event.type === "url_verification" && event.challenge) return NextResponse.json({ challenge: event.challenge });
-      // The signing secret and the team id must agree about which workspace this is.
-      if (event.team_id && workspaceByTeamId(event.team_id) !== workspace) return NextResponse.json({ error: "workspace mismatch" }, { status: 401 });
+      event = JSON.parse(body) as typeof event;
     } catch {
       return NextResponse.json({ error: "bad json" }, { status: 400 });
     }
+    if (event.type === "url_verification" && event.challenge) return NextResponse.json({ challenge: event.challenge });
+    // The signing secret and the team id must agree about which workspace this is.
+    if (event.team_id && workspaceByTeamId(event.team_id) !== workspace) return NextResponse.json({ error: "workspace mismatch" }, { status: 401 });
+    // Team-workspace events are acknowledged and not acted on.
+    if (workspace !== "client") return new NextResponse(null, { status: 200 });
+
+    const found = messageFromEventBody(event);
+    if ("ignored" in found) return new NextResponse(null, { status: 200 });
+    try {
+      // Stored first (once per channel + ts, so a Slack retry adds nothing), then
+      // acknowledged. Classifying happens after the response; the router-process
+      // job picks the message up if that is cut short.
+      const db = createAdminClient();
+      const stored = await ingestClientMessage(found.message, ingestDeps(db));
+      if (stored.action === "stored" && classifierConfigured()) {
+        after(async () => {
+          await processRequest(stored.id, processDeps(db)).catch((err) => console.error("router: processing failed", err));
+        });
+      }
+    } catch (err) {
+      // Not stored: a 500 makes Slack send it again.
+      console.error("router: could not store client message", { retry: request.headers.get("x-slack-retry-num"), err });
+      return NextResponse.json({ error: "not stored" }, { status: 500 });
+    }
     return new NextResponse(null, { status: 200 });
   }
-  // Buttons only exist on messages the app sent, and it sends none to the client workspace.
+  // Buttons only exist on messages with buttons, and the app sends none of those to the client workspace.
   if (workspace === "client") return new NextResponse(null, { status: 200 });
 
   const payload = parseInteractionBody(body);

@@ -1,5 +1,6 @@
 import "server-only";
 import { verifySlackSignature } from "@/lib/slack/signature";
+import { isClientThreadText, type ClientThreadText } from "@/lib/router/replies";
 
 /**
  * Two installs of the same Slack app.
@@ -30,12 +31,18 @@ export function workspaceFromSignature(input: { timestamp: string | null; signat
   return null;
 }
 
+/** The client install's bot token, for read-only calls (users.info, conversations.history). */
+export const clientWorkspaceToken = (): string | undefined => config().client.token;
+
 /**
  * The only way to post into the client workspace: a reply inside an existing
- * thread, refused unless the owner has switched thread replies on.
+ * thread, refused unless the owner has switched thread replies on, and refused
+ * for any text other than the request router's two ("Logged ✓ ..." / "Done ✓").
  */
-export async function replyInClientThread(opts: { channel: string; threadTs: string; text: "Logged ✓" | "Done ✓"; repliesEnabled: boolean }): Promise<{ ok: boolean; error?: string }> {
+export async function replyInClientThread(opts: { channel: string; threadTs: string; text: ClientThreadText; repliesEnabled: boolean }): Promise<{ ok: boolean; error?: string; ts?: string }> {
   if (!opts.repliesEnabled) return { ok: false, error: "client_thread_replies_off" };
+  if (!isClientThreadText(opts.text)) return { ok: false, error: "text_not_allowed" };
+  if (!opts.threadTs) return { ok: false, error: "no_thread" };
   const token = config().client.token;
   if (!token) return { ok: false, error: "client_workspace_not_configured" };
   const res = await fetch("https://slack.com/api/chat.postMessage", {
@@ -43,6 +50,6 @@ export async function replyInClientThread(opts: { channel: string; threadTs: str
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify({ channel: opts.channel, thread_ts: opts.threadTs, text: opts.text, unfurl_links: false }),
   });
-  const json = (await res.json()) as { ok: boolean; error?: string };
-  return { ok: json.ok, error: json.error };
+  const json = (await res.json()) as { ok: boolean; error?: string; ts?: string };
+  return { ok: json.ok, error: json.error, ts: json.ts };
 }

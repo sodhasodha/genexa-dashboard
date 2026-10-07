@@ -177,6 +177,8 @@ export async function getBottlenecks(): Promise<{ rows: Bottleneck[]; atRisk: nu
 }
 
 export const REVIEW_KINDS = [
+  // Client requests the router could not place on its own (0035_request_router.sql).
+  { kind: "triage", label: "Triage" },
   { kind: "unlogged_outcome", label: "Unlogged outcomes" },
   { kind: "unmatched_payment", label: "Unmatched payments" },
   { kind: "unclassified_payment", label: "Unclassified payments" },
@@ -186,17 +188,57 @@ export const REVIEW_KINDS = [
   { kind: "anomaly", label: "Data anomalies" },
 ] as const;
 export type ReviewKind = (typeof REVIEW_KINDS)[number]["kind"];
-export type ReviewItem = { kind: ReviewKind; record_table: string; record_id: string; client_id: string | null; title: string; detail: string; item_key: string };
+/** What the model made of a client message that needs a person to place it. */
+export type TriageInfo = {
+  permalink: string; channel_kind: string; received_at: string; mode: string; reason: string | null;
+  is_request: boolean | null; owner: string | null; guess_title: string | null; urgency: string | null; confidence: number | null;
+};
+export type ReviewItem = {
+  kind: ReviewKind; record_table: string; record_id: string; client_id: string | null; title: string; detail: string; item_key: string;
+  /** Only on Triage items. */
+  triage?: TriageInfo;
+};
+
+/** Client requests waiting in Triage, as review items (title = clinic, detail = the message, first 300 characters). */
+async function getTriageItems(supabase: Awaited<ReturnType<typeof createClient>>): Promise<ReviewItem[]> {
+  const { data, error } = await supabase
+    .from("client_requests")
+    .select("id, client_id, text, permalink, channel_kind, received_at, mode, triage_reason, is_request, owner, title, urgency, confidence, clients(name)")
+    .eq("status", "triage")
+    .order("received_at", { ascending: false })
+    .limit(200);
+  // The other queues still load if the router's tables are not there yet.
+  if (error) return [];
+  type Row = {
+    id: string; client_id: string; text: string; permalink: string; channel_kind: string; received_at: string; mode: string; triage_reason: string | null;
+    is_request: boolean | null; owner: string | null; title: string | null; urgency: string | null; confidence: number | string | null;
+    clients: { name: string } | { name: string }[] | null;
+  };
+  return ((data ?? []) as Row[]).map((r) => {
+    const clinic = (Array.isArray(r.clients) ? r.clients[0] : r.clients)?.name ?? "Unknown clinic";
+    return {
+      kind: "triage" as const, record_table: "client_requests", record_id: r.id, client_id: r.client_id, item_key: `triage:${r.id}`,
+      title: clinic, detail: r.text.length > 300 ? `${r.text.slice(0, 300)}…` : r.text,
+      triage: {
+        permalink: r.permalink, channel_kind: r.channel_kind, received_at: r.received_at, mode: r.mode, reason: r.triage_reason,
+        is_request: r.is_request, owner: r.owner, guess_title: r.title, urgency: r.urgency, confidence: r.confidence === null ? null : Number(r.confidence),
+      },
+    };
+  });
+}
 
 export async function getReview(): Promise<{ counts: Record<ReviewKind, number>; items: ReviewItem[]; total: number }> {
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("data_review_open")
-    .select("kind, record_table, record_id, client_id, title, detail, occurred_at, item_key")
-    .order("occurred_at", { ascending: false })
-    .limit(500);
+  const [{ data, error }, triage] = await Promise.all([
+    supabase
+      .from("data_review_open")
+      .select("kind, record_table, record_id, client_id, title, detail, occurred_at, item_key")
+      .order("occurred_at", { ascending: false })
+      .limit(500),
+    getTriageItems(supabase),
+  ]);
   if (error) throw new Error(`data_review_open: ${error.message}`);
-  const items = (data ?? []) as ReviewItem[];
+  const items = [...triage, ...((data ?? []) as ReviewItem[])];
   const counts = Object.fromEntries(REVIEW_KINDS.map((k) => [k.kind, items.filter((i) => i.kind === k.kind).length])) as Record<ReviewKind, number>;
   return { counts, items, total: items.length };
 }

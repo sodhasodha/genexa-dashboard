@@ -1,0 +1,46 @@
+# Genexa OS Slack app: the CLIENT workspace install ONLY.
+# Do not use this manifest for the team workspace (that one is slack-app-manifest.yaml).
+# It is the team manifest plus what the request router needs to listen: message
+# history scopes and the message events. The app reads clients' messages in the
+# channels it has been added to; the only thing it can ever post there is a
+# thread reply ("Logged ✓ ..." / "Done ✓"), and only while the
+# client_workspace_thread_replies setting is on.
+# After installing to the client workspace, send back:
+#   SLACK_CLIENT_BOT_TOKEN       (OAuth & Permissions -> Bot User OAuth Token, starts xoxb-)
+#   SLACK_CLIENT_SIGNING_SECRET  (Basic Information -> App Credentials -> Signing Secret)
+#   SLACK_CLIENT_TEAM_ID         (the workspace id, starts T)
+# Then add the app to each clinic's General and Scheduling channel.
+display_information:
+  name: Genexa OS
+  description: Reminders and alerts from the Genexa operating system
+  background_color: "#16181d"
+features:
+  bot_user:
+    display_name: Genexa OS
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - chat:write          # send DMs and post in channels the bot is in
+      - chat:write.public   # post in public channels without being invited
+      - im:write            # open a DM with a staff member
+      - users:read          # look up workspace members
+      - users:read.email    # match staff to Slack users by email
+      - channels:read       # resolve public channel ids (pod and clinic channels)
+      - groups:read         # resolve private channel ids the bot has been added to
+      - channels:history    # read messages in public clinic channels the bot is in
+      - groups:history      # read messages in private clinic channels the bot is in
+settings:
+  event_subscriptions:
+    # Client messages arrive here and feed the request router.
+    request_url: https://ops.genexascaling.com/api/webhooks/slack
+    bot_events:
+      - message.channels
+      - message.groups
+  interactivity:
+    is_enabled: true
+    # Done / Snooze 1h buttons post here.
+    request_url: https://ops.genexascaling.com/api/webhooks/slack
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

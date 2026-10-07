@@ -22,7 +22,7 @@ export default async function DataReviewPage({ searchParams }: PageProps<"/data-
         ))}
       </div>
       <div className="rounded-lg border border-line bg-panel">
-        <ReviewList items={review.items.filter((i) => i.kind === queue)} clients={clients} isOwner={me.role === "owner"} />
+        <ReviewList items={review.items.filter((i) => i.kind === queue)} clients={clients} isOwner={me.role === "owner"} queue={queue} />
       </div>
     </div>
   );
