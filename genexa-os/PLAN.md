@@ -189,7 +189,7 @@ The outcome webhook from the client dashboard is no longer needed for numbers: C
 ## 7c. Slack: two workspaces
 
 - Team workspace (`SLACK_TEAM_ID`): everything the app sends — alerts, reminders, digests, Done / Snooze buttons.
-- Client workspace (`SLACK_CLIENT_TEAM_ID`): a second install of the same app, listen-only. A database trigger refuses any notification addressed to a client's General or Scheduling channel. The only possible output is a request-router thread reply ("Logged ✓" / "Done ✓"), behind the `client_workspace_thread_replies` setting, which is off. The request router itself is not built.
+- Client workspace (`SLACK_CLIENT_TEAM_ID`): a second install of the same app, listen-only. A database trigger refuses any notification addressed to a client's General or Scheduling channel. The only possible output is a request-router thread reply ("Logged ✓" / "Done ✓"), behind the `client_workspace_thread_replies` setting, which is off. The request router reads client messages, classifies them with the Anthropic API and routes them to tech jobs, Aditya's tasks or an exception for the owner (see `lib/router/`). The weekly "consults waiting for an outcome" message is the one other thing posted there.
 - `/api/webhooks/slack` works out which workspace a request came from by which install's signing secret verifies it.
 
 ## 8. Cortana facts (from real responses, 7 Sep – 6 Oct 2026)
