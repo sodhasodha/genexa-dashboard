@@ -35,6 +35,10 @@ describe("GHL appointments (real response shape, patient details replaced)", () 
     ]);
     expect(cancelled.map((r) => [r.ghl_appointment_id, r.cancelled])).toEqual([["unconf", false]]);
     expect(mapAppointments([{ event: { ...a, appointmentStatus: "cancelled" }, kind: "confirmed" }])[0].cancelled).toBe(true);
+    // The confirmed copy is often an hour off the unconfirmed one: still one consult that day.
+    const moved = { ...a, id: "conf-later", startTime: a.startTime.replace(/T(\d\d)/, (_m, h) => `T${String((Number(h) + 1) % 24).padStart(2, "0")}`) };
+    const sameDay = mapAppointments([{ event: { ...a, id: "unconf" }, kind: "unconfirmed" }, { event: moved, kind: "confirmed" }]);
+    expect(sameDay.map((r) => r.ghl_appointment_id)).toEqual(["conf-later"]);
   });
 });
 

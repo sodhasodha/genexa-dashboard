@@ -282,3 +282,27 @@ describe("finance rules", () => {
     expect((await one<{ category: string }>(`select category from finance_transactions where mercury_id = 'r5'`)).category).toBe("software");
   });
 });
+
+describe("outcome nudges", () => {
+  it("lists live clinics with consults waiting, leaves out consults that cannot be matched, and only this rule may target a client channel", async () => {
+    const c = await id(`insert into clients (name, stage, slack_scheduling_id, slack_general_id) values ('Nudge Clinic', 'live', 'CNUDGESCHED', 'CNUDGEGEN') returning id`);
+    const off = await id(`insert into clients (name, stage, slack_general_id) values ('Paused Clinic', 'paused', 'CPAUSED') returning id`);
+    const appt = (clientId: string, contact: string, key: string | null, when: string, attendance = "scheduled") =>
+      db.query(`insert into appointments (client_id, ghl_contact_id, contact_key, contact_first_name, scheduled_for, attendance) values ($1, $2, $3, $4, ${when}, $5)`, [clientId, contact, key, contact.toUpperCase(), attendance]);
+    await appt(c, "ann", "p:1", "now() - interval '2 days'");
+    await appt(c, "bob", "p:2", "now() - interval '5 days'");
+    await appt(c, "cat", null, "now() - interval '3 days'"); // no phone: cannot be checked, not chased
+    await appt(c, "dan", "p:4", "now() - interval '3 hours'"); // too recent
+    await appt(c, "eve", "p:5", "now() - interval '30 days'"); // too old
+    await appt(c, "fay", "p:6", "now() - interval '4 days'", "showed"); // logged
+    await appt(off, "gus", "p:7", "now() - interval '2 days'");
+    const rows = await db.query<{ name: string; channel: string; waiting: string; consults: string }>(`select name, channel, waiting, consults from outcome_nudges_due where client_id in ($1, $2)`, [c, off]);
+    expect(rows.rows.length).toBe(1);
+    expect(rows.rows[0]).toMatchObject({ name: "Nudge Clinic", channel: "CNUDGESCHED" });
+    expect(Number(rows.rows[0].waiting)).toBe(2);
+    expect(rows.rows[0].consults).toMatch(/^BOB \(\w{3} \d\d \w{3}\), ANN \(\w{3} \d\d \w{3}\)$/);
+    await db.query(`insert into notifications (rule_key, channel, record_id, window_key) values ('outcome_nudge', 'CNUDGESCHED', $1, 'w1'), ('weekly_scorecard', 'CNUDGESCHED', $1, 'w1')`, [c]);
+    const queued = await db.query<{ rule_key: string }>(`select rule_key from notifications where channel = 'CNUDGESCHED'`);
+    expect(queued.rows.map((r) => r.rule_key)).toEqual(["outcome_nudge"]);
+  });
+});

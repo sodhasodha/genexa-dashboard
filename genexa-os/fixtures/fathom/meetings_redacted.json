@@ -1,0 +1,460 @@
+{
+ "items": [
+  {
+   "title": "David Popkin - Onboarding Call",
+   "meeting_title": "David Popkin - Onboarding Call",
+   "meeting_type": null,
+   "url": "https://fathom.video/calls/848282602",
+   "meeting_url": null,
+   "created_at": "2026-10-06T18:30:55Z",
+   "scheduled_start_time": "2026-10-06T17:30:00Z",
+   "scheduled_end_time": "2026-10-06T18:00:00Z",
+   "recording_id": 190182650,
+   "recording_start_time": "2026-10-06T17:30:22Z",
+   "recording_end_time": "2026-10-06T18:30:41Z",
+   "calendar_invitees_domains_type": "one_or_more_external",
+   "shared_with": "no_teams",
+   "transcript": null,
+   "transcript_language": "en",
+   "default_summary": null,
+   "action_items": null,
+   "highlights": null,
+   "calendar_invitees": [
+    {
+     "name": "Dave Popkin",
+     "email": "person0@gmail.com",
+     "email_domain": "gmail.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "Ryan Sodha",
+     "email": "person1@genexascaling.com",
+     "email_domain": "genexascaling.com",
+     "is_external": false,
+     "matched_speaker_display_name": null
+    }
+   ],
+   "recorded_by": {
+    "name": "Ryan Sodha",
+    "email": "owner@genexascaling.com",
+    "email_domain": "genexascaling.com",
+    "team": null
+   },
+   "share_url": "https://fathom.video/share/redacted",
+   "crm_matches": null
+  },
+  {
+   "title": "Mitchell x Samantha x Ryan",
+   "meeting_title": "Mitchell x Samantha x Ryan",
+   "meeting_type": null,
+   "url": "https://fathom.video/calls/848282613",
+   "meeting_url": null,
+   "created_at": "2026-10-05T19:33:08Z",
+   "scheduled_start_time": "2026-10-05T19:00:00Z",
+   "scheduled_end_time": "2026-10-05T20:00:00Z",
+   "recording_id": 189756027,
+   "recording_start_time": "2026-10-05T19:07:51Z",
+   "recording_end_time": "2026-10-05T19:32:59Z",
+   "calendar_invitees_domains_type": "one_or_more_external",
+   "shared_with": "no_teams",
+   "transcript": null,
+   "transcript_language": "en",
+   "default_summary": null,
+   "action_items": null,
+   "highlights": null,
+   "calendar_invitees": [
+    {
+     "name": "Mitch Duquesnel",
+     "email": "person0@vitalehealthclinic.com",
+     "email_domain": "vitalehealthclinic.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "samantha@vitalehealthclinic.com",
+     "email": "person1@vitalehealthclinic.com",
+     "email_domain": "vitalehealthclinic.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "Ryan Sodha",
+     "email": "person2@genexascaling.com",
+     "email_domain": "genexascaling.com",
+     "is_external": false,
+     "matched_speaker_display_name": null
+    }
+   ],
+   "recorded_by": {
+    "name": "Ryan Sodha",
+    "email": "owner@genexascaling.com",
+    "email_domain": "genexascaling.com",
+    "team": null
+   },
+   "share_url": "https://fathom.video/share/redacted",
+   "crm_matches": null
+  },
+  {
+   "title": "team training",
+   "meeting_title": "team training",
+   "meeting_type": null,
+   "url": "https://fathom.video/calls/847067271",
+   "meeting_url": null,
+   "created_at": "2026-10-05T13:00:56Z",
+   "scheduled_start_time": "2026-10-05T12:45:00Z",
+   "scheduled_end_time": "2026-10-05T13:15:00Z",
+   "recording_id": 189511502,
+   "recording_start_time": "2026-10-05T12:46:51Z",
+   "recording_end_time": "2026-10-05T13:00:44Z",
+   "calendar_invitees_domains_type": "one_or_more_external",
+   "shared_with": "no_teams",
+   "transcript": null,
+   "transcript_language": "en",
+   "default_summary": null,
+   "action_items": null,
+   "highlights": null,
+   "calendar_invitees": [
+    {
+     "name": "Almarie Llames",
+     "email": "person0@gmail.com",
+     "email_domain": "gmail.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "Phenelopy Thrish Nicole Depositar",
+     "email": "person1@gmail.com",
+     "email_domain": "gmail.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "Edelweiss \u201cAmanda\u201d Harder",
+     "email": "person2@gmail.com",
+     "email_domain": "gmail.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "marjgrace19@gmail.com",
+     "email": "person3@gmail.com",
+     "email_domain": "gmail.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "adityaarajdhiman@gmail.com",
+     "email": "person4@gmail.com",
+     "email_domain": "gmail.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "Ryan Sodha",
+     "email": "person5@genexascaling.com",
+     "email_domain": "genexascaling.com",
+     "is_external": false,
+     "matched_speaker_display_name": null
+    }
+   ],
+   "recorded_by": {
+    "name": "Ryan Sodha",
+    "email": "owner@genexascaling.com",
+    "email_domain": "genexascaling.com",
+    "team": null
+   },
+   "share_url": "https://fathom.video/share/redacted",
+   "crm_matches": null
+  },
+  {
+   "title": "Impromptu Google Meet Meeting",
+   "meeting_title": "Impromptu Google Meet Meeting",
+   "meeting_type": null,
+   "url": "https://fathom.video/calls/846024729",
+   "meeting_url": null,
+   "created_at": "2026-10-01T22:06:03Z",
+   "scheduled_start_time": "2026-10-01T22:02:04Z",
+   "scheduled_end_time": "2026-10-01T22:17:04Z",
+   "recording_id": 188907006,
+   "recording_start_time": "2026-10-01T22:02:42Z",
+   "recording_end_time": "2026-10-01T22:05:54Z",
+   "calendar_invitees_domains_type": "one_or_more_external",
+   "shared_with": "no_teams",
+   "transcript": null,
+   "transcript_language": "en",
+   "default_summary": null,
+   "action_items": null,
+   "highlights": null,
+   "calendar_invitees": [
+    {
+     "name": "Ryan Sodha",
+     "email": "person0@genexascaling.com",
+     "email_domain": "genexascaling.com",
+     "is_external": false,
+     "matched_speaker_display_name": null
+    }
+   ],
+   "recorded_by": {
+    "name": "Ryan Sodha",
+    "email": "owner@genexascaling.com",
+    "email_domain": "genexascaling.com",
+    "team": null
+   },
+   "share_url": "https://fathom.video/share/redacted",
+   "crm_matches": null
+  },
+  {
+   "title": "Impromptu Google Meet Meeting",
+   "meeting_title": "Impromptu Google Meet Meeting",
+   "meeting_type": null,
+   "url": "https://fathom.video/calls/844451104",
+   "meeting_url": null,
+   "created_at": "2026-09-30T21:49:56Z",
+   "scheduled_start_time": "2026-09-30T21:15:56Z",
+   "scheduled_end_time": "2026-09-30T21:30:56Z",
+   "recording_id": 188447807,
+   "recording_start_time": "2026-09-30T21:25:23Z",
+   "recording_end_time": "2026-09-30T21:49:48Z",
+   "calendar_invitees_domains_type": "one_or_more_external",
+   "shared_with": "no_teams",
+   "transcript": null,
+   "transcript_language": "en",
+   "default_summary": null,
+   "action_items": null,
+   "highlights": null,
+   "calendar_invitees": [
+    {
+     "name": "Ryan Sodha",
+     "email": "person0@genexascaling.com",
+     "email_domain": "genexascaling.com",
+     "is_external": false,
+     "matched_speaker_display_name": null
+    }
+   ],
+   "recorded_by": {
+    "name": "Ryan Sodha",
+    "email": "owner@genexascaling.com",
+    "email_domain": "genexascaling.com",
+    "team": null
+   },
+   "share_url": "https://fathom.video/share/redacted",
+   "crm_matches": null
+  },
+  {
+   "title": "Aryan meeting",
+   "meeting_title": "Aryan meeting",
+   "meeting_type": null,
+   "url": "https://fathom.video/calls/835421608",
+   "meeting_url": null,
+   "created_at": "2026-09-24T15:26:51Z",
+   "scheduled_start_time": "2026-09-24T15:00:00Z",
+   "scheduled_end_time": "2026-09-24T15:30:00Z",
+   "recording_id": 186385423,
+   "recording_start_time": "2026-09-24T15:04:31Z",
+   "recording_end_time": "2026-09-24T15:26:41Z",
+   "calendar_invitees_domains_type": "one_or_more_external",
+   "shared_with": "no_teams",
+   "transcript": null,
+   "transcript_language": "en",
+   "default_summary": null,
+   "action_items": null,
+   "highlights": null,
+   "calendar_invitees": [
+    {
+     "name": "Dipak Dhamecha",
+     "email": "person0@dd-ca.com",
+     "email_domain": "dd-ca.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "Ryan Sodha",
+     "email": "person1@genexascaling.com",
+     "email_domain": "genexascaling.com",
+     "is_external": false,
+     "matched_speaker_display_name": null
+    }
+   ],
+   "recorded_by": {
+    "name": "Ryan Sodha",
+    "email": "owner@genexascaling.com",
+    "email_domain": "genexascaling.com",
+    "team": null
+   },
+   "share_url": "https://fathom.video/share/redacted",
+   "crm_matches": null
+  },
+  {
+   "title": "Close AI Catchup",
+   "meeting_title": "Close AI Catchup",
+   "meeting_type": null,
+   "url": "https://fathom.video/calls/833072955",
+   "meeting_url": null,
+   "created_at": "2026-09-22T16:11:04Z",
+   "scheduled_start_time": "2026-09-22T15:30:00Z",
+   "scheduled_end_time": "2026-09-22T16:30:00Z",
+   "recording_id": 185480440,
+   "recording_start_time": "2026-09-22T15:50:33Z",
+   "recording_end_time": "2026-09-22T16:10:54Z",
+   "calendar_invitees_domains_type": "one_or_more_external",
+   "shared_with": "no_teams",
+   "transcript": null,
+   "transcript_language": "en",
+   "default_summary": null,
+   "action_items": null,
+   "highlights": null,
+   "calendar_invitees": [
+    {
+     "name": "Jacob Ray",
+     "email": "person0@close-ai.com",
+     "email_domain": "close-ai.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "rish@titanappointments.com",
+     "email": "person1@titanappointments.com",
+     "email_domain": "titanappointments.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "Ryan Sodha",
+     "email": "person2@genexascaling.com",
+     "email_domain": "genexascaling.com",
+     "is_external": false,
+     "matched_speaker_display_name": null
+    }
+   ],
+   "recorded_by": {
+    "name": "Ryan Sodha",
+    "email": "owner@genexascaling.com",
+    "email_domain": "genexascaling.com",
+    "team": null
+   },
+   "share_url": "https://fathom.video/share/redacted",
+   "crm_matches": null
+  },
+  {
+   "title": "Impromptu Google Meet Meeting",
+   "meeting_title": "Impromptu Google Meet Meeting",
+   "meeting_type": null,
+   "url": "https://fathom.video/calls/833267858",
+   "meeting_url": null,
+   "created_at": "2026-09-22T15:48:53Z",
+   "scheduled_start_time": "2026-09-22T15:25:50Z",
+   "scheduled_end_time": "2026-09-22T15:40:50Z",
+   "recording_id": 185477200,
+   "recording_start_time": "2026-09-22T15:36:31Z",
+   "recording_end_time": "2026-09-22T15:48:45Z",
+   "calendar_invitees_domains_type": "one_or_more_external",
+   "shared_with": "no_teams",
+   "transcript": null,
+   "transcript_language": "en",
+   "default_summary": null,
+   "action_items": null,
+   "highlights": null,
+   "calendar_invitees": [
+    {
+     "name": "Ryan Sodha",
+     "email": "person0@genexascaling.com",
+     "email_domain": "genexascaling.com",
+     "is_external": false,
+     "matched_speaker_display_name": null
+    }
+   ],
+   "recorded_by": {
+    "name": "Ryan Sodha",
+    "email": "owner@genexascaling.com",
+    "email_domain": "genexascaling.com",
+    "team": null
+   },
+   "share_url": "https://fathom.video/share/redacted",
+   "crm_matches": null
+  },
+  {
+   "title": "Dr. Robert Abraham - Onboarding Call",
+   "meeting_title": "Dr. Robert Abraham - Onboarding Call",
+   "meeting_type": null,
+   "url": "https://fathom.video/calls/831362923",
+   "meeting_url": null,
+   "created_at": "2026-09-22T15:25:28Z",
+   "scheduled_start_time": "2026-09-22T15:00:00Z",
+   "scheduled_end_time": "2026-09-22T15:30:00Z",
+   "recording_id": 185440445,
+   "recording_start_time": "2026-09-22T15:00:22Z",
+   "recording_end_time": "2026-09-22T15:25:19Z",
+   "calendar_invitees_domains_type": "one_or_more_external",
+   "shared_with": "no_teams",
+   "transcript": null,
+   "transcript_language": "en",
+   "default_summary": null,
+   "action_items": null,
+   "highlights": null,
+   "calendar_invitees": [
+    {
+     "name": "Robert",
+     "email": "person0@revivflorida.com",
+     "email_domain": "revivflorida.com",
+     "is_external": true,
+     "matched_speaker_display_name": null
+    },
+    {
+     "name": "Ryan Sodha",
+     "email": "person1@genexascaling.com",
+     "email_domain": "genexascaling.com",
+     "is_external": false,
+     "matched_speaker_display_name": null
+    }
+   ],
+   "recorded_by": {
+    "name": "Ryan Sodha",
+    "email": "owner@genexascaling.com",
+    "email_domain": "genexascaling.com",
+    "team": null
+   },
+   "share_url": "https://fathom.video/share/redacted",
+   "crm_matches": null
+  },
+  {
+   "title": "Impromptu Google Meet Meeting",
+   "meeting_title": "Impromptu Google Meet Meeting",
+   "meeting_type": null,
+   "url": "https://fathom.video/calls/831507838",
+   "meeting_url": null,
+   "created_at": "2026-09-21T17:04:35Z",
+   "scheduled_start_time": "2026-09-21T16:53:08Z",
+   "scheduled_end_time": "2026-09-21T17:08:08Z",
+   "recording_id": 185094325,
+   "recording_start_time": "2026-09-21T16:54:04Z",
+   "recording_end_time": "2026-09-21T17:03:44Z",
+   "calendar_invitees_domains_type": "one_or_more_external",
+   "shared_with": "no_teams",
+   "transcript": null,
+   "transcript_language": "en",
+   "default_summary": null,
+   "action_items": null,
+   "highlights": null,
+   "calendar_invitees": [
+    {
+     "name": "Ryan Sodha",
+     "email": "person0@genexascaling.com",
+     "email_domain": "genexascaling.com",
+     "is_external": false,
+     "matched_speaker_display_name": null
+    }
+   ],
+   "recorded_by": {
+    "name": "Ryan Sodha",
+    "email": "owner@genexascaling.com",
+    "email_domain": "genexascaling.com",
+    "team": null
+   },
+   "share_url": "https://fathom.video/share/redacted",
+   "crm_matches": null
+  }
+ ],
+ "next_cursor": null,
+ "limit": 10
+}

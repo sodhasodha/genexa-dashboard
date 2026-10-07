@@ -64,12 +64,12 @@ describe("clock in", () => {
     expect(await today(people.amanda)).toMatchObject({ status: "late", minutes_late: 17 });
   });
 
-  it("after the no-show mark records the time but the status is no-show, and the tick leaves it", async () => {
+  it("a clock-in after the no-show mark is late, with the minutes, and the tick leaves it", async () => {
     await clockIn(people.amanda, 42);
-    expect(await today(people.amanda)).toMatchObject({ status: "no_show", minutes_late: 42 });
+    expect(await today(people.amanda)).toMatchObject({ status: "late", minutes_late: 42 });
     expect((await today(people.amanda)).clock_in).not.toBeNull();
     expect(await tick(60)).toEqual([]);
-    expect(await today(people.amanda)).toMatchObject({ status: "no_show", minutes_late: 42 });
+    expect(await today(people.amanda)).toMatchObject({ status: "late", minutes_late: 42 });
   });
 
   it("refuses a second clock-in the same day", async () => {
@@ -114,7 +114,7 @@ describe("attendance_tick", () => {
     expect(await tick(35)).toEqual([]);
   });
 
-  it("someone marked late who then clocks in stays late with the minutes filled; a no-show stays a no-show", async () => {
+  it("someone marked late who then clocks in stays late with the minutes filled; a no-show who clocks in becomes late", async () => {
     await shift(people.sameer);
     await tick(12);
     await clockIn(people.amanda, 14);
@@ -123,7 +123,7 @@ describe("attendance_tick", () => {
     expect(await today(people.amanda)).toMatchObject({ status: "late", minutes_late: 14 });
     expect(await today(people.sameer)).toMatchObject({ status: "no_show", minutes_late: null });
     await clockIn(people.sameer, 50);
-    expect(await today(people.sameer)).toMatchObject({ status: "no_show", minutes_late: 50 });
+    expect(await today(people.sameer)).toMatchObject({ status: "late", minutes_late: 50 });
     expect(await tick(55)).toEqual([]);
   });
 

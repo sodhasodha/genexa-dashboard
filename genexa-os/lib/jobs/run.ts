@@ -10,6 +10,8 @@ import { JOBS_PAYROLL } from "@/lib/jobs/payroll";
 import { JOBS_ATTENDANCE } from "@/lib/jobs/attendance";
 import { JOBS_REMINDERS } from "@/lib/jobs/reminders";
 import { JOBS_MISC } from "@/lib/jobs/misc";
+import { JOBS_NUDGES } from "@/lib/jobs/nudges";
+import { syncFathom } from "@/lib/integrations/fathom/sync";
 import { syncWhop } from "@/lib/integrations/whop/sync";
 import { addDays, etToday } from "@/lib/time";
 import { runExceptionsEngine } from "@/lib/exceptions/engine";
@@ -56,6 +58,12 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
   ...JOBS_ATTENDANCE,
   ...JOBS_REMINDERS,
   ...JOBS_MISC,
+  ...JOBS_NUDGES,
+  // Client and sales calls: touches, last contact, prospect call dates.
+  "fathom-sync": async () => {
+    const r = await syncFathom({ db: createAdminClient(), apiKey: requireEnv("FATHOM_API_KEY"), since: "2026-08-01" });
+    return { ok: r.ok, summary: r };
+  },
   exceptions: async () => {
     const r = await runExceptionsEngine(createAdminClient());
     return { ok: true, summary: r };

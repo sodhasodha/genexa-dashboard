@@ -52,6 +52,15 @@ export async function syncGhlAppointments(opts: { db: SupabaseClient; keys: GhlK
             { onConflict: "client_id,ghl_contact_id,scheduled_for" },
           );
           if (upsertError) throw new Error(`appointments: ${upsertError.message}`);
+          // A copy of a consult that lost to another copy (the unconfirmed twin of a confirmed booking, or a
+          // booking since moved) must stop counting as a consult waiting for an outcome.
+          const keep = rows.map((r) => r.ghl_appointment_id);
+          const { error: staleError } = await db.from("appointments")
+            .update({ attendance: "rescheduled_before_consult", attendance_logged_at: synced_at })
+            .eq("client_id", client.id).eq("attendance", "scheduled").not("ghl_appointment_id", "is", null)
+            .gte("scheduled_for", new Date(from).toISOString()).lte("scheduled_for", new Date(to).toISOString())
+            .not("ghl_appointment_id", "in", `(${keep.map((k) => `"${k}"`).join(",")})`);
+          if (staleError) throw new Error(`appointments: ${staleError.message}`);
           const cancelledIds = rows.filter((r) => r.cancelled).map((r) => r.ghl_appointment_id);
           if (cancelledIds.length > 0) {
             const { error: cancelError } = await db.from("appointments").update({ attendance: "cancelled", attendance_logged_at: synced_at })

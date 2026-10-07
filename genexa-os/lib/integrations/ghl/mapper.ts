@@ -57,8 +57,9 @@ export type AppointmentRow = {
 const isCancelled = (e: GhlEvent) => e.deleted === true || /cancel|invalid/i.test(e.appointmentStatus ?? "");
 
 /**
- * One row per consult. The same consult usually exists twice in GHL, once on the
- * unconfirmed calendar and once on the confirmed one: the confirmed, live copy wins.
+ * One row per patient per day. The same consult usually exists twice in GHL, once
+ * on the unconfirmed calendar and once on the confirmed one, and the confirmed copy
+ * is often at a different time: the confirmed, live copy wins.
  */
 export function mapAppointments(events: { event: GhlEvent; kind: CalendarKind }[]): AppointmentRow[] {
   const best = new Map<string, { event: GhlEvent; kind: CalendarKind }>();
@@ -67,7 +68,8 @@ export function mapAppointments(events: { event: GhlEvent; kind: CalendarKind }[
     if (!x.event.contactId) continue;
     const start = new Date(x.event.startTime);
     if (Number.isNaN(start.getTime())) continue;
-    const key = `${x.event.contactId}|${start.toISOString()}`;
+    // The clinic-local calendar day, read from the timestamp as GHL wrote it.
+    const key = `${x.event.contactId}|${x.event.startTime.slice(0, 10)}`;
     const current = best.get(key);
     if (!current || rank(x) > rank(current)) best.set(key, x);
   }
