@@ -45,13 +45,24 @@ export async function setAttendance(formData: FormData) {
   done();
 }
 
-/** Match a Whop payment to a client. */
+/** Match a Whop customer to a client (one click covers all of that customer's payments). */
 export async function assignPayment(formData: FormData) {
   await requireOwner();
   const id = Id.parse(formData.get("id"));
   const clientId = Id.parse(formData.get("client_id"));
   const supabase = await createClient();
-  await supabase.from("payments").update({ client_id: clientId }).eq("id", id);
+  const { data: payment } = await supabase.from("payments").select("whop_user_id").eq("id", id).single();
+  const userId = payment?.whop_user_id;
+  if (!userId) {
+    await supabase.from("payments").update({ client_id: clientId }).eq("id", id);
+  } else {
+    // Remember the customer on the client, so every past and future payment and membership follows.
+    const { data: client } = await supabase.from("clients").select("whop_customer_ids").eq("id", clientId).single();
+    const ids = new Set<string>([...(client?.whop_customer_ids ?? []), userId]);
+    await supabase.from("clients").update({ whop_customer_ids: [...ids] }).eq("id", clientId);
+    await supabase.from("payments").update({ client_id: clientId }).eq("whop_user_id", userId);
+    await supabase.from("whop_memberships").update({ client_id: clientId }).eq("whop_user_id", userId);
+  }
   done();
 }
 

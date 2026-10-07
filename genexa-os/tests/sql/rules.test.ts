@@ -134,9 +134,7 @@ describe("test-lead filter", () => {
     await db.query(`update leads set is_test = false, test_reviewed = true where client_id = $1 and ghl_contact_id = 'c0'`, [c.id]);
     const again = await one<{ is_test: boolean }>(`update leads set name = 'Test Lead' where client_id = $1 and ghl_contact_id = 'c0' returning is_test`, [c.id]);
     expect(again.is_test).toBe(false);
-    await db.query(`update leads set is_test = true where client_id = $1 and ghl_contact_id = 'c0'`, [c.id]);
-    const perf = await one<{ leads: string }>(`select sum(leads) as leads from client_performance_daily where client_id = $1`, [c.id]);
-    expect(Number(perf.leads)).toBe(4);
+
   });
 });
 

@@ -4,7 +4,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { addDays, etRange, etToday } from "@/lib/time";
 import type { CortanaClient } from "./client";
-import { accountTotals, adHadActivity, adLevelAvailable, adTotals, type CampaignScope } from "./mapper";
+import { accountTotals, adHadActivity, adLevelAvailable, adTotals, mapEvent, type CampaignScope } from "./mapper";
 
 /** "All-time" window start. Genexa's first clinic ads are later than this. */
 const ALL_TIME_FROM = "2025-01-01";
@@ -26,6 +26,8 @@ export async function syncCortana(opts: {
   days: number;
   /** Refresh the 7d / all-time per-ad windows as well. */
   windows?: boolean;
+  /** Skip per-ad rows: account totals and site tracking only (half the calls; used for long backfills). */
+  accountOnly?: boolean;
   onlyClientIds?: string[];
   log?: (line: string) => void;
 }): Promise<CortanaSyncResult> {
@@ -52,15 +54,16 @@ export async function syncCortana(opts: {
     for (const client of (clients ?? []) as ClientRow[]) {
       clientCount++;
       const scope = scopeOf(client.id);
-      const withAds = adLevelAvailable(scope);
+      const withAds = adLevelAvailable(scope) && !opts.accountOnly;
       try {
         const synced_at = new Date().toISOString();
         for (let back = days - 1; back >= 0; back--) {
           const date = addDays(today, -back);
           const range = etRange(date, date);
-          const account = accountTotals(await cortana.attribution(client.cortana_business_id, range, "campaign"), scope);
+          const day = await cortana.attributionWithTracking(client.cortana_business_id, range, "campaign");
+          const account = accountTotals(day.rows, scope);
           const { error } = await db.from("ad_metrics_daily").upsert(
-            { client_id: client.id, date, ...account, synced_at },
+            { client_id: client.id, date, ...account, page_views: day.page_views, unique_visitors: day.unique_visitors, synced_at },
             { onConflict: "client_id,date" },
           );
           if (error) throw new Error(`ad_metrics_daily: ${error.message}`);
@@ -121,5 +124,57 @@ export async function syncCortana(opts: {
     })
     .eq("source", "cortana");
   await db.from("job_runs").insert({ job: "cortana-sync", started_at: startedAt, finished_at: finishedAt, ok, rows_processed: rows, error: ok ? null : errors.map((e) => `${e.client}: ${e.error}`).join(" | ").slice(0, 1000) });
+  return { ok, clients: clientCount, rows, calls: cortana.calls(), errors };
+}
+
+/**
+ * Cortana conversion events since `from` (ET date) for every connected clinic:
+ * leads, bookings, confirmations, shows, no-shows, cancellations and purchases,
+ * from every source. Writes cortana_events only. Re-reading a window is safe:
+ * rows are keyed on Cortana's entry id.
+ */
+export async function syncCortanaEvents(opts: {
+  db: SupabaseClient;
+  cortana: CortanaClient;
+  from: string;
+  log?: (line: string) => void;
+}): Promise<CortanaSyncResult> {
+  const { db, cortana, log = () => {} } = opts;
+  const startedAt = new Date().toISOString();
+  const errors: CortanaSyncResult["errors"] = [];
+  let rows = 0;
+  let clientCount = 0;
+  try {
+    const { data: clients, error } = await db.from("clients").select("id, name, cortana_business_id").not("cortana_business_id", "is", null).neq("stage", "churned").is("deleted_at", null).order("name");
+    if (error) throw new Error(`clients: ${error.message}`);
+    const { data: staff, error: staffError } = await db.from("staff").select("name, email");
+    if (staffError) throw new Error(`staff: ${staffError.message}`);
+    const fromIso = etRange(opts.from, opts.from).start;
+    for (const client of (clients ?? []) as ClientRow[]) {
+      clientCount++;
+      try {
+        const entries = await cortana.entries(client.cortana_business_id, fromIso);
+        const synced_at = new Date().toISOString();
+        const events = entries.map((e) => mapEvent(e, staff ?? [])).filter((e) => e !== null);
+        for (let i = 0; i < events.length; i += 500) {
+          const { error: upsertError } = await db
+            .from("cortana_events")
+            .upsert(events.slice(i, i + 500).map((e) => ({ ...e, client_id: client.id, synced_at })), { onConflict: "client_id,cortana_entry_id" });
+          if (upsertError) throw new Error(`cortana_events: ${upsertError.message}`);
+        }
+        rows += events.length;
+        log(`ok   ${client.name}: ${events.length} events`);
+      } catch (err) {
+        errors.push({ client: client.name, error: (err as Error).message });
+        log(`FAIL ${client.name}: ${(err as Error).message}`);
+      }
+    }
+  } catch (err) {
+    errors.push({ client: "(all)", error: (err as Error).message });
+  }
+  const ok = errors.length === 0 && clientCount > 0;
+  await db.from("job_runs").insert({ job: "cortana-events", started_at: startedAt, finished_at: new Date().toISOString(), ok, rows_processed: rows, error: ok ? null : errors.map((e) => `${e.client}: ${e.error}`).join(" | ").slice(0, 1000) });
+  // The freshness dot follows the ad sync; a failed event sync marks the source as errored so it shows.
+  if (!ok) await db.from("integration_sync_status").update({ status: "error", error: `events: ${errors.map((e) => `${e.client}: ${e.error}`).join(" | ").slice(0, 900)}` }).eq("source", "cortana");
   return { ok, clients: clientCount, rows, calls: cortana.calls(), errors };
 }

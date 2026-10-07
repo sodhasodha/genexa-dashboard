@@ -28,7 +28,7 @@ export async function getDrill(metric: string, period: Period): Promise<DrillTab
   const perDay = async (title: string, columns: string[], pick: (r: Record<string, unknown>) => (string | null)[], filter: (r: Record<string, unknown>) => boolean, totalOf?: (rows: Record<string, unknown>[]) => string | null): Promise<DrillTable> => {
     const { data, error } = await db
       .from("client_performance_daily")
-      .select("day, spend, leads, booked, confirmed, shows, no_shows, closes, revenue, client:clients(name)")
+      .select("day, spend, leads, booked, client:clients(name)")
       .gte("day", period.from).lte("day", period.to).order("day", { ascending: false });
     if (error) throw new Error(error.message);
     const rows = ((data ?? []) as Record<string, unknown>[]).filter(filter);
@@ -55,25 +55,45 @@ export async function getDrill(metric: string, period: Period): Promise<DrillTab
       };
     }
     case "leads":
-    case "booked": {
-      const col = metric === "leads" ? "created_at" : "booked_at";
-      const { data, error } = await db.from("leads").select("name, created_at, booked_at, first_call_at, client:clients(name)")
-        .eq("is_test", false).gte(col, startOf(period)).lt(col, endOf(period)).order(col, { ascending: false }).limit(1000);
-      if (error) throw new Error(error.message);
-      return {
-        title: `${metric === "leads" ? "Leads" : "Booked"} · ${range(period)}`,
-        columns: ["Lead", "Clinic", "Created", "First call", "Booked"],
-        rows: (data ?? []).map((r) => [(r.name as string | null)?.split(" ")[0] ?? "—", clientName(r.client), when(r.created_at), when(r.first_call_at), when(r.booked_at)]),
-        total: fmt((data ?? []).length, "count"),
-      };
-    }
+    case "booked":
     case "shows":
     case "show_rate":
-      return perDay("Shows", ["Shows", "No-shows"], (r) => [fmt(r.shows, "count"), fmt(r.no_shows, "count")], (r) => Number(r.shows) + Number(r.no_shows) > 0, (rows) => `${sum(rows, "shows")} shows · ${sum(rows, "no_shows")} no-shows`);
     case "closes":
     case "clinic_revenue":
-    case "rev_share":
-      return perDay("Closes and clinic revenue", ["Closes", "Revenue"], (r) => [fmt(r.closes, "count"), fmt(r.revenue, "money")], (r) => Number(r.closes) > 0, (rows) => `${sum(rows, "closes")} closes · ${fmt(sum(rows, "revenue"), "money")}`);
+    case "rev_share": {
+      const spec: Record<string, { title: string; events: string[] }> = {
+        leads: { title: "Leads", events: ["lead"] },
+        booked: { title: "Booked", events: ["unconfirmed_appointment_booked"] },
+        shows: { title: "Shows", events: ["appointment_shown"] },
+        show_rate: { title: "Shows and no-shows", events: ["appointment_shown", "appointment_no_show"] },
+        closes: { title: "Closes", events: ["purchase"] },
+        clinic_revenue: { title: "Clinic revenue", events: ["purchase"] },
+        rev_share: { title: "Clinic revenue (rev share is 5% of this)", events: ["purchase"] },
+      };
+      const { title, events } = spec[metric];
+      const [{ data, error }, { data: unverified }] = await Promise.all([
+        db.from("cortana_events")
+          .select("event, occurred_at, value, contact_id, contact_first_name, attribution_source, campaign_name, ad_name, client_id, client:clients(name)")
+          .eq("is_test", false).in("event", events).gte("occurred_at", startOf(period)).lt("occurred_at", endOf(period))
+          .order("occurred_at", { ascending: false }).limit(2000),
+        db.from("clients_ads_unverified").select("client_id"),
+      ]);
+      if (error) throw new Error(error.message);
+      const skip = new Set((unverified ?? []).map((u) => u.client_id));
+      const rows = (data ?? []).filter((r) => !skip.has(r.client_id));
+      const EVENT: Record<string, string> = { lead: "Lead", unconfirmed_appointment_booked: "Booked", appointment_shown: "Showed", appointment_no_show: "No-show", purchase: "Purchase" };
+      const money = events.includes("purchase");
+      const people = (name: string) => new Set(rows.filter((r) => r.event === name).map((r) => `${r.client_id}:${r.contact_id}`)).size;
+      return {
+        title: `${title} · ${range(period)}`,
+        note: "From Cortana, every source. Test contacts are left out. A contact is counted once per clinic per day.",
+        columns: ["When (ET)", "Clinic", "Patient", "Event", ...(money ? ["Value"] : []), "Source", "Campaign", "Ad"],
+        rows: rows.map((r) => [when(r.occurred_at), clientName(r.client), r.contact_first_name ?? "—", EVENT[r.event] ?? r.event, ...(money ? [fmt(r.value, "money")] : []), r.attribution_source, r.campaign_name, r.ad_name]),
+        total: money
+          ? `${rows.length} purchases · ${fmt(rows.reduce((a, r) => a + Number(r.value ?? 0), 0), "money")}`
+          : events.length > 1 ? `${people("appointment_shown")} showed · ${people("appointment_no_show")} no-show` : `${rows.length} events`,
+      };
+    }
     case "cost_per_booked":
       return perDay("Spend and bookings", ["Spend", "Booked"], (r) => [fmt(r.spend, "money"), fmt(r.booked, "count")], (r) => r.spend !== null || Number(r.booked) > 0, (rows) => `${fmt(sum(rows, "spend"), "money")} spend · ${sum(rows, "booked")} booked`);
     case "cash_collected": {

@@ -71,3 +71,44 @@ describe("ET day windows", () => {
     expect(addDays("2026-03-01", -1)).toBe("2026-02-28");
   });
 });
+
+import { ConversionEntriesResponse, isTestContact, mapEvent, trackingTotals } from "@/lib/integrations/cortana/mapper";
+import entriesFixture from "../../fixtures/cortana/conversions_entries_redacted.json";
+
+describe("Cortana conversion events (real response shape, contact details replaced)", () => {
+  const entries = ConversionEntriesResponse.parse(entriesFixture).data;
+  const staff = [{ name: "Amanda Harder", email: "amanda@genexa.test" }];
+
+  it("parses a real page and maps each counted event", () => {
+    expect(entries.length).toBe(22);
+    const events = entries.map((e) => mapEvent(e, staff)).filter((e) => e !== null);
+    const count = (name: string) => events.filter((e) => e.event === name).length;
+    expect([count("lead"), count("unconfirmed_appointment_booked"), count("appointment_booked"), count("appointment_shown"), count("appointment_no_show"), count("purchase")]).toEqual([2, 3, 4, 7, 1, 5]);
+    const first = events[0];
+    expect(first).toMatchObject({ event: "appointment_shown", attribution_source: "Instagram Organic", campaign_id: "120249604626100128", ad_id: "120249604626090128", ad_name: "Image AD Varitations" });
+    expect(first.contact_first_name).toBe("Maria");
+    expect(JSON.stringify(first)).not.toMatch(/Lopez|example\.org|\+1000/); // first name only
+  });
+
+  it("flags test contacts with the same rule as the database", () => {
+    expect(isTestContact({ name: "Test Lead" }, staff)).toBe(true);
+    expect(isTestContact({ name: "ZZ Sameer" }, staff)).toBe(true);
+    expect(isTestContact({ name: "Amanda Harder" }, staff)).toBe(true);
+    expect(isTestContact({ name: "Jo Bloggs", email: "qa+test@clinic.com" }, staff)).toBe(true);
+    expect(isTestContact({ name: "Ana Testa", email: "atesta@gmail.com" }, staff)).toBe(false);
+    expect(isTestContact({ name: "Maria Lopez", email: "latest.maria@gmail.com" }, staff)).toBe(false);
+    expect(isTestContact(null, staff)).toBe(false);
+  });
+
+  it("ignores event types the app does not count", () => {
+    expect(mapEvent({ ...entries[0], configName: "all_payments" }, staff)).toBeNull();
+  });
+});
+
+describe("site tracking totals", () => {
+  it("reads unique visitors from Cortana's own total and sums page views", () => {
+    const t = trackingTotals(AttributionResponse.parse(campaign30d));
+    expect(t.unique_visitors).toBe(1109);
+    expect(t.page_views).toBeGreaterThan(0);
+  });
+});

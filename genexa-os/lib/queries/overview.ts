@@ -26,7 +26,7 @@ type Totals = {
   expenses: number | null; bank_revenue: number | null;
 };
 const n = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
-const SOURCE_NAME: Record<string, string> = { cortana: "Cortana", ghl: "GHL", whop: "Whop", mercury: "Mercury", client_dashboard: "the client dashboard" };
+const SOURCE_NAME: Record<string, string> = { cortana: "Cortana", ghl: "GHL", whop: "Whop", mercury: "Mercury" };
 
 export async function getOverview(period: Period) {
   const supabase = await createClient();
@@ -38,6 +38,11 @@ export async function getOverview(period: Period) {
     supabase.from("scoring_config").select("key, value").in("key", ["rev_share_rate", "mrr_target"]),
     supabase.from("ad_metrics_daily").select("date").order("date").limit(1).maybeSingle(),
   ]);
+  const firstEvent = await supabase.from("cortana_events").select("occurred_at").order("occurred_at").limit(1).maybeSingle();
+  // No events loaded at all = the funnel has not synced: show "no data", not zeros.
+  const eventsLoaded = !!firstEvent.data;
+  const eventsPrevComplete = eventsLoaded && (firstEvent.data?.occurred_at as string).slice(0, 10) <= period.prevFrom;
+  const ev = (v: number | null) => (eventsPrevComplete ? v : null);
   // A comparison is only shown when the earlier period is fully loaded. Ad history starts at the first synced day.
   const adHistoryFrom = (firstAdDay.data?.date as string | undefined) ?? null;
   const adPrevComplete = adHistoryFrom !== null && adHistoryFrom <= period.prevFrom;
@@ -73,10 +78,10 @@ export async function getOverview(period: Period) {
   const money: Tile[] = [
     tile("cash_collected", "Cash collected", "money", ["whop"], c.cash_collected, p.cash_collected, "good"),
     { ...tile("mrr", "MRR", "money", [], mrr, null, "good"), note: "No earlier month recorded yet", sub: `Target ${(cfg.get("mrr_target") ?? 0).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}` },
-    tile("clinic_revenue", "Clinic revenue generated", "money", ["client_dashboard"], c.clinic_revenue, p.clinic_revenue, "good"),
-    tile("rev_share", "Rev share owed", "money", ["client_dashboard"],
+    tile("clinic_revenue", "Clinic revenue generated", "money", ["cortana"], c.clinic_revenue, ev(p.clinic_revenue), "good"),
+    tile("rev_share", "Rev share owed", "money", ["cortana"],
       c.clinic_revenue === null || revShare === null ? null : c.clinic_revenue * revShare,
-      p.clinic_revenue === null || revShare === null ? null : p.clinic_revenue * revShare, "good"),
+      ev(p.clinic_revenue) === null || revShare === null ? null : (p.clinic_revenue as number) * revShare, "good"),
   ];
   const profit: Tile[] = [
     tile("expenses", "Expenses", "money", ["mercury"], c.expenses, p.expenses, "bad"),
@@ -84,18 +89,22 @@ export async function getOverview(period: Period) {
     tile("margin", "Margin", "percent", ["mercury"], ratio(net(c), c.bank_revenue), ratio(net(p), p.bank_revenue), "good"),
     { ...tile("clients", "Active clients", "count", [], stage("live"), null, "good"), note: "Live right now", sub: `${stage("live")} live · ${stage("onboarding")} onboarding · ${stage("unlaunched")} waiting` },
   ];
-  const delivery: Tile[] = [
+  const noEvents = (t: Tile): Tile => (eventsLoaded ? t : { ...t, value: null, previous: null, change: null, state: "no_data", note: "Cortana events not synced yet" });
+  const deliveryRaw: Tile[] = [
     adPrevComplete
       ? tile("ad_spend", "Ad spend", "money", ["cortana"], c.ad_spend, p.ad_spend, "neutral")
       : { ...tile("ad_spend", "Ad spend", "money", ["cortana"], c.ad_spend, null, "neutral"), note: adHistoryFrom ? `No comparison: ad history starts ${adHistoryFrom}` : null },
-    tile("leads", "Leads", "count", ["ghl"], c.leads, p.leads, "good"),
-    tile("booked", "Booked", "count", ["ghl"], c.booked, p.booked, "good"),
-    tile("shows", "Shows", "count", ["client_dashboard"], c.shows, p.shows, "good"),
-    tile("closes", "Closes", "count", ["client_dashboard"], c.closes, p.closes, "good"),
-    tile("cost_per_booked", "Cost per booked", "money", ["cortana", "ghl"], ratio(c.ad_spend, c.booked), adPrevComplete ? ratio(p.ad_spend, p.booked) : null, "bad"),
-    tile("show_rate", "Show rate", "percent", ["client_dashboard"],
-      ratio(c.shows, (c.shows ?? 0) + (c.no_shows ?? 0)), ratio(p.shows, (p.shows ?? 0) + (p.no_shows ?? 0)), "good"),
+    tile("leads", "Leads", "count", ["cortana"], c.leads, ev(p.leads), "good"),
+    tile("booked", "Booked", "count", ["cortana"], c.booked, ev(p.booked), "good"),
+    tile("shows", "Shows", "count", ["cortana"], c.shows, ev(p.shows), "good"),
+    tile("closes", "Closes", "count", ["cortana"], c.closes, ev(p.closes), "good"),
+    tile("cost_per_booked", "Cost per booked", "money", ["cortana"], ratio(c.ad_spend, c.booked), adPrevComplete ? ratio(p.ad_spend, ev(p.booked)) : null, "bad"),
+    tile("show_rate", "Show rate", "percent", ["cortana"],
+      ratio(c.shows, (c.shows ?? 0) + (c.no_shows ?? 0)), eventsPrevComplete ? ratio(p.shows, (p.shows ?? 0) + (p.no_shows ?? 0)) : null, "good"),
   ];
+  const delivery = deliveryRaw.map((t) => (t.key === "ad_spend" ? t : noEvents(t)));
+  money[2] = noEvents(money[2]);
+  money[3] = noEvents(money[3]);
   return { money, profit, delivery, mrr, mrrTarget: cfg.get("mrr_target") ?? null };
 }
 

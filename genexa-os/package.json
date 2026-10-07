@@ -14,7 +14,8 @@
     "import:monday": "tsx --env-file=.env.local scripts/import-monday.ts",
     "sync:cortana": "tsx --env-file=.env.local scripts/sync-cortana.ts",
     "verify:cortana": "tsx --env-file=.env.local scripts/verify-cortana.ts",
-    "setup:cron": "node --env-file=.env.local scripts/setup-cron.mjs"
+    "setup:cron": "node --env-file=.env.local scripts/setup-cron.mjs",
+    "sync:whop": "tsx --env-file=.env.local scripts/sync-whop.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

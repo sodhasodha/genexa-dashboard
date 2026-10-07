@@ -48,3 +48,5 @@ next-env.d.ts
 # raw Monday exports contain pay and contact details
 /fixtures/monday/raw
 /supabase/.temp
+/fixtures/whop/raw
+/fixtures/cortana/raw

@@ -170,6 +170,21 @@ Section 2 of the brief, plus: `CRON_SECRET` (pg_cron → jobs), `APP_URL` (links
 - Vercel project `genexa-os` (team ryan-7487s-projects), deployed from this folder with `npx vercel deploy --prod`. Not connected to git, so pushing the repo never deploys it by accident.
 - Supabase `genexa-os-db` (free plan, us-east), provisioned through the Vercel Marketplace and connected to this project only. Migrations: `npm run db:push`.
 
+## 7b. Sources (corrected 7 Oct 2026)
+
+| Number | Source | Table |
+|---|---|---|
+| Spend, impressions, CTR, CPM, frequency, per-ad results | Cortana attribution (paid Meta rows in the clinic's scope) | `ad_metrics_daily`, `ad_metrics_ad_daily`, `ad_metrics_ad_window` |
+| Landing page views, visitors, LP conversion rate | Cortana site tracking, all sources | `ad_metrics_daily.page_views`, `unique_visitors` |
+| Leads, bookings, confirmations, shows, no-shows, cancellations, closes, revenue | Cortana conversion events, all sources, test contacts excluded | `cortana_events` |
+| Cash collected, memberships, renewal dates, cancellations, unpaid invoices | Whop API, direct | `payments`, `whop_memberships` |
+| Expenses, profit, margin | Mercury | `finance_transactions` |
+| Client and sales calls | Fathom | `touches`, `prospects` |
+| Call attempts, first-call time, who called | GHL (Cortana's calls endpoint returns no records for our clinics) | `leads`, `lead_calls` |
+
+Two filters only: Regen RX spend counts campaigns named "Genexa"; Cleveland is left out of every number until its Cortana business is confirmed.
+The outcome webhook from the client dashboard is no longer needed for numbers: Cortana already receives those outcomes.
+
 ## 8. Cortana facts (from real responses, 7 Sep – 6 Oct 2026)
 
 - Event names: `lead`, `unconfirmed_appointment_booked` (= booked), `appointment_booked` (= confirmed), `appointment_shown`, `appointment_no_show`, `appointment_cancelled`, `purchase`.

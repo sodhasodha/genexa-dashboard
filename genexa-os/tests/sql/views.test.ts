@@ -13,40 +13,34 @@ beforeAll(async () => {
   people = await seedStaff(db);
 });
 
-describe("client_mtd", () => {
-  it("rolls up each source and computes ratios from sums; test leads and pending outcomes never count", async () => {
+const ev = (clientId: string, event: string, contact: string, opts: { value?: number; test?: boolean; daysAgo?: number } = {}) =>
+  db.query(
+    `insert into cortana_events (client_id, cortana_entry_id, event, occurred_at, value, contact_id, contact_first_name, is_test)
+     values ($1, gen_random_uuid()::text, $2, now() - ($3 || ' days')::interval, $4, $5, 'Pat', $6)`,
+    [clientId, event, String(opts.daysAgo ?? 0), opts.value ?? null, contact, opts.test ?? false],
+  );
+
+describe("client_mtd (all patient-side numbers from Cortana)", () => {
+  it("counts unique contacts per event, computes ratios from sums, and never counts test contacts", async () => {
     const id = await client("Perf Clinic");
-    // Cortana: $300 + $200 this month.
     await db.query(
-      `insert into ad_metrics_daily (client_id, date, spend, impressions, clicks) values
-         ($1, app_today(), 300, 10000, 150), ($1, date_trunc('month', app_today())::date, 200, 10000, 50)`,
+      `insert into ad_metrics_daily (client_id, date, spend, impressions, clicks, unique_visitors) values
+         ($1, app_today(), 300, 10000, 150, 120), ($1, date_trunc('month', app_today())::date, 200, 10000, 50, 80)`,
       [id],
     );
-    // GHL: 10 real leads (4 booked, 3 confirmed) + 1 test lead that booked.
-    for (let i = 0; i < 10; i++) {
-      await db.query(
-        `insert into leads (client_id, ghl_contact_id, name, created_at, booked_at, confirmed_at)
-         values ($1, $2, $3, now(), $4, $5)`,
-        [id, `l${i}`, `Patient ${i}`, i < 4 ? new Date() : null, i < 3 ? new Date() : null],
-      );
-    }
-    await db.query(`insert into leads (client_id, ghl_contact_id, name, created_at, booked_at) values ($1, 'lt', 'Test Person', now(), now())`, [id]);
-    // Outcomes: 2 showed, 1 no-show, 1 past appointment with nothing logged. One sale of $8,000.
-    const leadIds = (await db.query<{ id: string }>(`select id from leads where client_id = $1 and not is_test order by ghl_contact_id limit 4`, [id])).rows;
-    const att = ["showed", "showed", "no_show", "scheduled"];
-    const appts: string[] = [];
-    for (const [i, l] of leadIds.entries()) {
-      appts.push(
-        (
-          await one<{ id: string }>(
-            `insert into appointments (lead_id, client_id, scheduled_for, attendance) values ($1, $2, now() - interval '1 minute', $3) returning id`,
-            [l.id, id, att[i]],
-          )
-        ).id,
-      );
-    }
-    await db.query(`insert into sales (appointment_id, client_id, close_status, amount, closed_at) values ($1, $2, 'closed_won', 8000, now())`, [appts[0], id]);
-    await db.query(`insert into sales (appointment_id, client_id, close_status, amount) values ($1, $2, 'follow_up', null)`, [appts[1], id]);
+    // 10 real leads; 4 booked, 3 confirmed; 2 showed, 1 no-show, 1 cancelled; 1 purchase of $8,000.
+    for (let i = 0; i < 10; i++) await ev(id, "lead", `c${i}`);
+    await ev(id, "lead", "c0"); // the same contact submitting twice is one lead
+    for (let i = 0; i < 4; i++) await ev(id, "unconfirmed_appointment_booked", `c${i}`);
+    for (let i = 0; i < 3; i++) await ev(id, "appointment_booked", `c${i}`);
+    await ev(id, "appointment_shown", "c0");
+    await ev(id, "appointment_shown", "c1");
+    await ev(id, "appointment_no_show", "c2");
+    await ev(id, "appointment_cancelled", "c3");
+    await ev(id, "purchase", "c0", { value: 8000 });
+    // A test contact going through the whole funnel changes nothing.
+    for (const e of ["lead", "unconfirmed_appointment_booked", "appointment_shown"]) await ev(id, e, "zz", { test: true });
+    await ev(id, "purchase", "zz", { value: 999, test: true });
 
     const m = await one<Record<string, string>>(`select * from client_mtd where client_id = $1`, [id]);
     expect(Number(m.spend)).toBe(500);
@@ -55,11 +49,12 @@ describe("client_mtd", () => {
     expect(Number(m.confirmed)).toBe(3);
     expect(Number(m.shows)).toBe(2);
     expect(Number(m.no_shows)).toBe(1);
-    expect(Number(m.outcomes_pending)).toBe(1);
+    expect(Number(m.cancelled)).toBe(1);
     expect(Number(m.closes)).toBe(1);
     expect(Number(m.revenue)).toBe(8000);
     expect(Number(m.cpl)).toBe(50);
     expect(Number(m.cost_per_booked)).toBe(125);
+    expect(Number(m.lp_conversion_rate)).toBeCloseTo(10 / 200);
     expect(Number(m.booking_rate)).toBeCloseTo(0.4);
     expect(Number(m.confirmation_rate)).toBeCloseTo(0.75);
     expect(Number(m.show_rate)).toBeCloseTo(2 / 3);
@@ -69,9 +64,9 @@ describe("client_mtd", () => {
     expect(Number(m.rev_share)).toBe(400);
   });
 
-  it("shows null, not zero, where a source has no rows", async () => {
+  it("shows null, not zero, where there is no ad row or no revenue", async () => {
     const id = await client("Leads Only Clinic");
-    await db.query(`insert into leads (client_id, ghl_contact_id, name, created_at) values ($1, 'a', 'Pat A', now())`, [id]);
+    await ev(id, "lead", "a");
     const m = await one<Record<string, string | null>>(`select * from client_mtd where client_id = $1`, [id]);
     expect(Number(m.leads)).toBe(1);
     expect(m.spend).toBeNull();
@@ -79,6 +74,16 @@ describe("client_mtd", () => {
     expect(m.revenue).toBeNull();
     expect(m.roas).toBeNull();
     expect(m.show_rate).toBeNull();
+  });
+
+  it("leaves a clinic with an unverified Cortana business out entirely", async () => {
+    const id = await client("Mirror Clinic");
+    await db.query(`insert into client_campaign_scope (client_id, verified) values ($1, false)`, [id]);
+    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 100)`, [id]);
+    await ev(id, "lead", "m1");
+    expect(await one(`select 1 from client_mtd where client_id = $1`, [id])).toBeUndefined();
+    await db.query(`update client_campaign_scope set verified = true where client_id = $1`, [id]);
+    expect(Number((await one<{ leads: string }>(`select leads from client_mtd where client_id = $1`, [id])).leads)).toBe(1);
   });
 });
 

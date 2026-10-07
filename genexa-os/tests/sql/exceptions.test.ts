@@ -95,19 +95,25 @@ describe("stale sources", () => {
     expect((await run()).map((r) => r.action)).toEqual(["resolved"]);
   });
 
-  it("a rule that needs two sources waits for both; rules with no source always run", async () => {
-    // $900 spend, 3 GHL bookings in 7 days = $300 per booked: over the $110 line.
+  it("cost per booked uses Cortana spend and Cortana bookings; rules with no source always run", async () => {
+    // $900 spend, 3 bookings in 7 days = $300 per booked: over the $110 line.
     for (let d = 1; d <= 3; d++) await spend(clinic, d, 300);
     for (let i = 0; i < 3; i++) {
       await db.query(
-        `insert into leads (client_id, ghl_contact_id, name, created_at, booked_at) values ($1, $2, $3, now() - interval '2 days', now() - interval '2 days')`,
-        [clinic, `g${i}`, `Patient ${i}`],
+        `insert into cortana_events (client_id, cortana_entry_id, event, occurred_at, contact_id) values ($1, $2, 'unconfirmed_appointment_booked', now() - interval '2 days', $2)`,
+        [clinic, `b${i}`],
       );
     }
+    // A test contact's booking must not bring the cost per booked down.
+    await db.query(
+      `insert into cortana_events (client_id, cortana_entry_id, event, occurred_at, contact_id, is_test) values ($1, 'bt', 'unconfirmed_appointment_booked', now() - interval '2 days', 'bt', true)`,
+      [clinic],
+    );
     await db.query(`insert into tech_jobs (type, title, owner_id, requested_at) values ('launch', 'Old launch', $1, now() - interval '5 days')`, [people.sameer]);
-    // GHL has never synced: the cost-per-booked rule must stay quiet, the tech rule must not.
+    await fresh("cortana", 500);
+    // Cortana stale: the cost-per-booked rule stays quiet, the tech rule does not.
     expect((await run()).map((r) => r.exception_type)).toEqual(["tech_job_overdue"]);
-    await fresh("ghl", 5);
+    await fresh("cortana", 5);
     const opened = (await run()).filter((r) => r.action === "opened");
     expect(opened.map((r) => r.exception_type)).toEqual(["account_cpb_high"]);
     const [ex] = await open("account_cpb_high");

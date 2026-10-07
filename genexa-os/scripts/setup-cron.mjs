@@ -20,6 +20,8 @@ const secret = need("CRON_SECRET");
 const SCHEDULES = [
   ["genexa-cortana-sync", "5 * * * *", "cortana-sync", 290000], // hourly, all day, so the source never looks stale overnight
   ["genexa-cortana-full", "30 6 * * *", "cortana-full", 290000], // 02:30 ET (01:30 in winter): re-read the last 4 days
+  ["genexa-cortana-events", "35 * * * *", "cortana-events", 290000], // funnel + outcomes, hourly, offset from the ad sync
+  ["genexa-whop-sync", "20 * * * *", "whop-sync", 120000],
   ["genexa-exceptions", "*/15 * * * *", "exceptions", 60000],
 ];
 

@@ -1,6 +1,6 @@
 // Cortana REST client. Read-only. Cortana allows about 60 calls a minute, so
 // calls are spaced out and a 429 is retried after a pause.
-import { AttributionResponse, type AttributionRow } from "./mapper";
+import { AttributionResponse, ConversionEntriesResponse, trackingTotals, type AttributionRow, type ConversionEntry } from "./mapper";
 
 const DEFAULT_BASE = "https://app.usecortana.ai/api/v1";
 const MIN_GAP_MS = 1100;
@@ -8,6 +8,10 @@ const MAX_TRIES = 4;
 
 export type CortanaClient = {
   attribution: (businessId: string, range: { start: string; end: string }, groupBy: "campaign" | "ad") => Promise<AttributionRow[]>;
+  /** Same call as attribution, plus site tracking totals for the window. */
+  attributionWithTracking: (businessId: string, range: { start: string; end: string }, groupBy: "campaign" | "ad") => Promise<{ rows: AttributionRow[]; page_views: number; unique_visitors: number | null }>;
+  /** Every conversion event since `from` (ISO), newest first, all pages. */
+  entries: (businessId: string, from: string) => Promise<ConversionEntry[]>;
   businesses: () => Promise<{ id: string; name: string }[]>;
   calls: () => number;
 };
@@ -47,12 +51,28 @@ export function createCortanaClient(opts: { apiKey: string; baseUrl?: string; fe
       return json.data;
     },
     async attribution(businessId, range, groupBy) {
+      return (await this.attributionWithTracking(businessId, range, groupBy)).rows;
+    },
+    async attributionWithTracking(businessId, range, groupBy) {
       const qs = new URLSearchParams({ startDate: range.start, endDate: range.end, groupBy });
       const parsed = AttributionResponse.safeParse(await get(`businesses/${businessId}/attribution?${qs}`));
       if (!parsed.success) {
         throw new Error(`Cortana attribution response did not match the expected shape: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`);
       }
-      return parsed.data.data.data;
+      return { rows: parsed.data.data.data, ...trackingTotals(parsed.data) };
+    },
+    async entries(businessId, from) {
+      const out: ConversionEntry[] = [];
+      for (let page = 1; page <= 100; page++) {
+        const qs = new URLSearchParams({ from, limit: "100", page: String(page), sort: "-occurredAt" });
+        const parsed = ConversionEntriesResponse.safeParse(await get(`businesses/${businessId}/conversions/entries?${qs}`));
+        if (!parsed.success) {
+          throw new Error(`Cortana entries response did not match the expected shape: ${parsed.error.issues[0]?.path.join(".")} ${parsed.error.issues[0]?.message}`);
+        }
+        out.push(...parsed.data.data);
+        if (!parsed.data.pagination?.hasMore) return out;
+      }
+      throw new Error("Cortana entries: more than 100 pages; narrow the window");
     },
   };
 }
