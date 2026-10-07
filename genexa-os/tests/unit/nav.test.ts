@@ -13,7 +13,7 @@ describe("role-based landing", () => {
     expect(NAV_GROUPS.map((g) => g.title)).toEqual(["Pacing", "Team", "Clients", "Work", "System"]);
     expect(NAV_GROUPS.map((g) => g.items.map((i) => i.label))).toEqual([
       ["Overview", "Today", "Week", "Month"],
-      ["Call Centre", "Media Buying", "Tech", "Team"],
+      ["Call Centre", "Media Buying", "Tech", "Team", "Payroll"],
       ["Clients", "Launches", "Pipeline"],
       ["Tasks", "Ideas"],
       ["Integrations", "Data review"],

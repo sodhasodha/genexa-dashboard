@@ -1,6 +1,6 @@
 export type Role = "owner" | "media_buyer" | "tech" | "csr" | "freelance";
 
-export type NavItem = { href: string; label: string };
+export type NavItem = { href: string; label: string; ownerOnly?: boolean };
 export type NavGroup = { title: string; items: NavItem[] };
 
 export const NAV_GROUPS: NavGroup[] = [
@@ -20,6 +20,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/media-buying", label: "Media Buying" },
       { href: "/tech", label: "Tech" },
       { href: "/team", label: "Team" },
+      { href: "/payroll", label: "Payroll", ownerOnly: true },
     ],
   },
   {

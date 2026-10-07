@@ -20,7 +20,7 @@ export function Sidebar({ groups, userName, userRole }: { groups: NavGroup[]; us
         {groups.map((group) => (
           <div key={group.title} className="flex shrink-0 gap-0.5 md:flex-col">
             <div className="hidden px-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted md:block">{group.title}</div>
-            {group.items.map((item) => (
+            {group.items.filter((item) => !item.ownerOnly || userRole === "owner").map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
