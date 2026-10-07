@@ -93,7 +93,8 @@ beforeAll(async () => {
   await db.query(`insert into tasks (owner_id, title, source, status) values ($1, 'Already done', 'ryan', 'done')`, [people.sameer]);
   await db.query(`insert into tasks (owner_id, title, source, deleted_at) values ($1, 'Removed', 'ryan', now())`, [people.sameer]);
   await db.query(
-    `insert into prospects (name, contact, heat, stage, follow_up_date, deal_size) values ('Smith Regen', '555-0100 smith@regen.test', 'hot', 'chase', app_today() - 3, 9000)`);
+    `with p as (insert into prospects (name, heat, stage, follow_up_date, deal_size) values ('Smith Regen', 'hot', 'chase', app_today() - 3, 9000) returning id)
+     insert into prospect_contacts (prospect_id, contact) select id, '555-0100 smith@regen.test' from p`);
   await db.query(`insert into agency_month (month, snapshot, frozen_at) values ('2026-08-01', '{"cash_collected": 41000}', now())`);
   await db.query(
     `insert into integration_sync_status (source, schedule_minutes, last_attempt_at, last_success_at, status)
@@ -218,14 +219,14 @@ describe("write functions: audited as claude", () => {
   });
 
   it("mcp_upsert_prospect matches on name, writes only what it is given and never touches contact", async () => {
-    const before = await one<{ id: string; contact: string }>(`select id, contact from prospects where name = 'Smith Regen'`);
+    const before = await one<{ id: string; contact: string }>(`select id, (select contact from prospect_contacts pc where pc.prospect_id = prospects.id) as contact from prospects where name = 'Smith Regen'`);
     const r = await one<{ r: { created: boolean; prospect: Record<string, unknown> } }>(
       `select mcp_upsert_prospect('  smith REGEN ', '{"heat": "warm", "objection": "Price", "deal_size": 12000}') as r`);
     expect(r.r.created).toBe(false);
     expect(r.r.prospect).toMatchObject({ id: before.id, name: "Smith Regen", heat: "warm", objection: "Price", deal_size: 12000, stage: "chase" });
     expect(r.r.prospect).not.toHaveProperty("contact");
     const after = await one<{ contact: string; follow_up_date: string | null; n: number }>(
-      `select contact, follow_up_date::text, (select count(*)::int from prospects where lower(name) = 'smith regen') as n from prospects where id = $1`, [before.id]);
+      `select (select contact from prospect_contacts pc where pc.prospect_id = prospects.id) as contact, follow_up_date::text, (select count(*)::int from prospects p2 where lower(p2.name) = 'smith regen') as n from prospects where id = $1`, [before.id]);
     expect(after.contact).toBe(before.contact);
     expect(after.follow_up_date).not.toBeNull(); // not given, so left alone
     expect(after.n).toBe(1);
@@ -234,12 +235,12 @@ describe("write functions: audited as claude", () => {
     expect(changed).toEqual(["deal_size", "heat", "objection"]);
 
     await expect(db.query(`select mcp_upsert_prospect('Smith Regen', '{"contact": "new@number.test"}')`)).rejects.toThrow(/MCP_INVALID.*contact/);
-    expect((await one<{ contact: string }>(`select contact from prospects where id = $1`, [before.id])).contact).toBe(before.contact);
+    expect((await one<{ contact: string }>(`select (select contact from prospect_contacts pc where pc.prospect_id = prospects.id) as contact from prospects where id = $1`, [before.id])).contact).toBe(before.contact);
 
     const made = await one<{ r: { created: boolean; prospect: { id: string; stage: string; heat: string | null } } }>(
       `select mcp_upsert_prospect('Northside Stem Cell', '{"state": "FL", "call_date": "2026-10-05"}') as r`);
     expect(made.r).toMatchObject({ created: true, prospect: { stage: "chase", heat: null } });
-    const row = await one<{ contact: string | null; state: string; call_date: string }>(`select contact, state, call_date::text from prospects where id = $1`, [made.r.prospect.id]);
+    const row = await one<{ contact: string | null; state: string; call_date: string }>(`select (select contact from prospect_contacts pc where pc.prospect_id = prospects.id) as contact, state, call_date::text from prospects where id = $1`, [made.r.prospect.id]);
     expect(row).toEqual({ contact: null, state: "FL", call_date: "2026-10-05" });
     expect((await audit("prospects", made.r.prospect.id)).rows).toMatchObject([{ field: "_created", actor: "claude" }]);
   });
@@ -456,7 +457,7 @@ describe("write tools, through the handlers", () => {
     expect(r.created).toBe(false);
     expect(r.prospect).toMatchObject({ stage: "contract_out", follow_up_date: "2026-10-12", heat: "warm" });
     expect(r.prospect).not.toHaveProperty("contact");
-    expect((await one<{ contact: string }>(`select contact from prospects where name = 'Smith Regen'`)).contact).toBe("555-0100 smith@regen.test");
+    expect((await one<{ contact: string }>(`select pc.contact from prospect_contacts pc join prospects p on p.id = pc.prospect_id where p.name = 'Smith Regen'`)).contact).toBe("555-0100 smith@regen.test");
   });
 
   it("add_task adds a task", async () => {
