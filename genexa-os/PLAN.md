@@ -122,7 +122,7 @@ Jobs are scheduled in Supabase (`pg_cron` + `pg_net` → `/api/jobs/<name>`). Ve
 | Job | Schedule (ET) | Writes |
 |---|---|---|
 | `cortana-sync` | hourly, all day (today + yesterday, per-ad 7d / all-time windows) | `ad_metrics_daily`, `ad_metrics_ad_daily`, `ad_metrics_ad_window` |
-| `cortana-full` | 02:30 (re-reads the last 5 days) | same |
+| `cortana-full` | 02:30 (re-reads the last 4 days) | same |
 | `ghl-poll` | every 15 min | `leads`, `lead_calls`, `appointments` |
 | `whop-sync` | hourly | `payments` |
 | `mercury-sync` | daily 06:00 | `finance_transactions` |
@@ -175,7 +175,7 @@ Section 2 of the brief, plus: `CRON_SECRET` (pg_cron → jobs), `APP_URL` (links
 - Event names: `lead`, `unconfirmed_appointment_booked` (= booked), `appointment_booked` (= confirmed), `appointment_shown`, `appointment_no_show`, `appointment_cancelled`, `purchase`.
 - Per-row fields used: `spent`, `impressions`, `clicks`, `ctr`, `cpm`, `frequency`, `metaPlatformLeads`, `leads`, `conversions.<event>.uniqueCount`, `totalRevenue`, `effectiveStatus`, `customerId` (Meta ad account), `platformEntityId`.
 - Ad rows carry no campaign id or name, and there is no endpoint that links them. A clinic limited to campaigns by name (Regen RX) therefore has account-level numbers but no ad-level rows, and no ad-level alerts.
-- Cortana revises recent days (Pivotal 5 Oct moved from $67.61 to $68.23 within hours), which is why the nightly job re-reads 5 days.
+- Cortana revises recent days (Pivotal 5 Oct moved from $67.61 to $68.23 within hours), which is why the nightly job re-reads 4 days.
 - The sync runs hourly round the clock rather than 08–22, so the source is never "stale" overnight and rules keep running.
 - Account frequency = impressions ÷ summed campaign reach (exact for one campaign). Per-ad frequency is Cortana's own figure.
 - "Interventional Pain Consultants - Cleveland" reports spend from the same two ad accounts as the Georgia business and the base IPC business, so it is marked unverified.

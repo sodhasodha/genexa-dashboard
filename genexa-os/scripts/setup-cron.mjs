@@ -19,7 +19,7 @@ const secret = need("CRON_SECRET");
 // name, cron (UTC), job, timeout ms
 const SCHEDULES = [
   ["genexa-cortana-sync", "5 * * * *", "cortana-sync", 290000], // hourly, all day, so the source never looks stale overnight
-  ["genexa-cortana-full", "30 6 * * *", "cortana-full", 290000], // 02:30 ET (01:30 in winter): re-read the last 5 days
+  ["genexa-cortana-full", "30 6 * * *", "cortana-full", 290000], // 02:30 ET (01:30 in winter): re-read the last 4 days
   ["genexa-exceptions", "*/15 * * * *", "exceptions", 60000],
 ];
 

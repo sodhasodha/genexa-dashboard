@@ -16,9 +16,11 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
     const r = await syncCortana({ db: createAdminClient(), cortana: cortana(), days: 2 });
     return { ok: r.ok, summary: r };
   },
-  // 02:00 ET: re-read the last 5 days, so late attribution and Meta corrections land.
+  // 02:30 ET: re-read the last 4 days, so late attribution and Meta corrections land.
+  // Sized to finish inside the 300s function limit (about 1.9s per Cortana call, 96 calls);
+  // the hourly job already refreshes the per-ad windows.
   "cortana-full": async () => {
-    const r = await syncCortana({ db: createAdminClient(), cortana: cortana(), days: 5 });
+    const r = await syncCortana({ db: createAdminClient(), cortana: cortana(), days: 4, windows: false });
     return { ok: r.ok, summary: r };
   },
   exceptions: async () => {
