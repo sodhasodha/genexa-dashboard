@@ -32,6 +32,10 @@ export async function syncGhlAppointments(opts: { db: SupabaseClient; keys: GhlK
         continue;
       }
       try {
+        // The clinic's own timezone, as set on its GHL sub-account (used for 10:00-local messages and date parsing).
+        const location = (await get(apiKey, `/locations/${client.ghl_location_id}`).catch(() => null)) as { location?: { timezone?: string } } | null;
+        const timezone = location?.location?.timezone;
+        if (timezone) await db.from("clients").update({ timezone }).eq("id", client.id).neq("timezone", timezone);
         const calendars = GhlCalendarsResponse.parse(await get(apiKey, `/calendars/?locationId=${client.ghl_location_id}`)).calendars;
         const consultCalendars = calendars.map((c) => ({ id: c.id, kind: calendarKind(c.name) })).filter((c): c is { id: string; kind: CalendarKind } => c.kind !== null);
         if (consultCalendars.length === 0) {
@@ -49,7 +53,7 @@ export async function syncGhlAppointments(opts: { db: SupabaseClient; keys: GhlK
           // attendance is deliberately not written here: outcomes come from Cortana, and must not be reset.
           const { error: upsertError } = await db.from("appointments").upsert(
             rows.map(({ cancelled: _cancelled, ...r }) => { void _cancelled; return { ...r, client_id: client.id, synced_at }; }),
-            { onConflict: "client_id,ghl_contact_id,scheduled_for" },
+            { onConflict: "client_id,ghl_appointment_id" },
           );
           if (upsertError) throw new Error(`appointments: ${upsertError.message}`);
           // A copy of a consult that lost to another copy (the unconfirmed twin of a confirmed booking, or a
@@ -76,6 +80,8 @@ export async function syncGhlAppointments(opts: { db: SupabaseClient; keys: GhlK
         log(`FAIL ${client.name}: ${(err as Error).message}`);
       }
     }
+    const carried = await db.rpc("appointments_carry_nudges");
+    if (carried.error) throw new Error(`appointments_carry_nudges: ${carried.error.message}`);
     const applied = await db.rpc("appointments_apply_outcomes");
     if (applied.error) throw new Error(`appointments_apply_outcomes: ${applied.error.message}`);
     result.outcomes_applied = Number(applied.data ?? 0);

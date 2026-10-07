@@ -1,4 +1,4 @@
-import { updateShift } from "@/lib/actions/team";
+import { resetPassword, updateShift } from "@/lib/actions/team";
 import { requireStaff } from "@/lib/auth/staff";
 import { getCoverage, getTeam, type CoverageHour } from "@/lib/queries/team";
 import { AttendanceSections } from "./AttendanceSections";
@@ -6,6 +6,8 @@ import { AttendanceSections } from "./AttendanceSections";
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TIMEZONES = ["America/New_York", "America/Chicago", "America/Los_Angeles", "Europe/London", "Asia/Manila", "Asia/Kolkata", "Asia/Karachi", "Asia/Dubai"];
 const ERRORS: Record<string, string> = {
+  no_login: "That person has no login to reset.",
+  password: "The password could not be reset.",
   invalid: "Check the times (HH:MM) and the timezone.",
   both_times: "Enter both a start and an end time, or leave both blank.",
   timezone: "That is not a timezone name. Use one like Asia/Manila.",
@@ -40,6 +42,9 @@ export default async function TeamPage({ searchParams }: PageProps<"/team">) {
         ) : null}
         {error ? <p className="mt-2 rounded bg-bad-bg px-3 py-2 text-bad">{error}</p> : null}
         {params.saved === "1" ? <p className="mt-2 rounded bg-good-bg px-3 py-2 text-good">Shift saved.</p> : null}
+        {params.saved === "password" ? (
+          <p className="mt-2 rounded bg-good-bg px-3 py-2 text-good">Password reset to their first name{typeof params.who === "string" ? ` (${params.who})` : ""}.</p>
+        ) : null}
       </div>
 
       <section>
@@ -61,6 +66,12 @@ export default async function TeamPage({ searchParams }: PageProps<"/team">) {
                   <td className="px-3 py-2 font-medium">
                     {t.name}
                     {!t.has_login ? <span className="ml-2 text-xs font-normal text-muted">no login</span> : null}
+                    {isOwner && t.has_login && t.role !== "owner" ? (
+                      <form action={resetPassword} className="mt-1">
+                        <input type="hidden" name="staff_id" value={t.id} />
+                        <button type="submit" className="cursor-pointer rounded border border-line px-2 py-0.5 text-xs font-normal text-muted hover:text-ink" title="Sets the password back to their first name">Reset password</button>
+                      </form>
+                    ) : null}
                   </td>
                   <td className="px-3 py-2">
                     {ROLE_LABEL[t.role] ?? t.role}

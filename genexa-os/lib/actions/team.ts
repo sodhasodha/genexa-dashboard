@@ -36,3 +36,22 @@ export async function updateShift(formData: FormData) {
   revalidatePath("/team");
   redirect("/team?saved=1");
 }
+
+/**
+ * Owner puts a person's password back to their first name. Uses the service
+ * role (Supabase's admin API is the only way to set someone else's password),
+ * so the owner check happens here first.
+ */
+export async function resetPassword(formData: FormData) {
+  await requireOwner();
+  const staffId = z.uuid().safeParse(formData.get("staff_id"));
+  if (!staffId.success) redirect("/team?error=invalid");
+  const { createAdminClient } = await import("@/lib/supabase/admin");
+  const admin = createAdminClient();
+  const { data: person } = await admin.from("staff").select("name, role, auth_user_id").eq("id", staffId.data).single();
+  if (!person?.auth_user_id || person.role === "owner") redirect("/team?error=no_login");
+  const password = String(person.name).trim().split(/\s+/)[0];
+  const { error } = await admin.auth.admin.updateUserById(person.auth_user_id as string, { password });
+  if (error) redirect("/team?error=password");
+  redirect(`/team?saved=password&who=${encodeURIComponent(password)}`);
+}

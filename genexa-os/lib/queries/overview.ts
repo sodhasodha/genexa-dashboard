@@ -1,4 +1,5 @@
 import "server-only";
+import { callMatchScore, callPerson } from "@/lib/integrations/fathom/person";
 import { createClient } from "@/lib/supabase/server";
 import { changeRatio, formatAge, type Unit } from "@/lib/format";
 import type { Period } from "@/lib/periods";
@@ -185,6 +186,7 @@ export const REVIEW_KINDS = [
   { kind: "uncategorised_expense", label: "Uncategorised expenses" },
   { kind: "eod_issue", label: "EOD issues" },
   { kind: "test_lead", label: "Test leads" },
+  { kind: "unmatched_call", label: "Unmatched calls" },
   { kind: "anomaly", label: "Data anomalies" },
 ] as const;
 export type ReviewKind = (typeof REVIEW_KINDS)[number]["kind"];
@@ -197,7 +199,41 @@ export type ReviewItem = {
   kind: ReviewKind; record_table: string; record_id: string; client_id: string | null; title: string; detail: string; item_key: string;
   /** Only on Triage items. */
   triage?: TriageInfo;
+  /** Only on unmatched Fathom calls: who it probably was, and everyone it could be assigned to. */
+  call?: { suggested: string | null; person: string | null; prospects: { id: string; name: string }[] };
 };
+
+/**
+ * Fathom calls with someone outside Genexa who is not a known client or prospect.
+ * Each comes with a suggestion: the prospect or client sharing a name with the
+ * call's title or invitees ("Genexa Scaling x Gannon" -> "Gannon / Dr Park").
+ */
+async function getUnmatchedCalls(supabase: Awaited<ReturnType<typeof createClient>>): Promise<ReviewItem[]> {
+  const [calls, prospects, clients] = await Promise.all([
+    supabase.from("fathom_calls").select("id, title, started_at, share_url, url, external_names, external_domains").eq("kind", "unmatched").order("started_at", { ascending: false }).limit(200),
+    supabase.from("prospects").select("id, name").is("deleted_at", null).order("name"),
+    supabase.from("clients").select("id, name, contact_name").is("deleted_at", null),
+  ]);
+  // The table arrives with a later migration; until then the queue is simply empty.
+  if (calls.error) return [];
+  const prospectList = (prospects.data ?? []) as { id: string; name: string }[];
+  return (calls.data ?? []).map((c) => {
+    const names = (c.external_names as string[]) ?? [];
+    const person = callPerson(c.title as string | null, names);
+    const score = (name: string) => callMatchScore(name, c.title as string | null, names);
+    const bestProspect = prospectList.map((p) => ({ p, s: score(p.name) })).sort((a, b) => b.s - a.s)[0];
+    const bestClient = (clients.data ?? []).map((cl) => ({ cl, s: score(`${cl.name} ${cl.contact_name ?? ""}`) })).sort((a, b) => b.s - a.s)[0];
+    const suggested = bestProspect && bestProspect.s > 0 && bestProspect.s >= (bestClient?.s ?? 0) ? `prospect:${bestProspect.p.id}`
+      : bestClient && bestClient.s > 0 ? `client:${bestClient.cl.id}` : null;
+    const when = new Date(c.started_at as string).toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "short", day: "numeric", month: "short" });
+    return {
+      kind: "unmatched_call" as const, record_table: "fathom_calls", record_id: c.id as string, client_id: null, item_key: `call:${c.id}`,
+      title: `${c.title ?? "Untitled call"} · ${when}`,
+      detail: [((c.external_names as string[]) ?? []).join(", ") || null, ((c.external_domains as string[]) ?? []).join(", ") || null, (c.share_url ?? c.url) as string | null].filter(Boolean).join(" · "),
+      call: { suggested, person, prospects: prospectList },
+    };
+  });
+}
 
 /** Client requests waiting in Triage, as review items (title = clinic, detail = the message, first 300 characters). */
 async function getTriageItems(supabase: Awaited<ReturnType<typeof createClient>>): Promise<ReviewItem[]> {
@@ -229,16 +265,17 @@ async function getTriageItems(supabase: Awaited<ReturnType<typeof createClient>>
 
 export async function getReview(): Promise<{ counts: Record<ReviewKind, number>; items: ReviewItem[]; total: number }> {
   const supabase = await createClient();
-  const [{ data, error }, triage] = await Promise.all([
+  const [{ data, error }, triage, calls] = await Promise.all([
     supabase
       .from("data_review_open")
       .select("kind, record_table, record_id, client_id, title, detail, occurred_at, item_key")
       .order("occurred_at", { ascending: false })
       .limit(500),
     getTriageItems(supabase),
+    getUnmatchedCalls(supabase),
   ]);
   if (error) throw new Error(`data_review_open: ${error.message}`);
-  const items = [...triage, ...((data ?? []) as ReviewItem[])];
+  const items = [...triage, ...((data ?? []) as ReviewItem[]), ...calls];
   const counts = Object.fromEntries(REVIEW_KINDS.map((k) => [k.kind, items.filter((i) => i.kind === k.kind).length])) as Record<ReviewKind, number>;
   return { counts, items, total: items.length };
 }

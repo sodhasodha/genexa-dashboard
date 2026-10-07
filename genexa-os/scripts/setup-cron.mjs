@@ -29,6 +29,7 @@ const INTERVAL = [
   ["genexa-attendance", "*/5 * * * *", "attendance", 60000],
   ["genexa-reminders", "2-59/5 * * * *", "reminders", 120000],
   ["genexa-exceptions", "*/15 * * * *", "exceptions", 60000],
+  ["genexa-outcome-nudges", "0 * * * *", "outcome-nudges", 120000], // hourly; each clinic is messaged at 10:00 its own time
   ["genexa-router-process", "1-59/5 * * * *", "router-process", 120000],
   ["genexa-router-replies", "3-59/5 * * * *", "router-replies", 60000],
 ];
@@ -38,7 +39,6 @@ const LOCAL = [
   ["genexa-mercury-sync", "mercury-sync", "America/New_York", 6, 0, null, 120000],
   ["genexa-daily-snapshot", "daily-snapshot", "America/New_York", 0, 5, null, 120000],
   ["genexa-pay-run", "pay-run", "America/New_York", 23, 59, 0, 120000], // Sunday 23:59 ET, after every shift has closed
-  ["genexa-outcome-nudges", "outcome-nudges", "America/New_York", 10, 0, 1, 120000], // Monday 10:00 ET
 ];
 // Offsets from UTC, in hours, that each timezone can have.
 const OFFSETS = { "America/New_York": [4, 5], "Europe/London": [0, -1] };

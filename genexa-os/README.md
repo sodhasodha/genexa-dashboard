@@ -69,7 +69,7 @@ npm run setup:cron -- https://ops.genexascaling.com
 | `router-process`, `router-replies` | every 5 min | client request router |
 | `daily-snapshot` | 00:05 ET | stores the week's scores; freezes last month on the 1st |
 | `pay-run` | Sunday 23:59 ET | builds the week's draft pay run and DMs the owner |
-| `outcome-nudges` | Monday 10:00 ET | one message per clinic with consults waiting for an outcome |
+| `outcome-nudges` | hourly, sends at 10:00 clinic time | one message per clinic: consults 24h past with no outcome, and a shorter second reminder at 48h |
 
 Jobs tied to a local time follow US and UK daylight saving on their own. Each run is logged; see Integrations in the app.
 
@@ -80,7 +80,7 @@ Manual runs from a developer's machine: `npm run sync:cortana -- --days 30`, `sy
 Two workspaces, two installs of the same app.
 
 - **Team workspace**: alerts, reminders, digests, and the Done / Snooze buttons.
-- **Client workspace**: the app listens to client channels for requests. It posts there in only two cases: the weekly "consults waiting for an outcome" message, and request-router thread replies when that setting is on.
+- **Client workspace**: the app listens to client channels for requests. It posts there in only two cases: the daily "consults waiting for an outcome" message, and request-router thread replies when that setting is on.
 
 ## Add a clinic
 
@@ -94,4 +94,4 @@ Two workspaces, two installs of the same app.
 
 ## Sign in
 
-Team members sign in with a one-time code sent to their email and typed into the login page. An account must exist in `staff` with a login; there is no self sign-up.
+Team members sign in with their email and a password. There is no self sign-up: a person must exist in `staff` with a login. The owner can put anyone's password back to their first name from the Team page ("Reset password").

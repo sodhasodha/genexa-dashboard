@@ -284,23 +284,34 @@ describe("finance rules", () => {
 });
 
 describe("outcome nudges", () => {
-  it("lists live clinics with consults waiting, leaves out consults that cannot be matched, and only this rule may target a client channel", async () => {
-    const c = await id(`insert into clients (name, stage, slack_scheduling_id, slack_general_id) values ('Nudge Clinic', 'live', 'CNUDGESCHED', 'CNUDGEGEN') returning id`);
+  it("first notice at 24h, second at 48h, then silence; consults that cannot be matched are left out", async () => {
+    const c = await id(`insert into clients (name, stage, slack_scheduling_id, slack_general_id, timezone) values ('Nudge Clinic', 'live', 'CNUDGESCHED', 'CNUDGEGEN', 'America/Chicago') returning id`);
     const off = await id(`insert into clients (name, stage, slack_general_id) values ('Paused Clinic', 'paused', 'CPAUSED') returning id`);
-    const appt = (clientId: string, contact: string, key: string | null, when: string, attendance = "scheduled") =>
-      db.query(`insert into appointments (client_id, ghl_contact_id, contact_key, contact_first_name, scheduled_for, attendance) values ($1, $2, $3, $4, ${when}, $5)`, [clientId, contact, key, contact.toUpperCase(), attendance]);
-    await appt(c, "ann", "p:1", "now() - interval '2 days'");
+    const appt = (clientId: string, contact: string, key: string | null, when: string, extra = "") =>
+      id(`insert into appointments (client_id, ghl_contact_id, contact_key, contact_first_name, scheduled_for ${extra ? ", " + extra.split("=")[0] : ""}) values ($1, $2, $3, $4, ${when} ${extra ? ", " + extra.split("=")[1] : ""}) returning id`, [clientId, contact, key, contact.toUpperCase()]);
+    await appt(c, "ann", "p:1", "now() - interval '30 hours'");
     await appt(c, "bob", "p:2", "now() - interval '5 days'");
     await appt(c, "cat", null, "now() - interval '3 days'"); // no phone: cannot be checked, not chased
-    await appt(c, "dan", "p:4", "now() - interval '3 hours'"); // too recent
+    await appt(c, "dan", "p:4", "now() - interval '3 hours'"); // under 24h
     await appt(c, "eve", "p:5", "now() - interval '30 days'"); // too old
-    await appt(c, "fay", "p:6", "now() - interval '4 days'", "showed"); // logged
+    await appt(c, "fay", "p:6", "now() - interval '4 days'", "attendance='showed'"); // logged
     await appt(off, "gus", "p:7", "now() - interval '2 days'");
-    const rows = await db.query<{ name: string; channel: string; waiting: string; consults: string }>(`select name, channel, waiting, consults from outcome_nudges_due where client_id in ($1, $2)`, [c, off]);
-    expect(rows.rows.length).toBe(1);
-    expect(rows.rows[0]).toMatchObject({ name: "Nudge Clinic", channel: "CNUDGESCHED" });
-    expect(Number(rows.rows[0].waiting)).toBe(2);
-    expect(rows.rows[0].consults).toMatch(/^BOB \(\w{3} \d\d \w{3}\), ANN \(\w{3} \d\d \w{3}\)$/);
+    const due = () => one<{ channel: string; timezone: string; first_count: string; second_count: string; first_list: string; second_list: string | null; first_ids: string[] | null }>(
+      `select channel, timezone, first_count, second_count, first_list, second_list, first_ids from outcome_nudges_due where client_id = $1`, [c]);
+    let d = await due();
+    expect(d).toMatchObject({ channel: "CNUDGESCHED", timezone: "America/Chicago" });
+    expect([Number(d.first_count), Number(d.second_count)]).toEqual([2, 0]);
+    expect(d.first_list).toMatch(/^BOB — \w{3} \d{1,2} \w{3}, \d{1,2}:\d\d[ap]m\nANN — \w{3} \d{1,2} \w{3}, \d{1,2}:\d\d[ap]m$/);
+    expect((await db.query(`select 1 from outcome_nudges_due where client_id = $1`, [off])).rows.length).toBe(0);
+
+    // The first notice went out a day ago: Bob (5 days old) is due his second, Ann (30h) is not yet.
+    await db.query(`update appointments set nudge1_at = now() - interval '24 hours' where client_id = $1 and nudge1_at is null and contact_key in ('p:1', 'p:2')`, [c]);
+    d = await due();
+    expect([Number(d.first_count), Number(d.second_count), d.second_list]).toEqual([0, 1, expect.stringMatching(/^BOB \(\w{3} \d{1,2} \w{3}\)$/)]);
+    // After the second reminder nothing more is due for him.
+    await db.query(`update appointments set nudge2_at = now() where client_id = $1 and contact_key = 'p:2'`, [c]);
+    expect(await due()).toBeUndefined();
+
     await db.query(`insert into notifications (rule_key, channel, record_id, window_key) values ('outcome_nudge', 'CNUDGESCHED', $1, 'w1'), ('weekly_scorecard', 'CNUDGESCHED', $1, 'w1')`, [c]);
     const queued = await db.query<{ rule_key: string }>(`select rule_key from notifications where channel = 'CNUDGESCHED'`);
     expect(queued.rows.map((r) => r.rule_key)).toEqual(["outcome_nudge"]);

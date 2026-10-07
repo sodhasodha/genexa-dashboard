@@ -44,6 +44,13 @@ export async function syncFathom(opts: { db: SupabaseClient; apiKey: string; sin
     }
 
     const synced_at = new Date().toISOString();
+    // Calls a person has sorted out in Data review keep that answer.
+    const { data: resolved, error: resolvedError } = await db.from("fathom_calls").select("recording_id").not("resolved_by", "is", null);
+    if (resolvedError) throw new Error(`fathom_calls: ${resolvedError.message}`);
+    const keep = new Set((resolved ?? []).map((r) => r.recording_id as string));
+    const fresh = rows.filter((r) => !keep.has(r.recording_id));
+    rows.length = 0;
+    rows.push(...fresh);
     if (rows.length > 0) {
       const { error } = await db.from("fathom_calls").upsert(rows.map(({ recorded_by_email: _e, ...r }) => { void _e; return { ...r, synced_at }; }), { onConflict: "recording_id" });
       if (error) throw new Error(`fathom_calls: ${error.message}`);

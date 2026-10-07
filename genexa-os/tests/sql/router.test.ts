@@ -550,3 +550,33 @@ describe("router_accuracy", () => {
     expect(get(30, "ryan")).toEqual([1, 1, 0, 1, 0]);
   });
 });
+
+describe("angry follow-up on a logged request", () => {
+  it("raises the original to urgent and queues one DM for the owner, once", async () => {
+    const d = await freshDb();
+    const p = await seedStaff(d);
+    const c = (await d.query<{ id: string }>(`insert into clients (name, stage) values ('Angry Clinic', 'live') returning id`)).rows[0].id;
+    const task = (await d.query<{ id: string }>(`insert into tasks (owner_id, title, category, source) values ($1, 'Lower the ad price', 'ads', 'slack') returning id`, [p.aditya])).rows[0].id;
+    const req = (ts: string, extra: string) =>
+      d.query<{ id: string }>(
+        `insert into client_requests (client_id, channel, channel_kind, slack_ts, text, permalink, received_at, title, owner, ${extra.split("|")[0]})
+         values ($1, 'CANGRY', 'general', $2, 'msg', 'https://slack.com/archives/CANGRY/p' || $2, now(), 'Lower the ad price', 'ads', ${extra.split("|")[1]}) returning id`, [c, ts]);
+    const orig = (await req("1.1", `status, routed_table, routed_id, urgency|'routed', 'tasks', '${task}', 'normal'`)).rows[0].id;
+    const calm = (await req("1.2", "urgency|'normal'")).rows[0].id;
+    const angry = (await req("1.3", "urgency|'urgent'")).rows[0].id;
+    const again = (await req("1.4", "urgency|'urgent'")).rows[0].id;
+    const merge = (id: string) => d.query(`update client_requests set status = 'merged', merged_into = $2 where id = $1`, [id, orig]);
+    const state = async () => ({
+      urgency: (await d.query<{ urgency: string }>(`select urgency from client_requests where id = $1`, [orig])).rows[0].urgency,
+      priority: (await d.query<{ priority: string }>(`select priority from tasks where id = $1`, [task])).rows[0].priority,
+      escalations: (await d.query(`select 1 from exceptions where type = 'client_escalation'`)).rows.length,
+      dms: (await d.query<{ staff_id: string }>(`select staff_id from notifications where rule_key = 'exception_opened' and payload->>'type' = 'client_escalation'`)).rows.map((r) => r.staff_id),
+    });
+    await merge(calm);
+    expect(await state()).toEqual({ urgency: "normal", priority: "medium", escalations: 0, dms: [] });
+    await merge(angry);
+    expect(await state()).toEqual({ urgency: "urgent", priority: "high", escalations: 1, dms: [p.ryan] });
+    await merge(again);
+    expect(await state()).toEqual({ urgency: "urgent", priority: "high", escalations: 1, dms: [p.ryan] });
+  });
+});

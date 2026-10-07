@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { assignPayment, categoriseExpense, classifyPayment, dismissReviewItem, markLeadReal, resolveException, resolveFeeMismatch, setAttendance, snoozeException } from "@/lib/actions/overview";
+import { resolveCall } from "@/lib/actions/calls";
 import { decideClientRequest } from "@/lib/actions/router";
 import { formatValue } from "@/lib/format";
 import { REVIEW_KINDS, type Bottleneck, type ReviewItem, type ReviewKind } from "@/lib/queries/overview";
@@ -27,6 +28,26 @@ function FixButtons({ item, clients, isOwner }: { item: ReviewItem; clients: { i
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <button className={btn}>Match</button>
+      </form>
+    );
+  }
+  if (item.kind === "unmatched_call" && item.call) {
+    const call = item.call;
+    return (
+      <form action={resolveCall} className="flex flex-wrap items-center gap-1">
+        <input type="hidden" name="id" value={item.record_id} />
+        <select name="target" defaultValue={call.suggested ?? ""} aria-label="Who the call was with" className="max-w-56 rounded border border-line px-1.5 py-1 text-xs">
+          <option value="">Pick who this was…</option>
+          <optgroup label="Prospects">
+            {call.prospects.map((p) => <option key={p.id} value={`prospect:${p.id}`}>{p.name}{call.suggested === `prospect:${p.id}` ? " (suggested)" : ""}</option>)}
+          </optgroup>
+          <optgroup label="Clients">
+            {clients.map((c) => <option key={c.id} value={`client:${c.id}`}>{c.name}{call.suggested === `client:${c.id}` ? " (suggested)" : ""}</option>)}
+          </optgroup>
+        </select>
+        <button name="decision" value="assign" className={btn}>This is them</button>
+        <button name="decision" value="new_prospect" className={btn} title={call.person ? `Creates the prospect "${call.person}"` : undefined}>New prospect</button>
+        <button name="decision" value="ignore" className={btn}>Ignore</button>
       </form>
     );
   }
@@ -135,7 +156,7 @@ export function ReviewList({ items, clients, isOwner, queue }: { items: ReviewIt
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <FixButtons item={item} clients={clients} isOwner={isOwner} />
-            {isOwner ? (
+            {isOwner && item.kind !== "unmatched_call" ? (
               <form action={dismissReviewItem} className="flex gap-1">
                 <input type="hidden" name="item_key" value={item.item_key} />
                 <input type="hidden" name="kind" value={item.kind} />

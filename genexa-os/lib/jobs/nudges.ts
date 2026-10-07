@@ -1,7 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { etToday } from "@/lib/time";
 
 export type NudgeSender = (channel: string, text: string) => Promise<{ ok: boolean; ts?: string; error?: string }>;
 
@@ -18,46 +17,63 @@ const postToClientChannel: NudgeSender = async (channel, text) => {
   return { ok: json.ok, ts: json.ts, error: json.error };
 };
 
-export const nudgeText = (waiting: number, consults: string) =>
-  `${waiting} ${waiting === 1 ? "consult is" : "consults are"} waiting for an outcome: ${consults}. Please log whether each patient showed, so your results stay accurate.`;
+/** The one batched message a clinic gets: new consults in full, second reminders in one short line. */
+export function nudgeText(first: { count: number; list: string | null }, second: { count: number; list: string | null }): string {
+  const parts: string[] = [];
+  if (first.count > 0) {
+    parts.push(`${first.count} ${first.count === 1 ? "consult needs" : "consults need"} an outcome logged (showed, no-show or cancelled):\n${(first.list ?? "").split("\n").map((l) => `• ${l}`).join("\n")}`);
+  }
+  if (second.count > 0) parts.push(`Second reminder, still waiting: ${second.list}`);
+  return parts.join("\n\n");
+}
+
+/** The clinic-local hour the daily message goes out. */
+export const NUDGE_HOUR = 10;
 
 /**
- * Outcome nudges: one message per clinic, in its own channel, saying how many
- * consults are waiting for an outcome. Never more than once every 7 days per
- * clinic. This is the only message the app posts in the client workspace
- * besides request-router thread replies.
+ * Outcome nudges, run every hour. A clinic gets at most one message a day, at
+ * 10:00 its own time: every consult that passed 24h with no outcome since the
+ * last message, plus a short second reminder for those now past 48h. After two
+ * reminders a consult is not mentioned again. Besides request-router thread
+ * replies, this is the only thing the app posts in the client workspace.
  */
-export async function runOutcomeNudges(opts: { db?: SupabaseClient; send?: NudgeSender; today?: string } = {}) {
+export async function runOutcomeNudges(opts: { db?: SupabaseClient; send?: NudgeSender; hour?: number } = {}) {
   const db = opts.db ?? createAdminClient();
   const send = opts.send ?? postToClientChannel;
-  const summary = { enabled: true, due: 0, sent: 0, skipped_recent: 0, skipped_no_channel: 0, failed: 0, clinics: [] as string[] };
+  const summary = { enabled: true, clinics_due: 0, sent: 0, first: 0, second: 0, not_their_hour: 0, already_today: 0, no_channel: [] as string[], failed: [] as string[] };
   const { data: setting } = await db.from("app_settings").select("value").eq("key", "client_outcome_nudges").maybeSingle();
   const { data: rule } = await db.from("reminder_rules").select("enabled").eq("key", "outcome_nudge").maybeSingle();
   if (setting?.value !== true || rule?.enabled === false) return { ok: true, summary: { ...summary, enabled: false } };
 
-  const { data, error } = await db.from("outcome_nudges_due").select("client_id, name, channel, waiting, consults, last_nudged_at");
+  const { data, error } = await db.from("outcome_nudges_due").select("*");
   if (error) throw new Error(`outcome_nudges_due: ${error.message}`);
-  const window = opts.today ?? etToday();
   for (const row of data ?? []) {
-    summary.due++;
-    if (!row.channel) { summary.skipped_no_channel++; continue; }
-    if (row.last_nudged_at && Date.now() - new Date(row.last_nudged_at as string).getTime() < 6.5 * 86_400_000) { summary.skipped_recent++; continue; }
-    // The row is written first: the unique index stops a second message for the same clinic and day.
+    if (Number(row.local_hour) !== (opts.hour ?? NUDGE_HOUR)) { summary.not_their_hour++; continue; }
+    summary.clinics_due++;
+    if (!row.channel) { summary.no_channel.push(row.name as string); continue; }
+    // Written first: the unique index allows one message per clinic per local day.
     const { data: note, error: noteError } = await db.from("notifications")
-      .insert({ rule_key: "outcome_nudge", channel: row.channel, record_type: "clients", record_id: row.client_id, window_key: window })
+      .insert({ rule_key: "outcome_nudge", channel: row.channel, record_type: "clients", record_id: row.client_id, window_key: row.local_date })
       .select("id").single();
-    if (noteError || !note) { summary.skipped_recent++; continue; }
-    const r = await send(row.channel as string, nudgeText(Number(row.waiting), row.consults as string));
-    if (r.ok) {
-      await db.from("notifications").update({ sent_at: new Date().toISOString(), slack_ts: r.ts ?? "sent" }).eq("id", note.id);
-      summary.sent++;
-      summary.clinics.push(`${row.name} (${row.waiting})`);
-    } else {
-      await db.from("notifications").update({ sent_at: new Date().toISOString(), channel: `${row.channel}`, slack_ts: null, window_key: `${window}:failed:${r.error ?? "error"}` }).eq("id", note.id);
-      summary.failed++;
+    if (noteError || !note) { summary.already_today++; continue; }
+    const first = { count: Number(row.first_count), list: row.first_list as string | null };
+    const second = { count: Number(row.second_count), list: row.second_list as string | null };
+    const r = await send(row.channel as string, nudgeText(first, second));
+    const now = new Date().toISOString();
+    if (!r.ok) {
+      // Freed so the next hourly run can try again the same day.
+      await db.from("notifications").update({ window_key: `${row.local_date}:failed:${now}`, sent_at: now }).eq("id", note.id);
+      summary.failed.push(`${row.name}: ${r.error ?? "error"}`);
+      continue;
     }
+    await db.from("notifications").update({ sent_at: now, slack_ts: r.ts ?? "sent" }).eq("id", note.id);
+    if (first.count > 0) await db.from("appointments").update({ nudge1_at: now }).in("id", row.first_ids as string[]);
+    if (second.count > 0) await db.from("appointments").update({ nudge2_at: now }).in("id", row.second_ids as string[]);
+    summary.sent++;
+    summary.first += first.count;
+    summary.second += second.count;
   }
-  return { ok: summary.failed === 0, summary };
+  return { ok: summary.failed.length === 0, summary };
 }
 
 export const JOBS_NUDGES: Record<string, () => Promise<{ ok: boolean; summary: Record<string, unknown> }>> = {
