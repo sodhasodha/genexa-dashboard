@@ -40,6 +40,7 @@ const CONFIG_KEYS = [
   "sop_milestone_1", "sop_milestone_2", "sop_milestone_3", "sop_milestone_4",
   "media_exceptions_24h_pct", "media_accounts_over_cpb", "media_book_cpb_change_pct",
   "media_zero_spend_accounts", "media_accounts_flagged_3d", "media_exception_sla_hours", "media_flagged_days",
+  "tasks_on_time_pct",
 ];
 
 const withUnit = (v: number | null, unit: string | null) => (v === null ? "not set" : unit === "$" ? `$${v}` : unit === "%" ? `${v}%` : `${v}`);
@@ -230,12 +231,15 @@ const SCORE_METRICS: { metric: string; key: string; currentOnly: boolean }[] = [
   { metric: "book_cpb_change_pct", key: "media_book_cpb_change_pct", currentOnly: true },
   { metric: "zero_spend_accounts", key: "media_zero_spend_accounts", currentOnly: true },
   { metric: "accounts_flagged_3d", key: "media_accounts_flagged_3d", currentOnly: true },
+  // From score_tasks_weekly: tasks with a deadline in the week, done by the deadline.
+  { metric: "tasks_on_time_pct", key: "tasks_on_time_pct", currentOnly: false },
 ];
 
 type Score = { staff_id: string; week_start: string; metric: string; value: number | null; numerator: number | null; denominator: number | null; colour: Colour | null };
 
 function scoreCell(s: Score | undefined): ScoreCell {
   if (!s || s.value === null) return { display: null, detail: null, colour: null };
+  if (s.metric === "tasks_on_time_pct") return { display: `${s.value}%`, detail: `${s.numerator} of ${s.denominator} done by the deadline`, colour: s.colour };
   if (s.metric === "exceptions_24h_pct") return { display: `${s.value}%`, detail: `${s.numerator} of ${s.denominator} resolved inside the limit`, colour: s.colour };
   if (s.metric === "book_cpb_change_pct") {
     return { display: `${s.value > 0 ? "+" : ""}${s.value}%`, detail: `${formatValue(s.numerator, "money")} now vs ${formatValue(s.denominator, "money")} the 7 days before`, colour: s.colour };
@@ -249,14 +253,16 @@ export async function getScorecards(today: string): Promise<Scorecard[]> {
   const isoDow = ((new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7) + 1;
   const week = addDays(today, -(isoDow - 1));
   const prev = addDays(week, -7);
-  const [staff, scores, config] = await Promise.all([
+  const [staff, scores, taskScores, config] = await Promise.all([
     supabase.from("staff").select("id, name").eq("role", "media_buyer").neq("status", "left").order("created_at"),
     supabase.from("score_media_weekly").select("staff_id, week_start, metric, value, numerator, denominator, colour").in("week_start", [week, prev]),
+    supabase.from("score_tasks_weekly").select("staff_id, week_start, metric, value, numerator, denominator, colour").in("week_start", [week, prev]),
     getConfig(),
   ]);
   if (staff.error) throw new Error(`staff: ${staff.error.message}`);
   if (scores.error) throw new Error(`score_media_weekly: ${scores.error.message}`);
-  const all = ((scores.data ?? []) as Record<string, unknown>[]).map((s) => ({
+  if (taskScores.error) throw new Error(`score_tasks_weekly: ${taskScores.error.message}`);
+  const all = ([...(scores.data ?? []), ...(taskScores.data ?? [])] as Record<string, unknown>[]).map((s) => ({
     staff_id: s.staff_id as string, week_start: String(s.week_start), metric: s.metric as string,
     value: n(s.value), numerator: n(s.numerator), denominator: n(s.denominator), colour: s.colour as Colour | null,
   }));

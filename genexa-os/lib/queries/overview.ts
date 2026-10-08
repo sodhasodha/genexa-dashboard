@@ -337,6 +337,7 @@ const METRIC: Record<string, { label: string; as: "ratio" | "pct" | "count" }> =
   book_cpb_change_pct: { label: "Book cost per booked vs last 7d", as: "pct" },
   zero_spend_accounts: { label: "Accounts at $0 spend", as: "count" },
   accounts_flagged_3d: { label: "Accounts flagged 3+ days", as: "count" },
+  tasks_on_time_pct: { label: "Tasks done on time", as: "pct" },
 };
 const RANK: Record<string, number> = { red: 3, amber: 2, green: 1 };
 

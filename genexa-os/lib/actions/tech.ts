@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { requireStaff } from "@/lib/auth/staff";
+import { requireOwner, requireStaff } from "@/lib/auth/staff";
+import { localToInstant } from "@/lib/deadlines";
 import { createClient } from "@/lib/supabase/server";
 
 // Every write goes through the logged-in user's Supabase client, so RLS decides
@@ -93,6 +94,28 @@ export async function pauseJob(formData: FormData) {
     fail("save");
   }
   ok("paused");
+}
+
+/**
+ * The app owner replaces a job's automatic due time with a date and time (typed in UK time,
+ * converted here on the server), or goes back to the automatic one. The database keeps the
+ * override through later changes and refuses anyone else (tech_jobs_due_override).
+ */
+export async function setJobDeadline(formData: FormData) {
+  await requireOwner();
+  const job = z.uuid().safeParse(formData.get("job_id"));
+  if (!job.success) fail("invalid");
+  let override: string | null = null;
+  if (formData.get("automatic") === null) {
+    const at = localToInstant(blank(formData.get("due_at_uk")) ?? "");
+    if (!at) fail("deadline_invalid");
+    override = at!.toISOString();
+  }
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("tech_jobs").update({ due_override: override }).eq("id", job.data!).select("id");
+  if (error) fail("save");
+  if (!data || data.length === 0) fail("not_yours");
+  ok(override ? "deadline" : "deadline_auto");
 }
 
 const Resume = z.object({ job_id: z.uuid() });

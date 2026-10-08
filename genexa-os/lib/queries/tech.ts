@@ -1,5 +1,6 @@
 import "server-only";
 import type { CurrentStaff } from "@/lib/auth/staff";
+import { UK, formatDeadline, instantToLocal } from "@/lib/deadlines";
 import { createClient } from "@/lib/supabase/server";
 
 export const JOB_TYPES = ["launch", "fix", "build", "other"] as const;
@@ -25,6 +26,12 @@ export type TechJob = {
   /** ET, e.g. "Mon 5 Oct 14:30". */
   requested: string | null;
   due: string | null;
+  /** The due time in UK time, for the owner who sets deadlines in UK time. */
+  due_uk: string | null;
+  /** True when the owner replaced the automatic due time with their own. */
+  deadline_overridden: boolean;
+  /** UK wall-clock value for the deadline box ("2026-10-14T15:00"); empty when nothing is due. */
+  deadline_uk_input: string;
   done: string | null;
   /** e.g. "2h 10m". Fix jobs count business minutes (09:00-17:00 ET, Mon-Fri). */
   genexa_time: string | null;
@@ -59,13 +66,13 @@ export type TechScorecard = { tech_name: string | null; weeks: ScoreWeek[] };
 type BoardRow = {
   tech_job_id: string; type: string; title: string; notes: string | null; client_name: string | null;
   requested_by_name: string | null; owner_id: string | null; owner_name: string | null;
-  requested_at: string | null; due_at: string | null; done_at: string | null; status: JobStatus; blocked_on: string | null;
+  requested_at: string | null; due_at: string | null; due_override: string | null; done_at: string | null; status: JobStatus; blocked_on: string | null;
   sla_minutes: number | null; genexa_minutes: number | null; paused_minutes: number | null; pause_count: number | null;
   is_paused: boolean | null; is_overdue: boolean | null; met_sla: boolean | null;
   pause_reason: string | null; pause_evidence: string | null;
 };
 const BOARD_COLUMNS =
-  "tech_job_id, type, title, notes, client_name, requested_by_name, owner_id, owner_name, requested_at, due_at, done_at, status, blocked_on, " +
+  "tech_job_id, type, title, notes, client_name, requested_by_name, owner_id, owner_name, requested_at, due_at, due_override, done_at, status, blocked_on, " +
   "sla_minutes, genexa_minutes, paused_minutes, pause_count, is_paused, is_overdue, met_sla, pause_reason, pause_evidence";
 
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
@@ -105,6 +112,9 @@ function toJob(r: BoardRow, me: CurrentStaff): TechJob {
     owner_name: r.owner_name,
     requested: formatEt(r.requested_at),
     due: formatEt(r.due_at),
+    due_uk: formatDeadline(r.due_at, UK),
+    deadline_overridden: r.due_override !== null && r.due_override !== undefined,
+    deadline_uk_input: instantToLocal(r.due_at),
     done: formatEt(r.done_at),
     genexa_time: formatDuration(num(r.genexa_minutes)),
     paused_time: formatDuration(num(r.paused_minutes)),
@@ -159,6 +169,8 @@ const METRICS: { metric: string; label: string; config_key: string | null; unit:
   { metric: "fix_sla_pct", label: "Fixes within SLA", config_key: "tech_fix_sla_pct", unit: "%" },
   { metric: "broken_week1", label: "Launches broken in week 1", config_key: "tech_broken_week1", unit: "count" },
   { metric: "paused_pct", label: "Jobs paused at least once", config_key: null, unit: "%" },
+  // From score_tasks_weekly: tasks with a deadline in the week, done by the deadline.
+  { metric: "tasks_on_time_pct", label: "Tasks done on time", config_key: "tasks_on_time_pct", unit: "%" },
 ];
 
 type ConfigRow = { key: string; direction: string; green: number | null; amber: number | null };
@@ -185,7 +197,7 @@ export async function getTechScorecard(): Promise<TechScorecard> {
   const techId = (holder.data as string | null) ?? null;
   if (!techId) return { tech_name: null, weeks: [] };
 
-  const [who, scores, config] = await Promise.all([
+  const [who, scores, taskScores, config] = await Promise.all([
     supabase.from("staff").select("name").eq("id", techId).maybeSingle(),
     supabase
       .from("score_tech_weekly")
@@ -193,13 +205,20 @@ export async function getTechScorecard(): Promise<TechScorecard> {
       .eq("staff_id", techId)
       .order("week_start", { ascending: false })
       .limit(METRICS.length * 2),
-    supabase.from("scoring_config").select("key, direction, green, amber").eq("card", "tech"),
+    supabase
+      .from("score_tasks_weekly")
+      .select("week_start, metric, value, numerator, denominator, colour")
+      .eq("staff_id", techId)
+      .order("week_start", { ascending: false })
+      .limit(2),
+    supabase.from("scoring_config").select("key, direction, green, amber").in("card", ["tech", "tasks"]),
   ]);
   if (scores.error) throw new Error(`score_tech_weekly: ${scores.error.message}`);
+  if (taskScores.error) throw new Error(`score_tasks_weekly: ${taskScores.error.message}`);
   if (config.error) throw new Error(`scoring_config: ${config.error.message}`);
 
   const configByKey = new Map((config.data ?? []).map((c) => [c.key, c as ConfigRow]));
-  const rows = scores.data ?? [];
+  const rows = [...(scores.data ?? []), ...(taskScores.data ?? [])];
   const weekStarts = [...new Set(rows.map((r) => r.week_start as string))].sort().reverse();
   const weeks = weekStarts.map((week_start, i) => ({
     week_start,

@@ -1,4 +1,4 @@
-import { pauseJob, requestTechWork, resumeJob, setBlockedOn, setJobStatus } from "@/lib/actions/tech";
+import { pauseJob, requestTechWork, resumeJob, setBlockedOn, setJobDeadline, setJobStatus } from "@/lib/actions/tech";
 import { requireStaff } from "@/lib/auth/staff";
 import {
   JOB_STATUSES, JOB_TYPES, PAUSE_REASONS, PAUSE_REASON_LABEL,
@@ -15,6 +15,7 @@ const ERRORS: Record<string, string> = {
   pause_invalid: "A pause needs a reason and an evidence note.",
   already_paused: "This job is already paused.",
   not_paused: "There is no open pause on this job, or it is not your job.",
+  deadline_invalid: "Enter the deadline as a date and a time.",
 };
 const SAVED: Record<string, string> = {
   requested: "Request sent to tech.",
@@ -22,6 +23,8 @@ const SAVED: Record<string, string> = {
   blocked: "Blocked-on saved.",
   paused: "Job paused. The SLA clock is stopped.",
   resumed: "Job resumed. The SLA clock is running.",
+  deadline: "Deadline set. It replaces the automatic due time until you go back to automatic.",
+  deadline_auto: "Back to the automatic due time.",
 };
 const STATUS_CLASS: Record<string, string> = {
   todo: "bg-stale-bg text-muted",
@@ -51,9 +54,22 @@ function ScoreTile({ cell }: { cell: ScoreCell }) {
   );
 }
 
-function JobControls({ job }: { job: TechJob }) {
+function JobControls({ job, isOwner }: { job: TechJob; isOwner: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
+      {isOwner ? (
+        <form action={setJobDeadline} className="flex flex-wrap items-center gap-1">
+          <input type="hidden" name="job_id" value={job.id} />
+          <label className="flex items-center gap-1">
+            <span className="text-muted">Deadline (UK time)</span>
+            <input type="datetime-local" name="due_at_uk" defaultValue={job.deadline_uk_input} aria-label={`Deadline for ${job.title}`} className={input} />
+          </label>
+          <button type="submit" className={smallButton}>Set</button>
+          {job.deadline_overridden ? (
+            <button type="submit" name="automatic" value="1" formNoValidate className={smallButton}>Back to automatic</button>
+          ) : null}
+        </form>
+      ) : null}
       <form action={setJobStatus} className="flex items-center gap-1">
         <input type="hidden" name="job_id" value={job.id} />
         <span className="text-muted">Status</span>
@@ -129,7 +145,7 @@ export default async function TechPage({ searchParams }: PageProps<"/tech">) {
             {scorecard.weeks.map((w) => (
               <div key={w.week_start}>
                 <h3 className="mb-1 text-xs text-muted">{w.label}</h3>
-                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
                   {w.cells.map((c) => <ScoreTile key={c.metric} cell={c} />)}
                 </div>
               </div>
@@ -172,6 +188,8 @@ export default async function TechPage({ searchParams }: PageProps<"/tech">) {
                     <td className={`${td} whitespace-nowrap tabular-nums`}>{j.requested ?? <NoData />}</td>
                     <td className={`${td} whitespace-nowrap tabular-nums`}>
                       {j.due ?? <span className="text-muted">no SLA</span>}
+                      {j.deadline_overridden ? <span className="ml-2 rounded bg-warn-bg px-1.5 py-0.5 text-xs text-warn">set by owner</span> : null}
+                      {me.role === "owner" && j.due_uk ? <span className="block text-xs text-muted">{j.due_uk}</span> : null}
                       {j.is_overdue ? <span className="ml-2 rounded bg-bad-bg px-1.5 py-0.5 text-xs font-semibold text-bad">overdue</span> : null}
                     </td>
                     <td className={`${td} whitespace-nowrap tabular-nums`}>
@@ -196,7 +214,7 @@ export default async function TechPage({ searchParams }: PageProps<"/tech">) {
                   ) : null}
                   {j.can_edit ? (
                     <tr>
-                      <td colSpan={9} className="bg-raised px-3 py-2"><JobControls job={j} /></td>
+                      <td colSpan={9} className="bg-raised px-3 py-2"><JobControls job={j} isOwner={me.role === "owner"} /></td>
                     </tr>
                   ) : null}
                 </tbody>
@@ -262,7 +280,7 @@ export default async function TechPage({ searchParams }: PageProps<"/tech">) {
         <h2 className="mb-1 font-semibold">Request tech work</h2>
         <p className="mb-2 text-xs text-muted">
           This form is the only way tech work is requested. A launch is due 48 hours after the request; a fix is due 30
-          business minutes after it.
+          business minutes after it. The owner can replace either with a specific date and time on the job.
         </p>
         <form action={requestTechWork} className="flex max-w-2xl flex-col gap-3 rounded border border-line bg-panel p-4">
           <div className="flex flex-wrap gap-3">

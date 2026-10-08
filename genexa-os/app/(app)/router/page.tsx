@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { decideClientRequest, setRouterVerdict } from "@/lib/actions/router";
+import { decideClientRequest, setRequestDeadline, setRouterVerdict } from "@/lib/actions/router";
 import { requireStaff } from "@/lib/auth/staff";
 import { OWNER_LABEL, getBackfillPending, getHandledInSlack, getRouterAccuracy, getRouterLog, routedHref, type AccuracyRow, type RouterRow } from "@/lib/queries/router";
 import { formatDue } from "@/lib/router/replies";
@@ -35,13 +35,50 @@ function Classification({ r }: { r: RouterRow }) {
   );
 }
 
-function Outcome({ r }: { r: RouterRow }) {
+const DEADLINE_FROM: Record<string, string> = {
+  set: "set by the owner",
+  message: "from the message",
+  next_shift: "end of the person's next shift",
+};
+
+/**
+ * The deadline the work has, or will get on Assign / Approve, in UK time. While the request
+ * is still waiting the owner can change it, or go back to the default.
+ */
+function Deadline({ r, isOwner }: { r: RouterRow; isOwner: boolean }) {
+  const d = r.deadline;
+  if (d.source === "none" && !d.can_change) return null;
+  return (
+    <div className="mt-1 text-xs">
+      <div>
+        <span className="text-muted">Deadline: </span>
+        {d.label
+          ? <>{d.label}{DEADLINE_FROM[d.source] ? <span className="text-muted"> · {DEADLINE_FROM[d.source]}</span> : null}</>
+          : d.source === "sla" ? <span className="text-muted">30 business minutes from the request (automatic for a fix)</span>
+          : d.source === "on_assign" ? <span className="text-muted">end of the person&apos;s next shift, once it has an owner</span>
+          : <span className="text-muted">none</span>}
+      </div>
+      {isOwner && d.can_change ? (
+        <form action={setRequestDeadline} className="mt-1 flex flex-wrap items-center gap-1">
+          <input type="hidden" name="id" value={r.id} />
+          <input type="datetime-local" name="due_at_uk" defaultValue={d.input} aria-label="Deadline, UK time" className="rounded border border-line px-1.5 py-1" />
+          <span className="text-muted">UK time</span>
+          <button className={btn}>Set deadline</button>
+          {d.source === "set" ? <button name="default" value="1" formNoValidate className={btn}>Use the default</button> : null}
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
+function Outcome({ r, isOwner }: { r: RouterRow; isOwner: boolean }) {
   const href = routedHref(r);
   return (
     <div className="text-xs">
       <div>{STATUS[r.status] ?? r.status}{r.assigned_owner ? ` · assigned to ${OWNER_LABEL[r.assigned_owner]}` : ""}</div>
       {href && r.routed_table ? <Link href={href} className="underline hover:text-ink">{CREATED[r.routed_table]}</Link> : null}
       {r.triage_reason ? <div className="text-warn">{r.triage_reason}</div> : null}
+      <Deadline r={r} isOwner={isOwner} />
     </div>
   );
 }
@@ -131,6 +168,7 @@ export default async function RouterPage() {
                   <div className="font-medium">{r.client_name}</div>
                   <Message r={r} />
                   <div className="mt-1"><Classification r={r} /></div>
+                  <Deadline r={r} isOwner={isOwner} />
                 </div>
                 {isOwner ? (
                   <form action={decideClientRequest} className="flex gap-1">
@@ -195,7 +233,7 @@ export default async function RouterPage() {
                 <td className={`${td} whitespace-nowrap`}>{r.client_name}</td>
                 <td className={`${td} max-w-xl`}><Message r={r} /></td>
                 <td className={td}><Classification r={r} /></td>
-                <td className={td}><Outcome r={r} /></td>
+                <td className={td}><Outcome r={r} isOwner={isOwner} /></td>
                 <td className={td}>
                   {isOwner ? (
                     <form action={setRouterVerdict} className="flex gap-1">
