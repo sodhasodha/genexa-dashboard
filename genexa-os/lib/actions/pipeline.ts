@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireOwner } from "@/lib/auth/staff";
+import { NOT_FOLLOWING_UP_REASONS } from "@/lib/pipeline/reasons";
 import { createClient } from "@/lib/supabase/server";
 import { blank, Day, Id } from "./fields";
 
@@ -97,4 +98,67 @@ export async function setFollowUp(formData: FormData) {
   const { data, error } = await supabase.from("prospects").update({ follow_up_date: day.data }).eq("id", id.data).is("deleted_at", null).select("id");
   if (error || !data || data.length === 0) back("error=save");
   back("saved=follow_up");
+}
+
+// ---------------------------------------------------------------------------
+// Closing a follow-up without doing it. The database functions make the change
+// in one step (prospect_not_following_up, prospect_follow_up_later,
+// prospect_follow_up_undo) and say what happened; this only passes the form on.
+// ---------------------------------------------------------------------------
+const Reason = z.enum(NOT_FOLLOWING_UP_REASONS.map((r) => r.key));
+const DECISION_SAVED: Record<string, string> = { not_following_up: "closed", follow_up_later: "later", undone: "undone" };
+const DECISION_ERRORS: Record<string, string> = {
+  refused: "owner_only",
+  not_open: "not_open",
+  invalid_reason: "reason",
+  reason_text_required: "reason_text",
+  date_not_future: "date",
+  nothing_to_undo: "no_undo",
+};
+
+/** Back to where the form was: the prospect's own page, or the Pipeline list. */
+function afterDecision(formData: FormData, id: string | null, result: string): never {
+  revalidatePath("/pipeline");
+  if (id) revalidatePath(`/pipeline/${id}`);
+  if (id && formData.get("from") === "prospect") redirect(`/pipeline/${id}?${result}`);
+  redirect(`/pipeline?${result}${id ? `&p=${id}` : ""}`);
+}
+
+function decided(formData: FormData, id: string, outcome: { data: unknown; error: unknown }): never {
+  const result = outcome.error ? null : (outcome.data as { result?: string } | null)?.result;
+  const saved = result ? DECISION_SAVED[result] : undefined;
+  if (saved) afterDecision(formData, id, `saved=${saved}`);
+  afterDecision(formData, id, `error=${(result && DECISION_ERRORS[result]) || "save"}`);
+}
+
+/** App owner closes a follow-up: the prospect goes to Dead with a reason and its reminders stop. */
+export async function notFollowingUp(formData: FormData) {
+  await requireOwner();
+  const id = Id.safeParse(formData.get("id"));
+  if (!id.success) afterDecision(formData, null, "error=invalid");
+  const reason = Reason.safeParse(formData.get("reason"));
+  const text = z.string().max(1000).nullable().safeParse(blank(formData.get("reason_text")));
+  if (!reason.success || !text.success) afterDecision(formData, id.data, "error=reason");
+  const supabase = await createClient();
+  decided(formData, id.data, await supabase.rpc("prospect_not_following_up", { p_prospect: id.data, p_reason: reason.data, p_reason_text: text.data }));
+}
+
+/** App owner moves the follow-up to a later day. Reminders pause until then. */
+export async function followUpLater(formData: FormData) {
+  await requireOwner();
+  const id = Id.safeParse(formData.get("id"));
+  if (!id.success) afterDecision(formData, null, "error=invalid");
+  const day = Day.safeParse(blank(formData.get("follow_up_date")));
+  if (!day.success) afterDecision(formData, id.data, "error=date");
+  const supabase = await createClient();
+  decided(formData, id.data, await supabase.rpc("prospect_follow_up_later", { p_prospect: id.data, p_date: day.data }));
+}
+
+/** App owner undoes the latest of those two decisions: stage and follow-up date go back. */
+export async function undoFollowUpDecision(formData: FormData) {
+  await requireOwner();
+  const id = Id.safeParse(formData.get("id"));
+  if (!id.success) afterDecision(formData, null, "error=invalid");
+  const supabase = await createClient();
+  decided(formData, id.data, await supabase.rpc("prospect_follow_up_undo", { p_prospect: id.data }));
 }

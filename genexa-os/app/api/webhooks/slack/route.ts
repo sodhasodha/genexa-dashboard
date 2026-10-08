@@ -10,7 +10,8 @@ import { processRequest } from "@/lib/router/process";
 import { classifierConfigured, ingestDeps, processDeps } from "@/lib/router/runtime";
 
 // Slack requests from both workspaces arrive here, each signed with its own
-// install's secret. Team workspace: the Done / Snooze 1h buttons on reminders.
+// install's secret. Team workspace: the Done / Snooze 1h buttons on reminders, and
+// the "Not following up" / "Follow up later" controls on a prospect follow-up.
 // Client workspace: message events from clients' channels feed the request
 // router. The only thing that can ever go back there is a thread reply, and only
 // while client_workspace_thread_replies is on (lib/slack/workspaces.ts).

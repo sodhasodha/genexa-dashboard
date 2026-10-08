@@ -133,3 +133,112 @@ describe("Slack button payloads", () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe("prospect follow-up controls", () => {
+  const id = "22222222-2222-4222-8222-222222222222";
+  const blockId = `act:prospects:${id}`;
+  const followUp = (over: Partial<Pending> = {}) => pending({
+    rule_key: "prospect_follow_up", record_type: "prospects", record_id: id, template: "Prospect follow-up",
+    payload: { name: "North <Clinic>", promised: "Send the case study", follow_up_date: "2026-10-05", days_overdue: 2 }, ...over,
+  });
+  const calls: { fn: string; args: Record<string, unknown> }[] = [];
+  const answering = (result: Record<string, unknown>) =>
+    (async (fn: string, args?: Record<string, unknown>) => {
+      calls.push({ fn, args: args ?? {} });
+      return result;
+    }) as Rpc;
+
+  it("puts a reason menu and a date picker under each prospect, and nothing but name, promise and link in the line", () => {
+    const other = "33333333-3333-4333-8333-333333333333";
+    const [g] = composeAll([followUp(), followUp({ id: "n2", record_id: other, payload: { name: "South Clinic", promised: null, days_overdue: 0 } })], "https://ops.test");
+    expect(g.message.text).toBe([
+      "Prospect follow-up",
+      `<https://ops.test/pipeline?prospect=${id}|North &lt;Clinic&gt;> · 2 days overdue · promised: Send the case study`,
+      `<https://ops.test/pipeline?prospect=${other}|South Clinic> · today`,
+    ].join("\n"));
+    const controls = g.message.blocks.filter((b) => b.type === "actions");
+    expect(controls.map((b) => b.block_id)).toEqual([blockId, `act:prospects:${other}`]);
+    expect(controls[0].elements).toEqual([
+      {
+        type: "static_select",
+        action_id: "prospect_not_following_up",
+        placeholder: { type: "plain_text", text: "Not following up" },
+        options: [
+          { text: { type: "plain_text", text: "Not a fit" }, value: "not_a_fit" },
+          { text: { type: "plain_text", text: "Went with someone else" }, value: "went_elsewhere" },
+          { text: { type: "plain_text", text: "Gone cold" }, value: "gone_cold" },
+          { text: { type: "plain_text", text: "Other" }, value: "other" },
+        ],
+      },
+      { type: "datepicker", action_id: "prospect_follow_up_later", placeholder: { type: "plain_text", text: "Follow up later" } },
+    ]);
+  });
+
+  it("the owner's digest lists late prospects as plain lines: it has no per-item buttons", () => {
+    const [g] = composeAll([pending({
+      rule_key: "ryan_morning_digest", record_type: null, record_id: null, template: "Morning digest",
+      payload: { at_risk: 0, open_exceptions: 0, bottlenecks: [], renewals: [], guarantees: [], missing_eods: [], stale_sources: [],
+        prospects: [{ id, name: "North Clinic", promised: "Send the case study", days_overdue: 2 }] },
+    })], "https://ops.test");
+    expect(g.message.text).toContain("Overdue prospect follow-ups");
+    expect(g.message.text).toContain("North Clinic");
+    expect(g.message.blocks.some((b) => b.type === "actions")).toBe(false);
+  });
+
+  it("a chosen reason goes to slack_prospect_action and the controls become one line saying what happened", async () => {
+    calls.length = 0;
+    const blocks = [{ type: "section", block_id: `item:prospects:${id}` }, { type: "actions", block_id: blockId }, { type: "actions", block_id: "act:prospects:other" }];
+    const reply = await handleInteraction(
+      { type: "block_actions", user: { id: "U1" }, actions: [{ action_id: "prospect_not_following_up", block_id: blockId, selected_option: { value: "gone_cold" } }], message: { blocks } },
+      { rpc: answering({ result: "not_following_up", actor: "Ryan", name: "North Clinic", reason: "gone_cold" }) });
+    expect(calls).toEqual([{ fn: "slack_prospect_action", args: { p_slack_user: "U1", p_action: "not_following_up", p_prospect: id, p_reason: "gone_cold", p_date: null } }]);
+    expect(reply.replace_original).toBe(true);
+    expect(reply.text).toBe("🚫 Not following up (Gone cold) · moved to Dead by Ryan. Undo on the prospect's page.: North Clinic");
+    expect(reply.blocks?.map((b) => b.type)).toEqual(["section", "context", "actions"]);
+  });
+
+  it("a picked date goes to slack_prospect_action as the new follow-up date", async () => {
+    calls.length = 0;
+    const reply = await handleInteraction(
+      { type: "block_actions", user: { id: "U1" }, actions: [{ action_id: "prospect_follow_up_later", block_id: blockId, selected_date: "2026-10-15" }], message: { blocks: [{ type: "actions", block_id: blockId }] } },
+      { rpc: answering({ result: "follow_up_later", actor: "Ryan", name: "North Clinic", date: "2026-10-15" }) });
+    expect(calls).toEqual([{ fn: "slack_prospect_action", args: { p_slack_user: "U1", p_action: "follow_up_later", p_prospect: id, p_reason: null, p_date: "2026-10-15" } }]);
+    expect(reply.text).toBe("📅 Follow up moved to Thu 15 Oct by Ryan. Reminders pause until then.: North Clinic");
+    expect(reply.blocks?.map((b) => b.type)).toEqual(["context"]);
+  });
+
+  it("words each refusal privately and leaves the message alone", async () => {
+    const press = (result: string) => handleInteraction(
+      { type: "block_actions", user: { id: "U1" }, actions: [{ action_id: "prospect_follow_up_later", block_id: blockId, selected_date: "2026-10-15" }] },
+      { rpc: answering({ result, actor: "Sameer" }) });
+    for (const [result, text] of [
+      ["refused", "Only the owner can close a prospect follow-up. Nothing was changed."],
+      ["unknown_user", "Your Slack account is not linked to a Genexa OS login, so nothing was changed."],
+      ["not_found", "That prospect no longer exists. Nothing was changed."],
+      ["date_not_future", "Pick a date after today. Nothing was changed."],
+      ["something_else", "Nothing was changed."],
+    ]) {
+      expect(await press(result)).toEqual({ replace_original: false, response_type: "ephemeral", text });
+    }
+  });
+
+  it("never calls the database for a malformed control", async () => {
+    calls.length = 0;
+    const rpc = answering({ result: "not_following_up" });
+    const bad = [
+      { action_id: "prospect_not_following_up", block_id: blockId, selected_option: { value: "bored" } },
+      { action_id: "prospect_not_following_up", block_id: blockId },
+      { action_id: "prospect_not_following_up", block_id: `act:tasks:${id}`, selected_option: { value: "gone_cold" } },
+      { action_id: "prospect_not_following_up", block_id: "act:prospects:not-a-uuid", selected_option: { value: "gone_cold" } },
+      { action_id: "prospect_not_following_up", selected_option: { value: "gone_cold" } },
+      { action_id: "prospect_follow_up_later", block_id: blockId, selected_date: "15/10/2026" },
+      { action_id: "prospect_follow_up_later", block_id: blockId, selected_date: null },
+      { action_id: "prospect_follow_up_later", block_id: blockId, selected_date: "2026-10-15'; drop table prospects" },
+    ];
+    for (const action of bad) {
+      const reply = await handleInteraction({ type: "block_actions", user: { id: "U1" }, actions: [action] }, { rpc });
+      expect(reply.response_type).toBe("ephemeral");
+    }
+    expect(calls).toEqual([]);
+  });
+});
