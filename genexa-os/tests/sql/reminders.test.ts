@@ -99,7 +99,9 @@ describe("acceptance 1: a task due today", () => {
     expect(actions.length).toBe(1);
     expect(JSON.stringify(actions[0])).toContain(`tasks:${task.id}`);
 
-    for (const t of ["09:07", "11:00", "15:00"]) await run(await at(1, t));
+    // Sameer's task now has a 17:00 deadline (0047), so a "due in 2h" reminder follows at 15:00:
+    // that one is covered in task_deadlines.test.ts. Up to then, nothing more.
+    for (const t of ["09:07", "11:00", "14:55"]) await run(await at(1, t));
     expect(to("sameer").length).toBe(1);
 
     // The digest row and the task's own row were both covered by that one message.
@@ -179,7 +181,10 @@ describe("acceptance 2: an overdue tech job", () => {
     };
     const open = await mk("e1", "Alpha: ad tired");
     const parked = await mk("e2", "Beta: ad tired");
-    await db.query(`insert into tasks (owner_id, title, due, source, created_at) values ($1, 'Send the report', app_today() - 1, 'ryan', now() - interval '3 days')`, [people.sameer]);
+    // The task is Amanda's: a date-only task. Sameer's tasks carry a time (0047) and reach the owner
+    // through task_overdue_24h instead (task_deadlines.test.ts).
+    await shift("amanda");
+    await db.query(`insert into tasks (owner_id, title, due, source, created_at) values ($1, 'Send the report', app_today() - 1, 'ryan', now() - interval '3 days')`, [people.amanda]);
     await run(await at(1, "09:05"));
     await db.query(`update exceptions set status = 'snoozed', snoozed_until = now() + interval '9 days', snooze_reason = 'Client away' where id = $1`, [parked]);
     await run(await at(2, "09:04")); // 23h59m after: not yet
@@ -191,7 +196,7 @@ describe("acceptance 2: an overdue tech job", () => {
     expect(esc[0].text).toContain("Alpha: ad tired");
     expect(esc[0].text).toContain(`${APP}/overview?exception=${open}`);
     expect(esc[0].text).toContain("Send the report");
-    expect(esc[0].text).toContain("Sameer reminded 2 times"); // the task: day 1 and day 2
+    expect(esc[0].text).toContain("Amanda Harder reminded 2 times"); // the task: day 1 and day 2
     expect(esc[0].text).not.toContain("Beta: ad tired");
   });
 
@@ -471,7 +476,7 @@ describe("assignment, tech and launch rules", () => {
     await db.query(`select set_config('app.actor', 'Ryan', false)`);
     await db.query(`insert into tasks (owner_id, title, due, source, created_at) values ($1, 'Assigned by Ryan', app_today() + 5, 'ryan', $2)`, [people.sameer, plus(now, -2)]);
     await db.query(`select set_config('app.actor', 'Sameer', false)`);
-    await db.query(`insert into tasks (owner_id, title, source, created_at) values ($1, 'My own note', 'staff', $2)`, [people.sameer, plus(now, -2)]);
+    await db.query(`insert into tasks (owner_id, title, due, source, created_at) values ($1, 'My own note', app_today() + 5, 'staff', $2)`, [people.sameer, plus(now, -2)]);
     await db.query(`select set_config('app.actor', '', false)`);
     await run(now);
     const dms = to("sameer").filter((m) => m.text.startsWith("New task"));

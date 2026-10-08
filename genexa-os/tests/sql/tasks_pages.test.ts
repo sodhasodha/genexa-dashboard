@@ -23,6 +23,9 @@ describe("task_list", () => {
          ($1, 'No date', null, null, 'ryan')`,
       [people.sameer, c.id],
     );
+    // Sameer's dated tasks get a 17:00 deadline (0047). Pin today's to the last minute of the ET day,
+    // so the overdue count below does not depend on the hour the suite runs at.
+    await db.query(`update tasks set due_at = ((app_today() + 1)::timestamp at time zone 'America/New_York') - interval '1 minute' where title = 'Due today'`);
     await db.query(`insert into tasks (owner_id, title, due, status, source) values ($1, 'Late but done', app_today() - 9, 'done', 'ryan')`, [people.sameer]);
     const rows = (
       await db.query<{ title: string; days_overdue: number | null; client_name: string | null; task_group: string }>(
@@ -99,7 +102,9 @@ describe("task rules through a staff login", () => {
   it("staff can add to their own or a colleague's list, never to Ryan's", async () => {
     await asUser(db, AUTH.amanda, async () => {
       await db.query(`insert into tasks (owner_id, title, source) values ($1, 'My own task', 'staff')`, [people.amanda]);
-      await db.query(`insert into tasks (owner_id, title, source) values ($1, 'For Sameer', 'staff')`, [people.sameer]);
+      // Sameer's tasks need a date and time deadline (0047): a person adding one without it is refused.
+      await expect(db.query(`insert into tasks (owner_id, title, source) values ($1, 'For Sameer', 'staff')`, [people.sameer])).rejects.toThrow(/TASK_DEADLINE_REQUIRED/);
+      await db.query(`insert into tasks (owner_id, title, source, due_at) values ($1, 'For Sameer', 'staff', now() + interval '3 days')`, [people.sameer]);
       await expect(db.query(`insert into tasks (owner_id, title, source) values ($1, 'For Ryan', 'staff')`, [people.ryan])).rejects.toThrow(/TASK_OWNER_LIST/);
       await expect(
         db.query(`insert into tasks (owner_id, title, category, source) values ($1, 'Tech thing', 'tech', 'staff')`, [people.aditya]),
