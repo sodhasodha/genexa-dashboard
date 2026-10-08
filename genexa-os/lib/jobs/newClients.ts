@@ -19,6 +19,9 @@ export async function createNewClientsFromWhop(opts: { db: SupabaseClient; send?
   const { db } = opts;
   const send: Send = opts.send ?? ((user, text) => postMessage(user, text));
   const out = { created: [] as string[], dm_sent: 0, dm_failed: [] as string[] };
+  // A payer who already filled the New Client Form belongs to that client: attach first, so no second client is made.
+  const attached = await db.rpc("whop_attach_known_contacts");
+  if (attached.error) throw new Error(`whop_attach_known_contacts: ${attached.error.message}`);
   const made = await db.rpc("whop_create_new_clients");
   if (made.error) throw new Error(`whop_create_new_clients: ${made.error.message}`);
   const rows = (made.data ?? []) as { client_id: string; name: string; amount: number; paid_at: string }[];

@@ -1,0 +1,15 @@
+{
+  "submissions": [
+    { "id": "sub_ob_1", "contactId": "contact_A", "surveyId": "SURVEY_ONBOARDING", "name": "Jane Redacted", "email": "owner@example.invalid",
+      "others": { "email": "owner@example.invalid", "full_name": "Jane Redacted", "phone": "+15555550100", "organization": "Vitale health", "address": "REDACTED", "website": "REDACTED",
+        "mJuJSTRiUrQ9UZxCtOa6": "REDACTED", "formId": "SURVEY_ONBOARDING", "location_id": "REDACTEDlocation", "sessionId": "REDACTED",
+        "eventData": { "source": "direct", "url_params": { "email": "owner@example.invalid", "onboarding_client_id": "REDACTED" }, "page": { "url": "REDACTED", "title": "Onboarding" }, "timestamp": 1790000000000 },
+        "Timezone": "America/Chicago", "fieldsOriSequance": ["full_name"], "submissionId": "sub_ob_1", "signatureHash": "REDACTED", "ip": "0.0.0.0" },
+      "createdAt": "2026-09-16T15:04:05.000Z" },
+    { "id": "sub_nc_1", "contactId": "contact_A", "surveyId": "SURVEY_NEW_CLIENT", "name": "Jane Redacted", "email": "owner@example.invalid",
+      "others": { "email": "owner@example.invalid", "full_name": "Jane Redacted", "organization": "Vitale Health Clinic", "formId": "SURVEY_NEW_CLIENT", "submissionId": "sub_nc_1" },
+      "createdAt": "2026-09-16T10:00:00.000Z" },
+    { "id": "sub_ko_1", "contactId": "contact_B", "surveyId": "SURVEY_KICKOFF", "name": "Other", "email": "x@example.invalid", "others": { "organization": "Ignored" }, "createdAt": "2026-09-17T10:00:00.000Z" }
+  ],
+  "meta": { "total": 3, "currentPage": 1, "nextPage": null, "prevPage": null }
+}

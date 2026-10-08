@@ -62,6 +62,7 @@ npm run setup:cron -- https://ops.genexascaling.com
 | `whop-sync` | hourly | payments and memberships, customer-to-client matching |
 | `mercury-sync` | 06:00 ET | bank transactions, then the finance rules |
 | `ghl-appointments` | hourly | consult calendars, outcomes copied across from Cortana |
+| `ghl-forms` | hourly | New Client Form creates the client and launch; Onboarding Form marks "OB form complete" |
 | `fathom-sync` | hourly | calls, touches, prospect call dates |
 | `exceptions` | every 15 min | opens, refreshes and resolves exceptions |
 | `attendance` | every 5 min | late / no-show status and alerts |

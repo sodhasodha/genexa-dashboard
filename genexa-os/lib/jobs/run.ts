@@ -10,6 +10,7 @@ import { JOBS_PAYROLL } from "@/lib/jobs/payroll";
 import { JOBS_ATTENDANCE } from "@/lib/jobs/attendance";
 import { JOBS_REMINDERS } from "@/lib/jobs/reminders";
 import { JOBS_MISC } from "@/lib/jobs/misc";
+import { syncGhlForms } from "@/lib/integrations/ghl/forms";
 import { createNewClientsFromWhop } from "@/lib/jobs/newClients";
 import { JOBS_NUDGES } from "@/lib/jobs/nudges";
 import { JOBS_ROUTER } from "@/lib/jobs/router";
@@ -27,7 +28,9 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
   // Hourly: today and yesterday, plus the per-ad 7d / all-time windows.
   "cortana-sync": async () => {
     const r = await syncCortana({ db: createAdminClient(), cortana: cortana(), days: 2 });
-    return { ok: r.ok, summary: r };
+    // A clinic not live yet whose ads have started spending is live from that day.
+    const live = await createAdminClient().rpc("launches_auto_live");
+    return { ok: r.ok && !live.error, summary: { ...r, went_live: live.error ? live.error.message : ((live.data ?? []) as { name: string; live_date: string }[]).map((x) => `${x.name} (${x.live_date})`) } };
   },
   // 02:30 ET: re-read the last 4 days, so late attribution and Meta corrections land.
   // Sized to finish inside the 300s function limit (about 1.9s per Cortana call, 96 calls);
@@ -51,6 +54,11 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
   // GHL consult calendars -> appointments, then outcomes copied across from Cortana.
   "ghl-appointments": async () => {
     const r = await syncGhlAppointments({ db: createAdminClient(), keys: JSON.parse(requireEnv("GHL_API_KEYS_JSON")) as GhlKeys });
+    return { ok: r.ok, summary: r };
+  },
+  // Genexa's own GHL sub-account: New Client Form -> client + launch, Onboarding Form -> "OB form complete".
+  "ghl-forms": async () => {
+    const r = await syncGhlForms({ db: createAdminClient(), locationId: requireEnv("GHL_AGENCY_LOCATION_ID"), apiKey: requireEnv("GHL_AGENCY_API_KEY") });
     return { ok: r.ok, summary: r };
   },
   // Bank transactions (through the static-IP proxy), then the finance rules.

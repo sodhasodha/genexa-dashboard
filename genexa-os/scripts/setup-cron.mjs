@@ -25,6 +25,7 @@ const INTERVAL = [
   ["genexa-cortana-events", "35 * * * *", "cortana-events", 290000],
   ["genexa-whop-sync", "20 * * * *", "whop-sync", 120000],
   ["genexa-ghl-appointments", "50 * * * *", "ghl-appointments", 290000],
+  ["genexa-ghl-forms", "40 * * * *", "ghl-forms", 120000],
   ["genexa-fathom-sync", "45 * * * *", "fathom-sync", 120000],
   ["genexa-attendance", "*/5 * * * *", "attendance", 60000],
   ["genexa-reminders", "2-59/5 * * * *", "reminders", 120000],
