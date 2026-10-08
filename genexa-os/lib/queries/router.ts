@@ -59,6 +59,25 @@ export async function getBackfillPending(): Promise<RouterRow[]> {
   return tidy(data);
 }
 
+export type HandledRow = { id: string; client_name: string; label: string; permalink: string; handled_by: string | null; handled_at: string };
+
+/** Triage items cleared because we had already replied in Slack, latest first. Label = the title, or the first 80 characters. */
+export async function getHandledInSlack(limit = 50): Promise<HandledRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("client_requests").select("id, title, text, permalink, handled_by, handled_at, clients(name)")
+    .eq("status", "handled").order("handled_at", { ascending: false }).limit(limit);
+  if (error) throw new Error(`client_requests: ${error.message}`);
+  type Row = { id: string; title: string | null; text: string; permalink: string; handled_by: string | null; handled_at: string; clients: { name: string } | { name: string }[] | null };
+  return ((data ?? []) as Row[]).map((r) => {
+    const c = Array.isArray(r.clients) ? r.clients[0] : r.clients;
+    const flat = r.text.replace(/\s+/g, " ").trim();
+    return {
+      id: r.id, client_name: c?.name ?? "Unknown clinic", label: r.title?.trim() || (flat.length > 80 ? `${flat.slice(0, 80)}…` : flat),
+      permalink: r.permalink, handled_by: r.handled_by, handled_at: r.handled_at,
+    };
+  });
+}
+
 export type AccuracyRow = { window_days: 7 | 30; owner: "all" | RouterOwner | "none"; classified: number; judged: number; right_count: number; wrong_count: number; accuracy_pct: number | null };
 
 export async function getRouterAccuracy(): Promise<AccuracyRow[]> {
