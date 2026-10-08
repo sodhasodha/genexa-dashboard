@@ -4,7 +4,8 @@ import { requireStaff } from "@/lib/auth/staff";
 import { categoriesFor, getClinicOptions, getTaskBoard, getTaskOwners, type TaskRow } from "@/lib/queries/tasks";
 
 const ERRORS: Record<string, string> = {
-  invalid: "Check the task: it needs a title, and the due date must be a real date.",
+  invalid: "Check the task: it needs a title, and the due date and time must be real.",
+  deadline: "This person's tasks need a deadline with a date and a time. The task was not saved.",
   owner_list: "Only Ryan can add to Ryan's list. The task was not added.",
   category: "The media buyer's tasks must be Ads or Call centre. The task was not saved.",
   deleted_match: "This matches a task that was deleted from this list, so it was not added again.",
@@ -45,7 +46,9 @@ function Pill({ className, children }: { className: string; children: React.Reac
   return <span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-xs ${className}`}>{children}</span>;
 }
 
-function TaskFields({ task, categories, clinics }: { task?: TaskRow; categories: string[]; clinics: { id: string; name: string }[] }) {
+function TaskFields({ task, categories, clinics, timed }: { task?: TaskRow; categories: string[]; clinics: { id: string; name: string }[]; timed: boolean }) {
+  // Deadlines are typed in UK time; the server turns them into an instant (lib/deadlines).
+  const [ukDate, ukTime] = task?.deadline_uk_input ? task.deadline_uk_input.split("T") : [task?.due ?? "", ""];
   return (
     <>
       <label className="flex flex-col gap-1 text-xs text-muted sm:col-span-2">
@@ -64,10 +67,23 @@ function TaskFields({ task, categories, clinics }: { task?: TaskRow; categories:
           {Object.entries(PRIORITY).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
         </select>
       </label>
-      <label className="flex flex-col gap-1 text-xs text-muted">
-        Due
-        <input type="date" name="due" defaultValue={task?.due ?? ""} className={`${field} text-sm`} />
-      </label>
+      {timed ? (
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          Deadline (UK time)
+          <input type="datetime-local" name="due_at_uk" required defaultValue={task?.deadline_uk_input ?? ""} className={`${field} text-sm`} />
+        </label>
+      ) : (
+        <>
+          <label className="flex flex-col gap-1 text-xs text-muted">
+            Due
+            <input type="date" name="due" defaultValue={ukDate} className={`${field} text-sm`} />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted">
+            Time (UK, optional)
+            <input type="time" name="due_time" defaultValue={ukTime} className={`${field} text-sm`} />
+          </label>
+        </>
+      )}
       <label className="flex flex-col gap-1 text-xs text-muted">
         Clinic
         <select name="client_id" defaultValue={task?.client_id ?? ""} className={`${field} text-sm`}>
@@ -136,6 +152,12 @@ export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
       <div className="text-xs text-muted">
         {owner.role === "owner" ? <p>Only {owner.name} can add to this list.</p> : null}
         {owner.role === "media_buyer" ? <p>Tasks on this list must be Ads or Call centre.</p> : null}
+        {owner.timed_deadlines ? (
+          <p>
+            Every task here needs a deadline with a date and a time. It is entered in UK time and shown in {owner.name}&apos;s own time
+            ({owner.timezone}). A task is overdue the minute its deadline passes. The list is in deadline order: overdue first, then due soonest.
+          </p>
+        ) : null}
         {!isOwner ? (
           <p>
             {ownList ? "You can change the status and group of your own tasks." : "You can read this list and add to it, but not change its tasks."} Editing
@@ -152,7 +174,7 @@ export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
           <form action={addTask} className="grid gap-3 border-t border-line p-3 sm:grid-cols-2 lg:grid-cols-4">
             <input type="hidden" name="list" value={owner.owner_id} />
             <input type="hidden" name="owner_id" value={owner.owner_id} />
-            <TaskFields categories={categories} clinics={clinics} />
+            <TaskFields categories={categories} clinics={clinics} timed={owner.timed_deadlines} />
             <label className="flex flex-col gap-1 text-xs text-muted">
               Group
               <select name="task_group" defaultValue="week" className={`${field} text-sm`}>
@@ -216,8 +238,14 @@ export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
                     <Pill className={PRIORITY_CLASS[t.priority] ?? "bg-stale-bg text-muted"}>{PRIORITY[t.priority] ?? t.priority}</Pill>
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">
-                    {t.due_label ?? <NoData />}
-                    {t.days_overdue !== null ? (
+                    {t.deadline_label ?? t.due_label ?? <NoData />}
+                    {/* The owner types deadlines in UK time, so they also see it that way when the person's zone differs. */}
+                    {isOwner && t.deadline_uk_label && t.deadline_uk_label !== t.deadline_label ? (
+                      <span className="block text-xs text-muted">{t.deadline_uk_label}</span>
+                    ) : null}
+                    {t.countdown ? (
+                      <span className={`block text-xs font-semibold ${t.is_overdue ? "text-bad" : "text-muted"}`}>{t.countdown}</span>
+                    ) : t.days_overdue !== null ? (
                       <span className="block text-xs font-semibold text-bad">
                         overdue {t.days_overdue} {t.days_overdue === 1 ? "day" : "days"}
                       </span>
@@ -256,7 +284,7 @@ export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
                             <form action={editTask} className="mt-2 grid w-72 gap-2 sm:grid-cols-2">
                               <input type="hidden" name="list" value={owner.owner_id} />
                               <input type="hidden" name="id" value={t.id} />
-                              <TaskFields task={t} categories={categories} clinics={clinics} />
+                              <TaskFields task={t} categories={categories} clinics={clinics} timed={owner.timed_deadlines} />
                               <div>
                                 <button type="submit" className={button}>Save</button>
                               </div>

@@ -1,4 +1,5 @@
 import "server-only";
+import { UK, countdown, formatDeadline, instantToLocal } from "@/lib/deadlines";
 import { createClient } from "@/lib/supabase/server";
 import { formatDay } from "./dates";
 
@@ -20,6 +21,10 @@ export type TaskOwner = {
   open_tasks: number;
   overdue_tasks: number;
   done_tasks: number;
+  /** This person's tasks carry a date and time deadline, and it is required (staff_has_timed_deadlines). */
+  timed_deadlines: boolean;
+  /** The timezone they read deadlines in. */
+  timezone: string;
 };
 
 export type TaskRow = {
@@ -36,6 +41,17 @@ export type TaskRow = {
   due: string | null;
   due_label: string | null;
   days_overdue: number | null;
+  /** The deadline instant, when the task has a time. */
+  due_at: string | null;
+  /** The deadline as the task's owner reads it, e.g. "Wed 14 Oct, 19:30 IST". */
+  deadline_label: string | null;
+  /** The same instant in UK time, e.g. "Wed 14 Oct, 15:00 BST". */
+  deadline_uk_label: string | null;
+  /** UK wall-clock value for the edit form's date and time boxes: "2026-10-14T15:00". */
+  deadline_uk_input: string;
+  /** "due in 3h" / "2h overdue", worked out when the page was rendered. Null without a time or when done. */
+  countdown: string | null;
+  is_overdue: boolean;
   status: string;
   task_group: TaskGroupKey;
   source: string;
@@ -50,10 +66,12 @@ export type TaskBoard = {
   parents: { id: string; title: string }[];
 };
 
-type Raw = Omit<TaskRow, "depth" | "due_label" | "done_label"> & {
+type Raw = Omit<TaskRow, "depth" | "due_label" | "done_label" | "deadline_label" | "deadline_uk_label" | "deadline_uk_input" | "countdown"> & {
   parent_task_id: string | null;
   done_day: string | null;
   done_rank: number | null;
+  minutes_to_deadline: number | null;
+  owner_timezone: string | null;
 };
 
 /** Everyone who can hold tasks, with open and overdue counts (view task_owners). */
@@ -61,7 +79,7 @@ export async function getTaskOwners(): Promise<TaskOwner[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("task_owners")
-    .select("owner_id, name, role, open_tasks, overdue_tasks, done_tasks")
+    .select("owner_id, name, role, open_tasks, overdue_tasks, done_tasks, timed_deadlines, timezone")
     .order("name");
   if (error) throw new Error(`task_owners: ${error.message}`);
   const owners = (data ?? []) as TaskOwner[];
@@ -103,6 +121,12 @@ function nest(rows: Raw[]): TaskRow[] {
       due: r.due,
       due_label: formatDay(r.due),
       days_overdue: r.days_overdue,
+      due_at: r.due_at,
+      deadline_label: formatDeadline(r.due_at, r.owner_timezone),
+      deadline_uk_label: formatDeadline(r.due_at, UK),
+      deadline_uk_input: instantToLocal(r.due_at),
+      countdown: countdown(r.minutes_to_deadline),
+      is_overdue: r.is_overdue === true,
       status: r.status,
       task_group: r.task_group,
       source: r.source,
@@ -116,19 +140,23 @@ function nest(rows: Raw[]): TaskRow[] {
   return out;
 }
 
-/** One person's list, grouped. Done holds the most recent 30 only (done_rank in task_list). */
+/**
+ * One person's list, grouped. Done holds the most recent 30 only (done_rank in task_list).
+ * A timed-deadline person's list is in deadline order: most overdue first, then due soonest,
+ * then tasks without a deadline (deadline_at in task_list). Everyone else: priority, then due date.
+ */
 export async function getTaskBoard(owner: TaskOwner): Promise<TaskBoard> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const query = supabase
     .from("task_list")
     .select(
-      "id, parent_task_id, parent_title, title, client_id, client_name, category, priority, due, days_overdue, status, task_group, source, notes, done_day, done_rank",
+      "id, parent_task_id, parent_title, title, client_id, client_name, category, priority, due, days_overdue, due_at, is_overdue, minutes_to_deadline, owner_timezone, status, task_group, source, notes, done_day, done_rank",
     )
     .eq("owner_id", owner.owner_id)
-    .or(`done_rank.is.null,done_rank.lte.${DONE_SHOWN}`)
-    .order("priority_rank")
-    .order("due", { nullsFirst: false })
-    .order("created_at");
+    .or(`done_rank.is.null,done_rank.lte.${DONE_SHOWN}`);
+  const { data, error } = await (owner.timed_deadlines
+    ? query.order("deadline_at", { ascending: true, nullsFirst: false }).order("priority_rank").order("created_at")
+    : query.order("priority_rank").order("due", { nullsFirst: false }).order("created_at"));
   if (error) throw new Error(`task_list: ${error.message}`);
   const rows = (data ?? []) as Raw[];
   const groups = TASK_GROUPS.map((g) => {

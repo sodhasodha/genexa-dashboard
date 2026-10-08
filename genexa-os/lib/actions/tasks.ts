@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireOwner, requireStaff } from "@/lib/auth/staff";
+import { localToInstant } from "@/lib/deadlines";
 import { createClient } from "@/lib/supabase/server";
 import { blank, Day, Id } from "./fields";
 
@@ -16,7 +17,6 @@ const Details = z.object({
   title: z.string().min(1).max(300),
   category: Category,
   priority: Priority,
-  due: Day.nullable(),
   client_id: Id.nullable(),
   notes: z.string().max(4000).nullable(),
 });
@@ -35,6 +35,7 @@ function reason(message: string): string {
   if (message.includes("TASK_CATEGORY")) return "category";
   if (message.includes("TASK_DELETED_MATCH")) return "deleted_match";
   if (message.includes("TASK_STATUS_ONLY")) return "status_only";
+  if (message.includes("TASK_DEADLINE_REQUIRED")) return "deadline";
   if (message.includes("row-level security")) return "not_allowed";
   return "save";
 }
@@ -44,10 +45,42 @@ function details(formData: FormData) {
     title: blank(formData.get("title")) ?? "",
     category: formData.get("category"),
     priority: formData.get("priority"),
-    due: blank(formData.get("due")),
     client_id: blank(formData.get("client_id")),
     notes: blank(formData.get("notes")),
   };
+}
+
+type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+/** Does this person's list need a date and time deadline? Decided in SQL (task_owners.timed_deadlines). */
+async function hasTimedDeadlines(supabase: Supabase, ownerId: string): Promise<boolean> {
+  const { data } = await supabase.from("task_owners").select("timed_deadlines").eq("owner_id", ownerId).maybeSingle();
+  return data?.timed_deadlines === true;
+}
+
+/**
+ * The deadline columns from the form. Times are typed as UK wall-clock time and turned
+ * into an instant here, on the server (Europe/London, summer and winter time), never by
+ * the browser's own timezone.
+ *   timed list:  one date-and-time box (due_at_uk), required.
+ *   other lists: an optional date (due) and an optional time (due_time).
+ * Returns the error code for the page, or the columns to write. The database keeps the
+ * date column in step with the instant (tasks_deadline).
+ */
+function deadline(formData: FormData, timed: boolean): string | { due?: string | null; due_at: string | null } {
+  if (timed) {
+    const typed = blank(formData.get("due_at_uk"));
+    if (!typed) return "deadline";
+    const at = localToInstant(typed);
+    return at ? { due_at: at.toISOString() } : "invalid";
+  }
+  const date = blank(formData.get("due"));
+  const time = blank(formData.get("due_time"));
+  if (!date) return time ? "invalid" : { due: null, due_at: null };
+  if (!Day.safeParse(date).success) return "invalid";
+  if (!time) return { due: date, due_at: null };
+  const at = localToInstant(`${date}T${time}`);
+  return at ? { due_at: at.toISOString() } : "invalid";
 }
 
 /** Anyone on the team adds a task. The database decides whether that list accepts it. */
@@ -63,11 +96,13 @@ export async function addTask(formData: FormData) {
   const task = parsed.data;
 
   const supabase = await createClient();
+  const due = deadline(formData, await hasTimedDeadlines(supabase, task.owner_id));
+  if (typeof due === "string") back(formData, `error=${due}`);
   if (task.parent_task_id) {
     const { data: parent } = await supabase.from("task_list").select("owner_id").eq("id", task.parent_task_id).maybeSingle();
     if (!parent || parent.owner_id !== task.owner_id) back(formData, "error=parent");
   }
-  const { error } = await supabase.from("tasks").insert({ ...task, source: me.role === "owner" ? "ryan" : "staff" });
+  const { error } = await supabase.from("tasks").insert({ ...task, ...due, source: me.role === "owner" ? "ryan" : "staff" });
   if (error) back(formData, `error=${reason(error.message)}`);
   back(formData, "saved=added");
 }
@@ -111,7 +146,11 @@ export async function editTask(formData: FormData) {
   const parsed = Details.safeParse(details(formData));
   if (!id.success || !parsed.success) back(formData, "error=invalid");
   const supabase = await createClient();
-  const { data, error } = await supabase.from("tasks").update(parsed.data).eq("id", id.data).is("deleted_at", null).select("id");
+  const { data: current } = await supabase.from("task_list").select("owner_id").eq("id", id.data).maybeSingle();
+  if (!current) back(formData, "error=not_allowed");
+  const due = deadline(formData, await hasTimedDeadlines(supabase, current.owner_id as string));
+  if (typeof due === "string") back(formData, `error=${due}`);
+  const { data, error } = await supabase.from("tasks").update({ ...parsed.data, ...due }).eq("id", id.data).is("deleted_at", null).select("id");
   if (error) back(formData, `error=${reason(error.message)}`);
   if (!data || data.length === 0) back(formData, "error=not_allowed");
   back(formData, "saved=edited");
