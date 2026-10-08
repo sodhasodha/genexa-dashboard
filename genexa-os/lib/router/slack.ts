@@ -1,4 +1,4 @@
-// Read-only calls to the CLIENT workspace: who a user is, and a channel's history.
+// Read-only calls to the CLIENT workspace: who a user is, a channel's history and a thread's replies.
 // The token and fetch are passed in. Nothing here can post a message.
 
 export type SlackUser = { email: string | null; realName: string | null };
@@ -35,6 +35,20 @@ export async function fetchChannelHistory(channel: string, oldest: string, deps:
   for (let page = 0; page < (deps.maxPages ?? 50); page++) {
     const r = await get<{ messages?: unknown[]; has_more?: boolean; response_metadata?: { next_cursor?: string } }>(
       "conversations.history", { channel, oldest, limit: "200", ...(cursor ? { cursor } : {}) }, deps);
+    out.push(...(r.messages ?? []));
+    cursor = r.response_metadata?.next_cursor ?? "";
+    if (!r.has_more || !cursor) break;
+  }
+  return out;
+}
+
+/** conversations.replies for one thread, every page: the root message and its replies, as Slack sent them. */
+export async function fetchThreadReplies(channel: string, threadTs: string, deps: Deps & { maxPages?: number }): Promise<unknown[]> {
+  const out: unknown[] = [];
+  let cursor = "";
+  for (let page = 0; page < (deps.maxPages ?? 50); page++) {
+    const r = await get<{ messages?: unknown[]; has_more?: boolean; response_metadata?: { next_cursor?: string } }>(
+      "conversations.replies", { channel, ts: threadTs, limit: "200", ...(cursor ? { cursor } : {}) }, deps);
     out.push(...(r.messages ?? []));
     cursor = r.response_metadata?.next_cursor ?? "";
     if (!r.has_more || !cursor) break;

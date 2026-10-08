@@ -7,6 +7,8 @@ import type { Classification } from "@/lib/router/classify";
 import { ingestClientMessage } from "@/lib/router/ingest";
 import { processPending, processRequest, sendDueReplies, type RouteResult } from "@/lib/router/process";
 import { runBackfill } from "@/lib/router/backfill";
+import { sweepHandled } from "@/lib/router/handled";
+import { fetchChannelHistory, fetchSlackUser, fetchThreadReplies } from "@/lib/router/slack";
 
 // The request router against the in-process Postgres. Slack and the model are fakes.
 let db: PGlite;
@@ -578,5 +580,226 @@ describe("angry follow-up on a logged request", () => {
     expect(await state()).toEqual({ urgency: "urgent", priority: "high", escalations: 1, dms: [p.ryan] });
     await merge(again);
     expect(await state()).toEqual({ urgency: "urgent", priority: "high", escalations: 1, dms: [p.ryan] });
+  });
+});
+
+describe("Triage handled in Slack", () => {
+  // Fixed, close-together timestamps so "before" and "after" are exact.
+  const T = (n: number, micro = "000100") => `${1_790_000_000 + n}.${micro}`;
+  type Opts = { channel?: string; thread?: string | null; mode?: "live" | "backfill" };
+  const put = async (ts: string, o: Opts = {}) =>
+    (await rpc<Stored>("router_store_message", {
+      p_channel: o.channel ?? GENERAL, p_ts: ts, p_user: "U_CLIENT", p_sender_name: "Dana Front Desk", p_text: "Can someone look at this?", p_thread_ts: o.thread ?? null, p_mode: o.mode ?? "live",
+    })).id;
+  /** A client message the model was not sure about: it waits in Triage. */
+  const triage = async (ts: string, o: Opts = {}) => {
+    const id = await put(ts, o);
+    expect((await route(id, { confidence: 0.5 })).status).toBe("triage");
+    return id;
+  };
+  const mark = (ts: string, o: { channel?: string; thread?: string | null; by?: string } = {}) =>
+    rpc<number>("router_mark_handled", { p_channel: o.channel ?? GENERAL, p_ts: ts, p_thread_ts: o.thread ?? null, p_by: o.by ?? "Sameer" });
+  const status = async (id: string) => (await request(id)).status;
+  const handled = (id: string) =>
+    one<{ status: string; handled_reason: string | null; handled_by: string | null; handled_ts: string | null; handled_at: Date | null; triage_reason: string | null }>(
+      `select status, handled_reason, handled_by, handled_ts, handled_at, triage_reason from client_requests where id = $1`, [id]);
+
+  it("a staff reply in a thread handles the thread's root and earlier messages in that thread, nothing else", async () => {
+    const root = await triage(T(0));
+    const earlier = await triage(T(10), { thread: T(0) });
+    const later = await triage(T(30), { thread: T(0) });
+    const otherThread = await triage(T(5));
+    const otherThreadReply = await triage(T(12), { thread: T(5) });
+    const topLevel = await triage(T(15));
+
+    expect(await mark(T(20), { thread: T(0) })).toBe(2);
+    expect(await handled(root)).toMatchObject({ status: "handled", handled_reason: "Handled in Slack", handled_by: "Sameer", handled_ts: T(20), triage_reason: "Low confidence (50%)" });
+    expect((await handled(root)).handled_at).toBeInstanceOf(Date);
+    expect(await status(earlier)).toBe("handled");
+    for (const id of [later, otherThread, otherThreadReply, topLevel]) expect(await status(id)).toBe("triage");
+    expect(await handled(later)).toMatchObject({ handled_reason: null, handled_by: null, handled_ts: null, handled_at: null });
+    // The same reply again (a Slack retry, or the sweep after the webhook) changes nothing.
+    expect(await mark(T(20), { thread: T(0), by: "Someone Else" })).toBe(0);
+    expect((await handled(root)).handled_by).toBe("Sameer");
+    // The row is still there: hidden with a reason, not deleted.
+    expect(await count("client_requests")).toBe(6);
+  });
+
+  it("a staff post in the channel handles earlier Triage rows there: not later ones, not other channels, not other statuses", async () => {
+    const before = await triage(T(0));
+    const beforeInThread = await triage(T(5), { thread: T(1) });
+    const after = await triage(T(40));
+    const otherChannel = await triage(T(2), { channel: SCHEDULING });
+    const fresh = await put(T(3));
+    const pending = await put(T(4), { mode: "backfill" });
+    expect((await route(pending)).status).toBe("pending_approval");
+    const routed = (await ask(T(6), "Please block Wednesday 21st October")).id;
+    const notRequest = (await ask(T(7), "Thanks!", { is_request: false, owner: null, tech_type: null, title: "Thanks" })).id;
+
+    expect(await mark(T(20))).toBe(2);
+    expect(await status(before)).toBe("handled");
+    expect(await status(beforeInThread)).toBe("handled");
+    expect(await status(after)).toBe("triage");
+    expect(await status(otherChannel)).toBe("triage");
+    expect(await status(fresh)).toBe("new");
+    expect(await status(pending)).toBe("pending_approval");
+    expect(await status(routed)).toBe("routed");
+    expect(await status(notRequest)).toBe("not_request");
+    expect(await count("client_requests", `status <> 'handled' and (handled_at is not null or handled_by is not null or handled_reason is not null or handled_ts is not null)`)).toBe(0);
+    expect(await count("tech_jobs")).toBe(1);
+    // A post in a channel that is no client's, or before everything, handles nothing.
+    expect(await mark(T(99), { channel: "C0RANDOM" })).toBe(0);
+    expect(await mark(T(-50), { channel: SCHEDULING })).toBe(0);
+    expect(await status(otherChannel)).toBe("triage");
+  });
+
+  it("compares Slack timestamps as numbers, not as text", async () => {
+    // As text '999999999.000100' sorts after '1000000000.000100'; as a number it is earlier.
+    const old = await triage("999999999.000100");
+    const newer = await triage("1000000005.000100");
+    expect(await mark("1000000000.000100")).toBe(1);
+    expect(await status(old)).toBe("handled");
+    expect(await status(newer)).toBe("triage");
+    // Same second: only the microseconds differ.
+    const a = await triage("1000000010.000200");
+    const b = await triage("1000000010.000900");
+    expect(await mark("1000000010.000500")).toBe(2);
+    expect(await status(a)).toBe("handled");
+    expect(await status(b)).toBe("triage");
+    await expect(mark("yesterday")).rejects.toThrow(/ROUTER_BAD_TS/);
+  });
+
+  it("a handled row is out of the Triage queue, cannot be assigned afterwards, and still counts in the router's totals", async () => {
+    const id = await triage(tsAgo(1));
+    await mark(tsAgo(0));
+    expect(await count("client_requests", `status = 'triage'`)).toBe(0);
+    expect(await rpc("router_open_triage")).toEqual([]);
+    await asUser(db, AUTH.ryan, async () => {
+      await expect(db.query(`select router_decide($1, 'assign', 'tech')`, [id])).rejects.toThrow(/ROUTER_STATE/);
+      await expect(db.query(`select router_decide($1, 'not_request')`, [id])).rejects.toThrow(/ROUTER_STATE/);
+      const seen = await db.query<{ status: string; handled_by: string }>(`select status, handled_by from client_requests where id = $1`, [id]);
+      expect(seen.rows).toEqual([{ status: "handled", handled_by: "Sameer" }]);
+      const acc = await db.query<{ classified: number }>(`select classified from router_accuracy where window_days = 7 and owner = 'all'`);
+      expect(acc.rows[0].classified).toBe(1);
+    });
+    // Routing it again as if it were new changes nothing.
+    expect((await route(id)).status).toBe("handled");
+    expect(await count("tech_jobs") + await count("tasks") + await count("exceptions")).toBe(0);
+    // The change is in the audit log like any other.
+    expect(await count("audit_log", `table_name = 'client_requests' and actor = 'request-router' and field = 'status' and new_value like '%handled%'`)).toBeGreaterThan(0);
+  });
+
+  it("only the server can mark rows handled or read the sweep's list", async () => {
+    const id = await triage(T(0));
+    for (const who of [AUTH.ryan, AUTH.sameer]) {
+      await asUser(db, who, async () => {
+        await expect(db.query(`select router_mark_handled($1, $2, null, 'x')`, [GENERAL, T(20)])).rejects.toThrow(/permission denied/);
+        await expect(db.query(`select router_open_triage()`)).rejects.toThrow(/permission denied/);
+      });
+    }
+    expect(await status(id)).toBe("triage");
+    await db.exec(`set role service_role`);
+    try {
+      expect((await db.query<{ n: number }>(`select router_mark_handled($1, $2, null, 'x') as n`, [GENERAL, T(20)])).rows[0].n).toBe(1);
+    } finally {
+      await db.exec(`reset role`);
+    }
+  });
+
+  it("live: a staff message arriving at the webhook clears the Triage rows it answers; a client's never does", async () => {
+    const lookupUser = async (id: string) => (id === "U_SAMEER" ? { email: "sameer@example.test", realName: "Sameer" } : { email: "dana@pivotal.test", realName: "Dana Front Desk" });
+    const arrive = (user: string, ts: string, threadTs: string | null = null, text = "On it") => ingestClientMessage({ channel: GENERAL, ts, user, text, threadTs }, { rpc, lookupUser });
+    const first = await triage(T(0));
+    const second = await triage(T(5));
+
+    // Another client message, in the thread and in the channel: stored, clears nothing.
+    expect((await arrive("U_DANA", T(8), T(0))).action).toBe("stored");
+    expect((await arrive("U_DANA", T(9))).action).toBe("stored");
+    expect(await count("client_requests", `status = 'handled'`)).toBe(0);
+
+    // Staff reply in the first message's thread: only that one.
+    expect(await arrive("U_SAMEER", T(10), T(0))).toEqual({ action: "ignored", reason: "staff" });
+    expect(await handled(first)).toMatchObject({ status: "handled", handled_by: "Sameer", handled_ts: T(10) });
+    expect(await status(second)).toBe("triage");
+    // Staff post in the channel (a file with no text): the rest that came before it.
+    expect(await arrive("U_SAMEER", T(20), null, "")).toEqual({ action: "ignored", reason: "staff" });
+    expect(await handled(second)).toMatchObject({ status: "handled", handled_ts: T(20) });
+    // Staff messages are still never stored as client requests; the two client messages wait to be classified.
+    expect(await count("client_requests")).toBe(4);
+    expect(await count("client_requests", `slack_user_id = 'U_SAMEER'`)).toBe(0);
+    expect(await count("client_requests", `status = 'new'`)).toBe(2);
+  });
+
+  it("the sweep reads history and threads with GET only and marks the rows staff have answered", async () => {
+    const other = (await one<{ id: string }>(
+      `insert into clients (name, stage, pod, slack_general_id) values ('Multivita IV', 'live', 'pod_1', 'C0MULTI') returning id`)).id;
+    const answeredInThread = await triage(T(0));
+    const clientOnlyThread = await triage(T(10));
+    const answeredInChannel = await triage(T(20), { channel: SCHEDULING });
+    const unanswered = await triage(T(40), { channel: SCHEDULING });
+    const elsewhere = await triage(T(1), { channel: "C0MULTI" });
+    expect(other).toBeTruthy();
+
+    const msg = (user: string, ts: string, over: Record<string, unknown> = {}) => ({ type: "message", user, text: "hello", ts, ...over });
+    const slack: Record<string, unknown[]> = {
+      // History starts after the oldest open row, so T(0) itself is not in it.
+      [`conversations.history:${GENERAL}`]: [msg("U_DANA", T(10), { thread_ts: T(10), reply_count: 1 })],
+      [`conversations.replies:${GENERAL}:${T(0)}`]: [msg("U_DANA", T(0), { thread_ts: T(0), reply_count: 1 }), msg("U_SAMEER", T(3), { thread_ts: T(0) })],
+      [`conversations.replies:${GENERAL}:${T(10)}`]: [msg("U_DANA", T(10), { thread_ts: T(10), reply_count: 1 }), msg("U_DANA", T(12), { thread_ts: T(10) })],
+      [`conversations.history:${SCHEDULING}`]: [
+        msg("U_DANA", T(40)), msg("U_SAMEER", T(30)), msg("U_DANA", T(25)),
+        { type: "message", subtype: "bot_message", bot_id: "B_GENEXA", text: "Logged ✓", ts: T(45) },
+      ],
+      "conversations.history:C0MULTI": [msg("U_ERIN", T(50))],
+    };
+    const calls: { url: string; method: string | undefined; body: unknown }[] = [];
+    const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push({ url: String(input), method: init?.method, body: init?.body });
+      const method = url.pathname.replace("/api/", "");
+      const q = url.searchParams;
+      if (method === "users.info") {
+        const id = q.get("user");
+        const profile = id === "U_SAMEER" ? { email: "sameer@example.test" } : { email: `${id}@clinic.test` };
+        return { json: async () => ({ ok: true, user: { real_name: id === "U_SAMEER" ? "Sameer" : "Front Desk", profile } }) };
+      }
+      const key = method === "conversations.replies" ? `${method}:${q.get("channel")}:${q.get("ts")}` : `${method}:${q.get("channel")}`;
+      return { json: async () => ({ ok: true, messages: slack[key] ?? [], has_more: false }) };
+    }) as unknown as typeof fetch;
+    const deps = { token: "xoxb-client", fetch: fakeFetch };
+    const sweep = () => sweepHandled({
+      rpc,
+      history: (channel, oldest) => fetchChannelHistory(channel, oldest, deps),
+      replies: (channel, threadTs) => fetchThreadReplies(channel, threadTs, deps),
+      lookupUser: (id) => fetchSlackUser(id, deps),
+    });
+
+    const r = await sweep();
+    expect(r).toMatchObject({ channels: 3, handled: 2, skippedChannels: [] });
+    expect(r.byClinic).toEqual([{ clinic: "Multivita IV", handled: 0 }, { clinic: "Pivotal Health", handled: 2 }]);
+    expect(await handled(answeredInThread)).toMatchObject({ status: "handled", handled_reason: "Handled in Slack", handled_by: "Sameer", handled_ts: T(3) });
+    expect(await handled(answeredInChannel)).toMatchObject({ status: "handled", handled_by: "Sameer", handled_ts: T(30) });
+    for (const id of [clientOnlyThread, unanswered, elsewhere]) expect(await status(id)).toBe("triage");
+
+    // Read-only towards Slack: every call is a GET to a read method, with no body.
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) {
+      expect(c.method).toBeUndefined();
+      expect(c.body).toBeUndefined();
+      expect(c.url).toMatch(/^https:\/\/slack\.com\/api\/(conversations\.history|conversations\.replies|users\.info)\?/);
+    }
+    expect(calls.filter((c) => c.url.includes("conversations.history")).map((c) => new URL(c.url).searchParams.get("oldest")).sort())
+      .toEqual([T(0), T(1), T(20)].sort());
+    // Staff are never stored as requests, and nothing else was touched.
+    expect(await count("client_requests")).toBe(5);
+    expect(await count("tech_jobs") + await count("tasks") + await count("exceptions")).toBe(0);
+
+    // Running it again changes nothing; a row that reaches Triage after our reply is picked up next time.
+    expect((await sweep()).handled).toBe(0);
+    const late = await triage(T(26), { channel: SCHEDULING });
+    expect(await status(late)).toBe("triage");
+    expect((await sweep()).handled).toBe(1);
+    expect(await handled(late)).toMatchObject({ status: "handled", handled_ts: T(30) });
+    expect(await status(unanswered)).toBe("triage");
   });
 });

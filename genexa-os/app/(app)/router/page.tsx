@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { decideClientRequest, setRouterVerdict } from "@/lib/actions/router";
 import { requireStaff } from "@/lib/auth/staff";
-import { OWNER_LABEL, getBackfillPending, getRouterAccuracy, getRouterLog, routedHref, type AccuracyRow, type RouterRow } from "@/lib/queries/router";
+import { OWNER_LABEL, getBackfillPending, getHandledInSlack, getRouterAccuracy, getRouterLog, routedHref, type AccuracyRow, type RouterRow } from "@/lib/queries/router";
 import { formatDue } from "@/lib/router/replies";
 
 const btn = "cursor-pointer rounded border border-line bg-raised px-2 py-1 text-xs hover:border-muted";
@@ -10,7 +10,7 @@ const td = "px-3 py-2 align-top";
 
 const STATUS: Record<string, string> = {
   not_request: "Not a request", routed: "Created", merged: "Added to an open item", triage: "In Triage",
-  pending_approval: "Awaiting approval", rejected: "Rejected",
+  pending_approval: "Awaiting approval", rejected: "Rejected", handled: "Handled in Slack",
 };
 const CREATED: Record<string, string> = { tasks: "Task", tech_jobs: "Tech job", exceptions: "Exception" };
 
@@ -93,7 +93,7 @@ function Totals({ rows, days }: { rows: AccuracyRow[]; days: 7 | 30 }) {
 export default async function RouterPage() {
   const me = await requireStaff();
   const isOwner = me.role === "owner";
-  const [accuracy, pending, log] = await Promise.all([getRouterAccuracy(), getBackfillPending(), getRouterLog()]);
+  const [accuracy, pending, handled, log] = await Promise.all([getRouterAccuracy(), getBackfillPending(), getHandledInSlack(), getRouterLog()]);
   const week = accuracy.find((r) => r.window_days === 7 && r.owner === "all");
 
   return (
@@ -144,6 +144,36 @@ export default async function RouterPage() {
           </ul>
         )}
       </section>
+
+      <details className="rounded-lg border border-line bg-panel">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">Handled in Slack <span className="font-normal text-muted">{handled.length === 50 ? "latest 50" : handled.length}</span></summary>
+        {handled.length === 0 ? (
+          <p className="border-t border-line px-4 py-4 text-sm text-muted">Nothing yet. A Triage item leaves the queue and is listed here once one of us replies in its thread, or posts in that channel after it.</p>
+        ) : (
+          <div className="overflow-x-auto border-t border-line">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-muted">
+                <tr>
+                  <th className={th}>Clinic</th>
+                  <th className={th}>Message</th>
+                  <th className={th}>Handled by</th>
+                  <th className={th}>When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {handled.map((h) => (
+                  <tr key={h.id} className="border-t border-line">
+                    <td className={`${td} whitespace-nowrap`}>{h.client_name}</td>
+                    <td className={`${td} max-w-xl`}><a href={h.permalink} target="_blank" rel="noreferrer" className="hover:underline">{h.label}</a></td>
+                    <td className={`${td} whitespace-nowrap`}>{h.handled_by ?? "—"}</td>
+                    <td className={`${td} whitespace-nowrap text-xs text-muted`}>{when(h.handled_at)} ET</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </details>
 
       <section className="overflow-x-auto rounded-lg border border-line bg-panel">
         <table className="w-full text-left text-sm">

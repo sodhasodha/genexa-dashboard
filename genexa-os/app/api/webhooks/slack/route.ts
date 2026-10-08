@@ -4,7 +4,7 @@ import { respondToInteraction } from "@/lib/slack/client";
 import { workspaceByTeamId, workspaceFromSignature } from "@/lib/slack/workspaces";
 import { supabaseRpc } from "@/lib/reminders/engine";
 import { handleInteraction, parseInteractionBody, type InteractionReply } from "@/lib/reminders/interaction";
-import { messageFromEventBody } from "@/lib/router/events";
+import { postFromEventBody } from "@/lib/router/events";
 import { ingestClientMessage } from "@/lib/router/ingest";
 import { processRequest } from "@/lib/router/process";
 import { classifierConfigured, ingestDeps, processDeps } from "@/lib/router/runtime";
@@ -41,9 +41,11 @@ export async function POST(request: NextRequest) {
     // Team-workspace events are acknowledged and not acted on.
     if (workspace !== "client") return new NextResponse(null, { status: 200 });
 
-    const found = messageFromEventBody(event);
+    // Text or not: a staff reply that is only a file still clears a Triage item.
+    const found = postFromEventBody(event);
     if ("ignored" in found) return new NextResponse(null, { status: 200 });
     try {
+      // A staff message is not stored: it marks the Triage rows it answers "Handled in Slack".
       // Stored first (once per channel + ts, so a Slack retry adds nothing), then
       // acknowledged. Classifying happens after the response; the router-process
       // job picks the message up if that is cut short.

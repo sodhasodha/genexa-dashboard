@@ -1,7 +1,8 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processPending, sendDueReplies } from "@/lib/router/process";
-import { classifierConfigured, processDeps } from "@/lib/router/runtime";
+import { sweepHandled } from "@/lib/router/handled";
+import { classifierConfigured, handledDeps, processDeps } from "@/lib/router/runtime";
 
 type JobResult = { ok: boolean; summary: Record<string, unknown> };
 
@@ -41,4 +42,16 @@ export const JOBS_ROUTER: Record<string, () => Promise<{ ok: boolean; summary: R
       const r = await sendDueReplies(processDeps());
       return { ok: r.failed === 0, summary: { ...r }, rows: r.sent };
     }),
+  // Triage items we have already answered in Slack (a staff reply in the thread, or a
+  // staff post in the channel afterwards) are marked "Handled in Slack". The webhook
+  // does this as replies arrive; this catches the ones it missed and the items that
+  // only reached Triage after we had replied. Reads Slack, posts nothing.
+  "router-handled": async () => {
+    const deps = handledDeps();
+    if (!deps) return { ok: true, summary: { slack: "not_configured", handled: 0 } };
+    return logged("router-handled", async () => {
+      const r = await sweepHandled(deps);
+      return { ok: r.skippedChannels.length === 0, summary: { ...r }, rows: r.handled };
+    });
+  },
 };

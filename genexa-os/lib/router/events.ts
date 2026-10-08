@@ -20,8 +20,11 @@ type RawMessage = {
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 
-/** A Slack message object (from an event or from conversations.history) -> a client message, or why not. */
-export function toClientMessage(raw: unknown, channel?: string): { message: ClientMessage } | { ignored: IgnoreReason } {
+/**
+ * A Slack message object -> who posted what, where. The text may be empty (a file
+ * on its own): that is no client request, but it is still a staff reply.
+ */
+export function toPost(raw: unknown, channel?: string): { message: ClientMessage } | { ignored: IgnoreReason } {
   const m = (raw ?? {}) as RawMessage;
   if (m.type !== "message") return { ignored: "not_a_message" };
   if (m.subtype !== undefined && m.subtype !== null && !HUMAN_SUBTYPES.has(String(m.subtype))) return { ignored: "subtype" };
@@ -32,9 +35,15 @@ export function toClientMessage(raw: unknown, channel?: string): { message: Clie
   if (!ts || !ch) return { ignored: "not_a_message" };
   if (!user) return { ignored: "no_user" };
   const text = typeof m.text === "string" ? m.text.trim() : "";
-  if (!text) return { ignored: "empty" };
   const threadTs = str(m.thread_ts);
   return { message: { channel: ch, ts, user, text, threadTs: threadTs && threadTs !== ts ? threadTs : null } };
+}
+
+/** A Slack message object (from an event or from conversations.history) -> a client message, or why not. */
+export function toClientMessage(raw: unknown, channel?: string): { message: ClientMessage } | { ignored: IgnoreReason } {
+  const found = toPost(raw, channel);
+  if ("message" in found && !found.message.text) return { ignored: "empty" };
+  return found;
 }
 
 /** An Events API body -> the client message in it, or why there is none. */
@@ -42,6 +51,13 @@ export function messageFromEventBody(body: unknown): { message: ClientMessage } 
   const b = (body ?? {}) as { type?: unknown; event?: unknown };
   if (b.type !== "event_callback") return { ignored: "not_a_message" };
   return toClientMessage(b.event);
+}
+
+/** An Events API body -> the post in it, text or not (the webhook: a staff reply with only a file still counts). */
+export function postFromEventBody(body: unknown): { message: ClientMessage } | { ignored: IgnoreReason } {
+  const b = (body ?? {}) as { type?: unknown; event?: unknown };
+  if (b.type !== "event_callback") return { ignored: "not_a_message" };
+  return toPost(b.event);
 }
 
 /** Link to a message, built from its channel and ts (no API call). */

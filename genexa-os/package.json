@@ -19,7 +19,8 @@
     "sync:ghl": "tsx --env-file=.env.local scripts/sync-ghl.ts",
     "sync:mercury": "tsx --env-file=.env.local scripts/sync-mercury.ts",
     "sync:fathom": "tsx --env-file=.env.local scripts/sync-fathom.ts",
-    "router:backfill": "tsx --env-file=.env.local scripts/router-backfill.ts"
+    "router:backfill": "tsx --env-file=.env.local scripts/router-backfill.ts",
+    "router:handled": "tsx --env-file=.env.local scripts/router-handled.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

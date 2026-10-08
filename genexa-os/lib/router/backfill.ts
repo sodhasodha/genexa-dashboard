@@ -32,7 +32,7 @@ export type BackfillResult = {
 };
 
 /** Slack errors that mean the install itself is wrong: stop, do not carry on channel by channel. */
-const FATAL = new Set(["missing_scope", "invalid_auth", "not_authed", "account_inactive", "token_revoked"]);
+export const FATAL =new Set(["missing_scope", "invalid_auth", "not_authed", "account_inactive", "token_revoked"]);
 
 export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
   const now = deps.now ?? new Date();

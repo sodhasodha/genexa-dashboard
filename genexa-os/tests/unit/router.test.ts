@@ -5,11 +5,12 @@ import type { Rpc } from "@/lib/jobs/rpc";
 import {
   CLASSIFICATION_JSON_SCHEMA, ClassifyError, ROUTER_MODEL, ROUTER_SYSTEM_PROMPT, buildClassifyRequest, classifyMessage, type ClassifyInput,
 } from "@/lib/router/classify";
-import { messageFromEventBody, permalink, toClientMessage, tsToDate } from "@/lib/router/events";
+import { messageFromEventBody, permalink, postFromEventBody, toClientMessage, tsToDate } from "@/lib/router/events";
+import { postsInOrder, sweepHandled, threadsToRead } from "@/lib/router/handled";
 import { ingestClientMessage } from "@/lib/router/ingest";
 import { processRequest, sendDueReplies } from "@/lib/router/process";
 import { formatDue, isClientThreadText, loggedReplyText } from "@/lib/router/replies";
-import { SlackApiError, fetchChannelHistory, fetchSlackUser } from "@/lib/router/slack";
+import { SlackApiError, fetchChannelHistory, fetchSlackUser, fetchThreadReplies } from "@/lib/router/slack";
 import { replyInClientThread } from "@/lib/slack/workspaces";
 
 const event = (over: Record<string, unknown> = {}) => ({
@@ -84,15 +85,38 @@ describe("storing a client message", () => {
   });
 
   it("drops a message from Genexa staff without storing it", async () => {
-    const db = fakeRpc({ router_sender: sender({ is_staff: true, email: "sameer@genexascaling.com", real_name: "Sameer", checked_at: new Date().toISOString() }) });
+    const db = fakeRpc({ router_sender: sender({ is_staff: true, email: "sameer@genexascaling.com", real_name: "Sameer", checked_at: new Date().toISOString() }), router_mark_handled: 0 });
     const lookupUser = vi.fn();
     expect(await ingestClientMessage(msg, { rpc: db.rpc, lookupUser })).toEqual({ action: "ignored", reason: "staff" });
     expect(lookupUser).not.toHaveBeenCalled();
     expect(db.called("router_store_message")).toHaveLength(0);
   });
 
+  it("a staff message clears the Triage rows it answers: channel, ts, thread and the staff member's name go to the database", async () => {
+    const staff = sender({ is_staff: true, email: "sameer@genexascaling.com", real_name: "Sameer", checked_at: new Date().toISOString() });
+    const db = fakeRpc({ router_sender: staff, router_mark_handled: 2 });
+    const reply = { ...msg, user: "U_SAMEER", ts: "1760000100.000200", threadTs: "1760000000.000100" };
+    expect(await ingestClientMessage(reply, { rpc: db.rpc, lookupUser: vi.fn() })).toEqual({ action: "ignored", reason: "staff" });
+    expect(db.called("router_mark_handled")).toHaveLength(1);
+    expect(db.called("router_mark_handled")[0].args).toEqual({ p_channel: "C0GENERAL", p_ts: "1760000100.000200", p_thread_ts: "1760000000.000100", p_by: "Sameer" });
+    // A staff reply that is only a file (no text) counts too; with no name on record the Slack user id is kept.
+    const nameless = fakeRpc({ router_sender: sender({ is_staff: true, email: "va@genexascaling.com", real_name: null, checked_at: new Date().toISOString() }), router_mark_handled: 1 });
+    expect(await ingestClientMessage({ ...reply, text: "" }, { rpc: nameless.rpc, lookupUser: vi.fn() })).toEqual({ action: "ignored", reason: "staff" });
+    expect(nameless.called("router_mark_handled")[0].args).toMatchObject({ p_by: "U_SAMEER" });
+  });
+
+  it("a client's message never clears anything, and a client's file with no words is not stored", async () => {
+    const known = sender({ is_staff: false, email: "dana@clinic.test", real_name: "Dana", checked_at: new Date().toISOString() });
+    // router_mark_handled is not in the fake: calling it would throw.
+    const db = fakeRpc({ router_sender: known, router_store_message: { id: "r1", created: true } });
+    expect(await ingestClientMessage({ ...msg, threadTs: "1759990000.000100" }, { rpc: db.rpc, lookupUser: vi.fn() })).toEqual({ action: "stored", id: "r1" });
+    expect(await ingestClientMessage({ ...msg, text: "" }, { rpc: db.rpc, lookupUser: vi.fn() })).toEqual({ action: "ignored", reason: "empty" });
+    expect(db.called("router_mark_handled")).toHaveLength(0);
+    expect(db.called("router_store_message")).toHaveLength(1);
+  });
+
   it("looks a new user up once; staff found that way are dropped too", async () => {
-    const db = fakeRpc({ router_sender: sender(null), router_save_person: true });
+    const db = fakeRpc({ router_sender: sender(null), router_save_person: true, router_mark_handled: 0 });
     const lookupUser = vi.fn().mockResolvedValue({ email: "sameer@example.test", realName: "Sameer" });
     expect(await ingestClientMessage(msg, { rpc: db.rpc, lookupUser })).toEqual({ action: "ignored", reason: "staff" });
     expect(lookupUser).toHaveBeenCalledWith("U_DANA");
@@ -344,5 +368,92 @@ describe("reading the client workspace", () => {
     const denied = vi.fn().mockResolvedValue(ok({ ok: false, error: "missing_scope" }));
     await expect(fetchChannelHistory("C1", "0", { token: "t", fetch: denied })).rejects.toMatchObject({ name: "SlackApiError", code: "missing_scope", method: "conversations.history" });
     expect(new SlackApiError("users.info", "missing_scope").message).toBe("Slack users.info: missing_scope");
+  });
+});
+
+describe("Triage handled in Slack: the sweep", () => {
+  const ok = (json: unknown) => ({ json: async () => json });
+  const m = (user: string, ts: string, over: Record<string, unknown> = {}) => ({ type: "message", user, text: "hello", ts, ...over });
+
+  it("the webhook reads a post with no text (a file on its own); bots and edits are still ignored", () => {
+    expect(postFromEventBody(event({ text: "", subtype: "file_share", thread_ts: "1759999000.000100" }))).toEqual({
+      message: { channel: "C0GENERAL", ts: "1760000000.000100", user: "U_DANA", text: "", threadTs: "1759999000.000100" },
+    });
+    expect(messageFromEventBody(event({ text: "" }))).toEqual({ ignored: "empty" });
+    expect(postFromEventBody(event({ bot_id: "B1" }))).toEqual({ ignored: "bot" });
+    expect(postFromEventBody(event({ subtype: "message_changed" }))).toEqual({ ignored: "subtype" });
+    expect(postFromEventBody({ type: "url_verification" })).toEqual({ ignored: "not_a_message" });
+  });
+
+  it("thread replies are read page by page with GET only", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok({ ok: true, messages: [{ ts: "1.0" }, { ts: "2.0" }], has_more: true, response_metadata: { next_cursor: "abc" } }))
+      .mockResolvedValueOnce(ok({ ok: true, messages: [{ ts: "3.0" }], has_more: false }));
+    expect(await fetchThreadReplies("C1", "1.0", { token: "xoxb-client", fetch: fetchMock })).toHaveLength(3);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://slack.com/api/conversations.replies?channel=C1&ts=1.0&limit=200");
+    expect(fetchMock.mock.calls[1][0]).toContain("cursor=abc");
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init.method).toBeUndefined();
+      expect(init.body).toBeUndefined();
+      expect(init.headers.Authorization).toBe("Bearer xoxb-client");
+    }
+    const gone = vi.fn().mockResolvedValue(ok({ ok: false, error: "thread_not_found" }));
+    await expect(fetchThreadReplies("C1", "1.0", { token: "t", fetch: gone })).rejects.toMatchObject({ name: "SlackApiError", code: "thread_not_found", method: "conversations.replies" });
+  });
+
+  it("reads the threads open rows are in, and a top-level row's thread only when it has replies (or was not in the history read)", () => {
+    const history = [m("U_DANA", "20.0"), m("U_DANA", "30.0", { reply_count: 2, thread_ts: "30.0" })];
+    expect(threadsToRead({ roots: ["10.0", "20.0", "30.0"], threads: ["5.0"] }, history)).toEqual(["5.0", "10.0", "30.0"]);
+    expect(threadsToRead({ roots: null, threads: [] }, history)).toEqual([]);
+  });
+
+  it("puts every person's message in time order once; ts is compared as a number", () => {
+    const posts = postsInOrder([
+      m("U_A", "1000.000200"), m("U_B", "999.000100"), m("U_A", "1000.000200", { subtype: "thread_broadcast", thread_ts: "999.000100" }),
+      m("U_C", "998.0", { bot_id: "B1" }), { type: "message", subtype: "channel_join", user: "U_D", ts: "997.0" },
+    ], "C1");
+    expect(posts.map((p) => p.ts)).toEqual(["999.000100", "1000.000200"]);
+    expect(posts.every((p) => p.channel === "C1")).toBe(true);
+  });
+
+  const openChannel = { channel: "C0GENERAL", client_name: "Pivotal Health", open: 2, oldest_ts: "1760000000.000100", roots: ["1760000000.000100", "1760000050.000100"], threads: [] };
+  const person = (isStaff: boolean, name: string) => ({ client_id: "c1", channel_kind: "general", person: { is_staff: isStaff, email: "x@y.test", real_name: name, checked_at: new Date().toISOString() } });
+
+  it("calls router_mark_handled for staff messages only, oldest first, and stops once the channel has no open rows left", async () => {
+    const db = fakeRpc({
+      router_open_triage: [openChannel],
+      router_sender: (a: Record<string, unknown>) => person(a.p_user === "U_SAMEER", a.p_user === "U_SAMEER" ? "Sameer" : "Dana"),
+      router_mark_handled: (a: Record<string, unknown>) => (a.p_ts === "1760000060.000100" ? 2 : 0),
+    });
+    const history = vi.fn().mockResolvedValue([
+      m("U_SAMEER", "1760000090.000100"), m("U_SAMEER", "1760000060.000100"), m("U_DANA", "1760000050.000100"), m("U_DANA", "1760000070.000100"),
+    ]);
+    const replies = vi.fn().mockResolvedValue([m("U_DANA", "1760000000.000100"), m("U_DANA", "1760000010.000100", { thread_ts: "1760000000.000100" })]);
+    const r = await sweepHandled({ rpc: db.rpc, history, replies, lookupUser: vi.fn() });
+    expect(history).toHaveBeenCalledWith("C0GENERAL", "1760000000.000100");
+    // The oldest row is not in the history read (it starts after it), so its thread is read; the other root has no replies.
+    expect(replies.mock.calls).toEqual([["C0GENERAL", "1760000000.000100"]]);
+    expect(db.called("router_mark_handled").map((c) => c.args)).toEqual([{ p_channel: "C0GENERAL", p_ts: "1760000060.000100", p_thread_ts: null, p_by: "Sameer" }]);
+    // One staff check per person, however many messages.
+    expect(db.called("router_sender")).toHaveLength(2);
+    expect(r).toMatchObject({ channels: 1, read: 6, handled: 2, byClinic: [{ clinic: "Pivotal Health", handled: 2 }], skippedChannels: [] });
+  });
+
+  it("when only clients have written, nothing is handled", async () => {
+    // router_mark_handled is not in the fake: calling it would throw.
+    const db = fakeRpc({ router_open_triage: [openChannel], router_sender: person(false, "Dana") });
+    const r = await sweepHandled({ rpc: db.rpc, history: async () => [m("U_DANA", "1760000070.000100"), m("U_ERIN", "1760000080.000100")], replies: async () => [], lookupUser: vi.fn() });
+    expect(r).toMatchObject({ handled: 0, byClinic: [{ clinic: "Pivotal Health", handled: 0 }] });
+  });
+
+  it("nothing in Triage = Slack is not read at all; a channel Slack refuses is skipped, a bad install stops the run", async () => {
+    const history = vi.fn();
+    expect(await sweepHandled({ rpc: fakeRpc({ router_open_triage: [] }).rpc, history, replies: vi.fn(), lookupUser: vi.fn() })).toMatchObject({ channels: 0, handled: 0 });
+    expect(history).not.toHaveBeenCalled();
+    const db = fakeRpc({ router_open_triage: [openChannel] });
+    const refused = await sweepHandled({ rpc: db.rpc, history: async () => { throw new SlackApiError("conversations.history", "not_in_channel"); }, replies: vi.fn(), lookupUser: vi.fn() });
+    expect(refused.skippedChannels).toEqual([{ channel: "C0GENERAL", clinic: "Pivotal Health", error: "not_in_channel" }]);
+    await expect(sweepHandled({ rpc: db.rpc, history: async () => { throw new SlackApiError("conversations.history", "missing_scope"); }, replies: vi.fn(), lookupUser: vi.fn() }))
+      .rejects.toMatchObject({ code: "missing_scope" });
   });
 });
