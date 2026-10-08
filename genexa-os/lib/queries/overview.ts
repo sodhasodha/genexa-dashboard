@@ -196,6 +196,8 @@ export type TriageInfo = {
 };
 export type ReviewItem = {
   kind: ReviewKind; record_table: string; record_id: string; client_id: string | null; title: string; detail: string; item_key: string;
+  /** Only on unlogged outcomes: where that clinic logs them (its own link, or the client dashboard). */
+  outcome_url?: string | null;
   /** Only on Triage items. */
   triage?: TriageInfo;
   /** Only on unmatched Fathom calls: who it probably was, and everyone it could be assigned to. */
@@ -264,8 +266,10 @@ async function getTriageItems(supabase: Awaited<ReturnType<typeof createClient>>
 
 export async function getReview(): Promise<{ counts: Record<ReviewKind, number>; items: ReviewItem[]; total: number }> {
   const supabase = await createClient();
-  const [{ data: owner }, { data, error }, triage, calls] = await Promise.all([
+  const [{ data: owner }, { data: links }, { data: defaultLink }, { data, error }, triage, calls] = await Promise.all([
     supabase.rpc("app_is_owner"),
+    supabase.from("clients").select("id, outcome_link"),
+    supabase.from("app_settings").select("value").eq("key", "client_outcome_link").maybeSingle(),
     supabase
       .from("data_review_open")
       .select("kind, record_table, record_id, client_id, title, detail, occurred_at, item_key")
@@ -276,7 +280,11 @@ export async function getReview(): Promise<{ counts: Record<ReviewKind, number>;
   ]);
   if (error) throw new Error(`data_review_open: ${error.message}`);
   // Unlogged outcomes are the owner's queue only: nobody on the team chases them.
-  const open = ((data ?? []) as ReviewItem[]).filter((i) => owner === true || i.kind !== "unlogged_outcome");
+  const linkOf = new Map((links ?? []).map((c) => [c.id as string, (c.outcome_link as string | null) || null]));
+  const fallback = typeof defaultLink?.value === "string" && defaultLink.value ? defaultLink.value : null;
+  const open = ((data ?? []) as ReviewItem[])
+    .filter((i) => owner === true || i.kind !== "unlogged_outcome")
+    .map((i) => (i.kind === "unlogged_outcome" ? { ...i, outcome_url: (i.client_id ? linkOf.get(i.client_id) : null) ?? fallback } : i));
   const items = [...triage, ...open, ...calls];
   const counts = Object.fromEntries(REVIEW_KINDS.map((k) => [k.kind, items.filter((i) => i.kind === k.kind).length])) as Record<ReviewKind, number>;
   return { counts, items, total: items.length };

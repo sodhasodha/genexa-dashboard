@@ -309,7 +309,7 @@ describe("outcome nudges", () => {
     const due = (clientId: string) => one<{ channel: string; timezone: string; overdue_count: number; uncertain_count: number; link: string | null; local_dow: number }>(
       `select channel, timezone, overdue_count, uncertain_count, link, local_dow from outcome_nudges_due where client_id = $1`, [clientId]);
     const d = await due(c);
-    expect(d).toMatchObject({ channel: "CNUDGEGEN", timezone: "America/Chicago", overdue_count: 2, uncertain_count: 3, link: null });
+    expect(d).toMatchObject({ channel: "CNUDGEGEN", timezone: "America/Chicago", overdue_count: 2, uncertain_count: 3, link: "https://client.genexascaling.com" });
     expect(d.local_dow).toBeGreaterThanOrEqual(1);
     expect(d.local_dow).toBeLessThanOrEqual(7);
     expect(await due(silent)).toMatchObject({ overdue_count: 0, uncertain_count: 1 });
@@ -326,6 +326,25 @@ describe("outcome nudges", () => {
     await db.query(`insert into notifications (rule_key, channel, record_id, window_key) values ('outcome_nudge', 'CNUDGEGEN', $1, 'w1'), ('weekly_scorecard', 'CNUDGEGEN', $1, 'w1')`, [c]);
     const queued = await db.query<{ rule_key: string }>(`select rule_key from notifications where channel = 'CNUDGEGEN'`);
     expect(queued.rows.map((r) => r.rule_key)).toEqual(["outcome_nudge"]);
+  });
+
+  it("nobody can write an outcome by hand, the owner included; the system still can", async () => {
+    const c = await id(`insert into clients (name, stage) values ('Read Only Clinic', 'live') returning id`);
+    const a = await id(`insert into appointments (client_id, ghl_contact_id, contact_first_name, scheduled_for) values ($1, 'ro', 'Ro', now() - interval '2 days') returning id`, [c]);
+    for (const who of [AUTH.ryan, AUTH.amanda]) {
+      await asUser(db, who, async () => {
+        const r = await db.query(`update appointments set attendance = 'showed' where id = $1 returning id`, [a]).catch((e: Error) => e);
+        // Staff are stopped by row security (no rows); the owner by the read-only rule.
+        expect(r instanceof Error ? r.message : (r as { rows: unknown[] }).rows.length).toSatisfy((v: unknown) => v === 0 || /OUTCOMES_READ_ONLY/.test(String(v)));
+      });
+    }
+    await asUser(db, AUTH.ryan, async () => {
+      await expect(db.query(`update appointments set attendance = 'no_show' where id = $1`, [a])).rejects.toThrow(/OUTCOMES_READ_ONLY/);
+      await expect(db.query(`insert into sales (appointment_id, client_id, close_status, amount) values ($1, $2, 'closed_won', 5000)`, [a, c])).rejects.toThrow(/OUTCOMES_READ_ONLY/);
+    });
+    expect((await one<{ attendance: string }>(`select attendance from appointments where id = $1`, [a])).attendance).toBe("scheduled");
+    await db.query(`update appointments set attendance = 'showed', attendance_logged_by = 'clinic' where id = $1`, [a]);
+    expect((await one<{ attendance: string }>(`select attendance from appointments where id = $1`, [a])).attendance).toBe("showed");
   });
 
   it("the CSR outcome and unconfirmed reminders cannot be switched back on", async () => {

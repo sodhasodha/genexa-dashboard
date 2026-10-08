@@ -33,18 +33,6 @@ export async function snoozeException(formData: FormData) {
   done();
 }
 
-const Attendance = z.enum(["showed", "no_show", "cancelled", "rescheduled_before_consult"]);
-
-/** Log what happened at a consult the clinic has not logged. */
-export async function setAttendance(formData: FormData) {
-  await requireOwner();
-  const id = Id.parse(formData.get("id"));
-  const attendance = Attendance.parse(formData.get("attendance"));
-  const supabase = await createClient();
-  await supabase.from("appointments").update({ attendance, attendance_logged_at: new Date().toISOString(), attendance_logged_by: "genexa_csr" }).eq("id", id);
-  done();
-}
-
 /** Match a Whop customer to a client (one click covers all of that customer's payments). */
 export async function assignPayment(formData: FormData) {
   await requireOwner();

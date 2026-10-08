@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { assignPayment, categoriseExpense, classifyPayment, dismissReviewItem, markLeadReal, resolveException, resolveFeeMismatch, setAttendance, snoozeException } from "@/lib/actions/overview";
+import { assignPayment, categoriseExpense, classifyPayment, dismissReviewItem, markLeadReal, resolveException, resolveFeeMismatch, snoozeException } from "@/lib/actions/overview";
 import { resolveCall } from "@/lib/actions/calls";
 import { decideClientRequest } from "@/lib/actions/router";
 import { formatValue } from "@/lib/format";
@@ -9,15 +9,9 @@ const btn = "cursor-pointer rounded border border-line bg-raised px-2 py-1 text-
 
 function FixButtons({ item, clients, isOwner }: { item: ReviewItem; clients: { id: string; name: string }[]; isOwner: boolean }) {
   if (!isOwner) return null;
+  // Outcomes are never written here: the clinic's dashboard is the only place they are logged.
   if (item.kind === "unlogged_outcome") {
-    return (
-      <form action={setAttendance} className="flex flex-wrap gap-1">
-        <input type="hidden" name="id" value={item.record_id} />
-        {[["showed", "Showed"], ["no_show", "No-show"], ["cancelled", "Cancelled"], ["rescheduled_before_consult", "Rescheduled"]].map(([v, l]) => (
-          <button key={v} name="attendance" value={v} className={btn}>{l}</button>
-        ))}
-      </form>
-    );
+    return item.outcome_url ? <a href={item.outcome_url} target="_blank" rel="noreferrer" className={btn}>Open client dashboard ↗</a> : null;
   }
   if (item.kind === "unmatched_payment") {
     return (
@@ -156,7 +150,7 @@ export function ReviewList({ items, clients, isOwner, queue }: { items: ReviewIt
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <FixButtons item={item} clients={clients} isOwner={isOwner} />
-            {isOwner && item.kind !== "unmatched_call" ? (
+            {isOwner && item.kind !== "unmatched_call" && item.kind !== "unlogged_outcome" ? (
               <form action={dismissReviewItem} className="flex gap-1">
                 <input type="hidden" name="item_key" value={item.item_key} />
                 <input type="hidden" name="kind" value={item.kind} />
