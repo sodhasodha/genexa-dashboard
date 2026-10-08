@@ -31,7 +31,7 @@ export default async function OverviewPage({ searchParams }: PageProps<"/overvie
       </div>
 
       <NeedsAction
-        bottlenecks={bottlenecks.rows} atRisk={bottlenecks.atRisk} counts={review.counts} items={review.items} clients={clients}
+        bottlenecks={bottlenecks.rows} atRisk={bottlenecks.atRisk} resolved={bottlenecks.resolved} counts={review.counts} items={review.items} clients={clients}
         panel={panel} queue={queue} isOwner={me.role === "owner"} basePath="/overview" periodKey={period.key}
       />
 

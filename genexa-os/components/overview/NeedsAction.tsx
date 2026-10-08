@@ -3,7 +3,7 @@ import { assignPayment, categoriseExpense, classifyPayment, dismissReviewItem, m
 import { resolveCall } from "@/lib/actions/calls";
 import { decideClientRequest } from "@/lib/actions/router";
 import { formatValue } from "@/lib/format";
-import { REVIEW_KINDS, type Bottleneck, type ReviewItem, type ReviewKind } from "@/lib/queries/overview";
+import { REVIEW_KINDS, type Bottleneck, type ResolvedBottleneck, type ReviewItem, type ReviewKind } from "@/lib/queries/overview";
 
 const btn = "cursor-pointer rounded border border-line bg-raised px-2 py-1 text-xs hover:border-muted";
 
@@ -167,9 +167,9 @@ export function ReviewList({ items, clients, isOwner, queue }: { items: ReviewIt
 }
 
 export function NeedsAction({
-  bottlenecks, atRisk, counts, items, clients, panel, queue, isOwner, basePath, periodKey,
+  bottlenecks, atRisk, resolved, counts, items, clients, panel, queue, isOwner, basePath, periodKey,
 }: {
-  bottlenecks: Bottleneck[]; atRisk: number; counts: Record<ReviewKind, number>; items: ReviewItem[];
+  bottlenecks: Bottleneck[]; atRisk: number; resolved: ResolvedBottleneck[]; counts: Record<ReviewKind, number>; items: ReviewItem[];
   clients: { id: string; name: string }[]; panel: "bottlenecks" | "review"; queue: ReviewKind; isOwner: boolean; basePath: string; periodKey: string;
 }) {
   const reviewTotal = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -189,7 +189,8 @@ export function NeedsAction({
         <Link href={href("review", queue)} className={tab(panel === "review")}>Data review <span className="text-muted">{reviewTotal}</span></Link>
       </div>
       {panel === "bottlenecks" ? (
-        bottlenecks.length === 0 ? (
+        <>
+        {bottlenecks.length === 0 ? (
           <p className="border-t border-line px-4 py-6 text-sm text-muted">No open exceptions.</p>
         ) : (
           <div className="overflow-x-auto border-t border-line">
@@ -228,7 +229,21 @@ export function NeedsAction({
               </tbody>
             </table>
           </div>
-        )
+        )}
+        {resolved.length > 0 ? (
+          <details className="border-t border-line">
+            <summary className="cursor-pointer px-4 py-2 text-xs text-muted">History: {resolved.length} resolved in the last 30 days</summary>
+            <ul className="divide-y divide-line">
+              {resolved.map((r) => (
+                <li key={r.id} className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-1.5 text-xs">
+                  <span className="min-w-0 truncate">{r.reason}{r.note ? <span className="text-muted"> · {r.note}</span> : null}</span>
+                  <span className="text-muted">{r.resolved}{r.held ? " · stays closed unless it changes" : ""}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+        </>
       ) : (
         <div className="border-t border-line">
           <div className="flex flex-wrap gap-1 px-3 py-2">

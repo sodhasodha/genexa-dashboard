@@ -151,7 +151,7 @@ export type ClientProfile = {
   ads_state: AdsState;
   /** This ET month from client_mtd. Null = nothing recorded this month. */
   mtd: ClientMtd | null;
-  exceptions: { severity: string; reason: string; status: string; first_seen: string; money_at_risk: number | null }[];
+  exceptions: { severity: string; reason: string; status: string; first_seen: string; money_at_risk: number | null; resolved: string | null }[];
   payments: { id: string; paid_on: string; product: string | null; amount: number; status: string }[];
   memberships: { id: string; product: string | null; status: string | null; valid: boolean; cancelling: boolean; renews_on: string | null; price: number | null; period_days: number | null }[];
   touches: { id: string; on: string; kind: string; by: string | null; note: string | null }[];
@@ -179,7 +179,7 @@ export async function getClientProfile(id: string): Promise<ClientProfile | null
     supabase.from("renewals").select("renewal_date, renewal_amount, status, days_until").eq("client_id", id).maybeSingle(),
     supabase.from("client_campaign_scope").select("campaign_name_contains, verified, note").eq("client_id", id).maybeSingle(),
     supabase.from("client_mtd").select(MTD_KEYS.join(", ")).eq("client_id", id).maybeSingle(),
-    supabase.from("exceptions").select("severity, reason, status, first_detected_at, money_at_risk").eq("client_id", id).order("first_detected_at", { ascending: false }).limit(50),
+    supabase.from("exceptions").select("severity, reason, status, first_detected_at, money_at_risk, resolved_at, resolved_by").eq("client_id", id).order("first_detected_at", { ascending: false }).limit(50),
     supabase.from("payments").select("id, paid_at, product_title, amount, status").eq("client_id", id).order("paid_at", { ascending: false }).limit(100),
     supabase.from("whop_memberships").select("id, product_title, status, valid, cancel_at_period_end, renewal_period_end, renewal_price, billing_period_days").eq("client_id", id).order("renewal_period_end", { ascending: false, nullsFirst: false }),
     supabase.from("touches").select("id, at, kind, by_id, note").eq("client_id", id).is("deleted_at", null).order("at", { ascending: false }).limit(100),
@@ -212,6 +212,7 @@ export async function getClientProfile(id: string): Promise<ClientProfile | null
     mtd: mtdRow ? (Object.fromEntries(MTD_KEYS.map((k) => [k, n(mtdRow[k])])) as ClientMtd) : null,
     exceptions: (exceptions.data ?? []).map((e) => ({
       severity: e.severity, reason: e.reason, status: e.status, first_seen: day(e.first_detected_at) ?? "", money_at_risk: n(e.money_at_risk),
+      resolved: e.status !== "resolved" ? null : e.resolved_by === "system" ? `cleared on its own, ${day(e.resolved_at) ?? ""}` : `resolved by ${e.resolved_by ?? "someone"}, ${day(e.resolved_at) ?? ""}`,
     })),
     payments: (payments.data ?? []).map((p) => ({ id: p.id, paid_on: day(p.paid_at) ?? "", product: p.product_title, amount: Number(p.amount), status: p.status })),
     memberships: (memberships.data ?? []).map((m) => ({

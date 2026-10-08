@@ -250,8 +250,8 @@ export default async function ClientPage({ params, searchParams }: PageProps<"/c
       <section>
         <h2 className="mb-2 text-sm font-semibold">Exceptions</h2>
         <DataTable
-          columns={["Status", "Severity", "What", "First seen", "At risk"]}
-          rows={profile.exceptions.map((e) => [e.status, e.severity, e.reason, e.first_seen, (e.money_at_risk ?? 0) > 0 ? formatValue(e.money_at_risk, "money") : "—"])}
+          columns={["Status", "Severity", "What", "First seen", "At risk", "Resolved"]}
+          rows={profile.exceptions.map((e) => [e.status, e.severity, e.reason, e.first_seen, (e.money_at_risk ?? 0) > 0 ? formatValue(e.money_at_risk, "money") : "—", e.resolved ?? "—"])}
         />
       </section>
     </div>

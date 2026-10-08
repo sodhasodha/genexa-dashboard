@@ -144,9 +144,16 @@ export type Bottleneck = {
   reminded: number;
 };
 
-/** Open exceptions ranked by money at risk, then age. */
-export async function getBottlenecks(): Promise<{ rows: Bottleneck[]; atRisk: number }> {
+export type ResolvedBottleneck = { id: string; reason: string; client_name: string | null; resolved: string; note: string | null; held: boolean };
+
+/** Open exceptions ranked by money at risk, then age, plus the last 30 days' resolved ones as history. */
+export async function getBottlenecks(): Promise<{ rows: Bottleneck[]; atRisk: number; resolved: ResolvedBottleneck[] }> {
   const supabase = await createClient();
+  const history = await supabase
+    .from("exceptions")
+    .select("id, reason, resolved_at, resolved_by, resolution_note, held, client:clients(name)")
+    .eq("status", "resolved").gte("resolved_at", new Date(Date.now() - 30 * 86_400_000).toISOString())
+    .order("resolved_at", { ascending: false }).limit(60);
   const { data, error } = await supabase
     .from("exceptions")
     .select("id, type, severity, reason, money_at_risk, first_detected_at, action_taken, status, client:clients(name), owner:staff!exceptions_owner_id_fkey(name)")
@@ -173,7 +180,16 @@ export async function getBottlenecks(): Promise<{ rows: Bottleneck[]; atRisk: nu
     status: d.status as string,
     reminded: (notes ?? []).filter((x) => x.record_id === d.id).length,
   }));
-  return { rows, atRisk: rows.reduce((a, r) => a + (r.money_at_risk ?? 0), 0) };
+  const on = (ts: string) => new Date(ts).toLocaleDateString("en-GB", { timeZone: "America/New_York", day: "numeric", month: "short" });
+  const resolved = (history.data ?? []).map((h) => ({
+    id: h.id as string,
+    reason: h.reason as string,
+    client_name: one(h.client as { name: string } | { name: string }[] | null)?.name ?? null,
+    resolved: h.resolved_by === "system" ? `cleared on its own, ${on(h.resolved_at as string)}` : `resolved by ${h.resolved_by ?? "someone"}, ${on(h.resolved_at as string)}`,
+    note: h.resolved_by === "system" ? null : ((h.resolution_note as string | null) ?? null),
+    held: h.held as boolean,
+  }));
+  return { rows, atRisk: rows.reduce((a, r) => a + (r.money_at_risk ?? 0), 0), resolved };
 }
 
 export const REVIEW_KINDS = [

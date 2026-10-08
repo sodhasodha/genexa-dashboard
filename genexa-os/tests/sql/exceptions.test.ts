@@ -211,7 +211,7 @@ describe("tech rules", () => {
 });
 
 describe("snooze and reopen", () => {
-  it("a snoozed exception stays one row, wakes when the snooze ends, and a resolved one can reopen", async () => {
+  it("a snoozed exception stays one row and wakes when the snooze ends", async () => {
     await spend(clinic, 1, 0);
     await run();
     await db.query(`update exceptions set status = 'snoozed', snoozed_until = now() + interval '1 hour', snooze_reason = 'Client paused ads'`);
@@ -220,10 +220,95 @@ describe("snooze and reopen", () => {
     await db.query(`update exceptions set snoozed_until = now() - interval '1 minute'`);
     await run();
     expect((await open("zero_spend"))[0].status).toBe("open");
+  });
+
+  it("resolved by a person stays resolved while the rule still matches", async () => {
+    await spend(clinic, 1, 0);
+    await run();
+    await db.query(`update exceptions set status = 'resolved', resolved_at = now(), resolved_by = 'Ryan', resolution_note = 'Client asked to pause'`);
+    expect((await db.query<{ held: boolean }>(`select held from exceptions`)).rows[0].held).toBe(true);
+    expect(await run()).toEqual([]);
+    expect(await run()).toEqual([]);
+    expect(await open("zero_spend")).toEqual([]);
+    expect((await db.query(`select 1 from exceptions where type = 'zero_spend'`)).rows.length).toBe(1);
+  });
+
+  it("comes back as a new bottleneck when the condition clears and later returns", async () => {
+    await spend(clinic, 1, 0);
+    await run();
     await db.query(`update exceptions set status = 'resolved', resolved_at = now(), resolved_by = 'Ryan'`);
+    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 30)`, [clinic]);
+    expect(await run()).toEqual([]); // cleared: nothing to open, the hold is let go
+    const released = await db.query<{ held: boolean; hold_release_reason: string }>(`select held, hold_release_reason from exceptions`);
+    expect(released.rows[0]).toEqual({ held: false, hold_release_reason: "cleared" });
+    await db.query(`update ad_metrics_daily set spend = 0 where client_id = $1 and date = app_today()`, [clinic]);
     expect((await run()).map((r) => r.action)).toEqual(["opened"]);
-    const all = await db.query(`select 1 from exceptions where type = 'zero_spend'`);
-    expect(all.rows.length).toBe(2);
+    expect((await db.query(`select 1 from exceptions where type = 'zero_spend'`)).rows.length).toBe(2);
+  });
+
+  it("comes back when it gets worse: $0 spend resolved early and still $0 three days on, once", async () => {
+    await spend(clinic, 1, 0);
+    await run();
+    await db.query(`update exceptions set status = 'resolved', resolved_at = now(), resolved_by = 'Ryan'`);
+    expect(await run()).toEqual([]);
+    // Three days later it is still $0.
+    await db.query(`update exceptions set first_detected_at = now() - interval '3 days 1 hour', resolved_at = now() - interval '3 days'`);
+    expect((await run()).map((r) => r.action)).toEqual(["opened"]);
+    const [again] = await open("zero_spend");
+    expect(again.reason).toMatch(/worse since it was resolved/);
+    // Resolved a second time: the three-day rule does not fire again for the same run of $0 days.
+    await db.query(`update exceptions set status = 'resolved', resolved_at = now(), resolved_by = 'Ryan' where status = 'open'`);
+    await db.query(`update exceptions set first_detected_at = now() - interval '4 days', resolved_at = now() - interval '3 days 12 hours' where held`);
+    expect(await run()).toEqual([]);
+  });
+
+  it("comes back when severity or money at risk gets worse, but not for a small change", async () => {
+    await db.query(`insert into exception_rules (type, label) values ('zz_manual', 'Test rule')`);
+    await db.query(`alter view exception_detections rename to exception_detections_real`);
+    await db.query(`create table zz_det (severity text, money numeric)`);
+    await db.query(`insert into zz_det values ('amber', 1000)`);
+    await db.query(`create view exception_detections as
+      select 'zz_manual'::text as type, 'zz_manual:1'::text as dedupe_key, null::uuid as client_id, null::uuid as staff_id, null::uuid as owner_id, null::text as owner_pod,
+             z.severity, 'Test problem'::text as reason, z.money as money_at_risk, null::text as record_table, null::uuid as record_id from zz_det z`);
+    expect((await run()).map((r) => r.action)).toEqual(["opened"]);
+    await db.query(`update exceptions set status = 'resolved', resolved_at = now(), resolved_by = 'Ryan'`);
+    await db.query(`update zz_det set money = 1200`); // +20%: not worse enough
+    expect(await run()).toEqual([]);
+    await db.query(`update zz_det set money = 1300`); // +30%
+    expect((await run()).map((r) => r.action)).toEqual(["opened"]);
+    await db.query(`update exceptions set status = 'resolved', resolved_at = now(), resolved_by = 'Ryan' where status = 'open'`);
+    expect(await run()).toEqual([]);
+    await db.query(`update zz_det set severity = 'red'`); // amber -> red
+    expect((await run()).map((r) => r.action)).toEqual(["opened"]);
+    expect((await db.query(`select 1 from exceptions where type = 'zz_manual'`)).rows.length).toBe(3);
+  });
+
+  it("a renewal overdue is one bottleneck per renewal period: resolving this one does not silence the next", async () => {
+    await fresh("whop");
+    const det = () => db.query<{ dedupe_key: string }>(`select dedupe_key from exception_detections where type = 'renewal_overdue'`);
+    await db.query(`insert into whop_memberships (whop_membership_id, client_id, whop_user_id, product_title, status, valid, billing_period_days, renewal_price, renewal_period_start, renewal_period_end, started_at)
+      values ('mem_1', $1, 'user_1', 'Genexa Scaling: Patient Protocol', 'active', true, 30, 2000, now() - interval '33 days', now() - interval '3 days', now() - interval '63 days')`, [clinic]);
+    const first = (await det()).rows;
+    expect(first.length).toBe(1);
+    expect((await run()).filter((r) => r.exception_type === "renewal_overdue").map((r) => r.action)).toEqual(["opened"]);
+    await db.query(`update exceptions set status = 'resolved', resolved_at = now(), resolved_by = 'Ryan' where type = 'renewal_overdue'`);
+    expect((await run()).filter((r) => r.exception_type === "renewal_overdue")).toEqual([]);
+    // Thirty days on, the next period is overdue too: a different key, so a new bottleneck.
+    await db.query(`update whop_memberships set renewal_period_start = now() - interval '5 days', renewal_period_end = now() + interval '25 days' where whop_membership_id = 'mem_1'`);
+    await run();
+    await db.query(`update whop_memberships set renewal_period_start = now() - interval '32 days', renewal_period_end = now() - interval '2 days' where whop_membership_id = 'mem_1'`);
+    expect((await det()).rows[0].dedupe_key).not.toBe(first[0].dedupe_key);
+    expect((await run()).filter((r) => r.exception_type === "renewal_overdue").map((r) => r.action)).toEqual(["opened"]);
+  });
+
+  it("the engine resolving on its own puts no hold on: it reopens as before", async () => {
+    await spend(clinic, 1, 0);
+    await run();
+    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 30)`, [clinic]);
+    expect((await run()).map((r) => r.action)).toEqual(["resolved"]);
+    expect((await db.query<{ held: boolean }>(`select held from exceptions`)).rows[0].held).toBe(false);
+    await db.query(`update ad_metrics_daily set spend = 0 where client_id = $1 and date = app_today()`, [clinic]);
+    expect((await run()).map((r) => r.action)).toEqual(["opened"]);
   });
 
   it("the engine's refresh does not flood the audit log", async () => {

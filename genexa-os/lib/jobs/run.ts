@@ -10,6 +10,7 @@ import { JOBS_PAYROLL } from "@/lib/jobs/payroll";
 import { JOBS_ATTENDANCE } from "@/lib/jobs/attendance";
 import { JOBS_REMINDERS } from "@/lib/jobs/reminders";
 import { JOBS_MISC } from "@/lib/jobs/misc";
+import { createNewClientsFromWhop } from "@/lib/jobs/newClients";
 import { JOBS_NUDGES } from "@/lib/jobs/nudges";
 import { JOBS_ROUTER } from "@/lib/jobs/router";
 import { syncFathom } from "@/lib/integrations/fathom/sync";
@@ -43,7 +44,9 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
   // Genexa's own payments and memberships, direct from Whop.
   "whop-sync": async () => {
     const r = await syncWhop({ db: createAdminClient(), whop: createWhopClient({ apiKey: requireEnv("WHOP_API_KEY") }), since: "2026-08-01" });
-    return { ok: r.ok, summary: { ...r, unmatched: r.unmatched.length } };
+    // Brand-new paying customers become clients (with a launch at Paid) and the owner is told.
+    const fresh = r.ok ? await createNewClientsFromWhop({ db: createAdminClient() }) : null;
+    return { ok: r.ok && (fresh?.dm_failed.length ?? 0) === 0, summary: { ...r, unmatched: r.unmatched.length, new_clients: fresh } };
   },
   // GHL consult calendars -> appointments, then outcomes copied across from Cortana.
   "ghl-appointments": async () => {
