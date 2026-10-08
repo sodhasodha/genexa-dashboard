@@ -1,6 +1,7 @@
 // Turns queued reminders into Slack messages. Pure: no database, no network.
 // What is due is decided in SQL (reminder_candidates); this only words it.
 // Patients appear by first name only. Surnames, phones and emails never reach here.
+import { formatDeadline } from "@/lib/deadlines";
 import { NOT_FOLLOWING_UP_REASONS } from "@/lib/pipeline/reasons";
 
 /** One unsent notification, as reminders_deliverable returns it. */
@@ -158,9 +159,12 @@ class Draft {
 const taskLine = (t: P, appUrl: string, extra = "") =>
   `${link(`${appUrl}/tasks?task=${str(t.id)}`, str(t.title))}${t.client ? ` · ${esc(t.client)}` : ""}${extra}`;
 const overdueBy = (t: P) => {
+  // A task with a date and time deadline says when it was due, in the reader's timezone (tz).
+  if (t.due_at) return ` · was due ${formatDeadline(str(t.due_at), str(t.tz) || null)}`;
   const d = num(t.days_overdue);
   return d ? ` · ${plural(d, "day")} overdue` : "";
 };
+const dueBy = (t: P) => (t.due_at ? ` · due ${formatDeadline(str(t.due_at), str(t.tz) || null)}` : t.due ? ` · due ${day(t.due)}` : "");
 const exceptionLine = (e: P, id: string, appUrl: string) => {
   const m = num(e.money);
   return `${severityDot(e.severity)} ${esc(e.reason)}${m && m > 0 ? ` · ${money(m)} at risk` : ""} · ${link(`${appUrl}/overview?exception=${id}`, "open")}`;
@@ -192,7 +196,7 @@ function composeShiftStart(items: Pending[], appUrl: string): Message {
     d.heading("New tasks");
     for (const i of assigned) {
       const p = i.payload;
-      d.item("tasks", str(i.record_id), taskLine({ ...p, id: i.record_id }, appUrl, `${p.assigned_by ? ` · from ${esc(p.assigned_by)}` : ""}${p.due ? ` · due ${day(p.due)}` : ""}`));
+      d.item("tasks", str(i.record_id), taskLine({ ...p, id: i.record_id }, appUrl, `${p.assigned_by ? ` · from ${esc(p.assigned_by)}` : ""}${dueBy(p)}`));
     }
   }
   const exceptions = list(p.exceptions);
@@ -256,6 +260,7 @@ function composeRule(rule: string, items: Pending[], appUrl: string): Message {
       d.line(link(`${appUrl}/eod`, "Open EODs"));
       break;
     case "task_due_today":
+    case "task_due_2h":
     case "task_overdue":
     case "task_assigned":
     case "task_snoozed":
@@ -263,10 +268,14 @@ function composeRule(rule: string, items: Pending[], appUrl: string): Message {
         const p = i.payload;
         const bits = [
           p.assigned_by ? ` · from ${esc(p.assigned_by)}` : "",
-          rule === "task_overdue" ? overdueBy(p) : p.due ? ` · due ${day(p.due)}` : "",
+          rule === "task_overdue" ? overdueBy(p) : dueBy(p),
         ].join("");
         d.item("tasks", str(i.record_id), taskLine({ ...p, id: i.record_id }, appUrl, bits));
       }
+      break;
+    case "task_overdue_24h":
+      // To the app owner: whose task, and when it was due (UK time). No buttons: it is not the owner's task to tick off.
+      d.bullets(items.map((i) => `${taskLine({ ...i.payload, id: i.record_id }, appUrl)}${i.payload.owner ? ` · ${esc(i.payload.owner)}` : ""}${overdueBy(i.payload)}`));
       break;
     case "tech_job_new":
       d.bullets(items.map((i) => {
