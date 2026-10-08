@@ -1,17 +1,25 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { CloseFollowUp } from "@/components/pipeline/CloseFollowUp";
 import { addProspect, editProspect, moveProspect, setFollowUp } from "@/lib/actions/pipeline";
 import { requireStaff } from "@/lib/auth/staff";
-import { getOverdueFollowUps, getPipeline, STAGES, type Prospect } from "@/lib/queries/pipeline";
+import { DECISION_ERRORS, DECISION_SAVED } from "@/lib/pipeline/reasons";
+import { earliestLaterDay, getOverdueFollowUps, getPipeline, STAGES, type Prospect } from "@/lib/queries/pipeline";
 
 const ERRORS: Record<string, string> = {
   invalid: "Check the prospect: it needs a name, dates must be real dates, deal size a number, and the Fathom link must start with http.",
   save: "The prospect could not be saved.",
+  ...DECISION_ERRORS,
 };
 const SAVED: Record<string, string> = {
   added: "Prospect added.",
   edited: "Prospect saved.",
   moved: "Stage updated.",
   follow_up: "Follow-up date saved.",
+  ...DECISION_SAVED,
 };
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const nameLink = "underline decoration-line underline-offset-2 hover:decoration-ink";
 const HEAT: Record<string, string> = { hot: "Hot", warm: "Warm", cold: "Cold" };
 const HEAT_CLASS: Record<string, string> = { hot: "bg-bad-bg text-bad", warm: "bg-warn-bg text-warn", cold: "bg-stale-bg text-muted" };
 
@@ -97,17 +105,27 @@ function ProspectFields({ p, stage }: { p?: Prospect; stage: string }) {
 export default async function PipelinePage({ searchParams }: PageProps<"/pipeline">) {
   const me = await requireStaff();
   const params = await searchParams;
+  // Slack reminders link to /pipeline?prospect=<id>: that is the prospect's own page.
+  if (typeof params.prospect === "string" && UUID.test(params.prospect)) redirect(`/pipeline/${params.prospect}`);
   const isOwner = me.role === "owner";
   const [followUps, stages] = await Promise.all([getOverdueFollowUps(), getPipeline(isOwner)]);
   const error = typeof params.error === "string" ? ERRORS[params.error] : undefined;
   const saved = typeof params.saved === "string" ? SAVED[params.saved] : undefined;
+  // The prospect a "not following up" / "follow up later" decision was just made on.
+  const decidedOn = typeof params.p === "string" && UUID.test(params.p) ? params.p : null;
+  const earliest = earliestLaterDay();
 
   return (
     <div className="flex flex-col gap-6 p-4">
       <div>
         <h1 className="text-lg font-semibold">Pipeline</h1>
         {error ? <p className="mt-2 rounded bg-bad-bg px-3 py-2 text-bad">{error}</p> : null}
-        {saved ? <p className="mt-2 rounded bg-good-bg px-3 py-2 text-good">{saved}</p> : null}
+        {saved ? (
+          <p className="mt-2 rounded bg-good-bg px-3 py-2 text-good">
+            {saved}
+            {decidedOn ? <> <Link href={`/pipeline/${decidedOn}`} className="underline">Undo on the prospect&apos;s page</Link>.</> : null}
+          </p>
+        ) : null}
       </div>
 
       <section>
@@ -127,13 +145,14 @@ export default async function PipelinePage({ searchParams }: PageProps<"/pipelin
                   <th className={th}>Follow-up was due</th>
                   <th className={th}>What Ryan promised</th>
                   <th className={th}>Deal size</th>
+                  {isOwner ? <th className={th}>Close without doing it</th> : null}
                 </tr>
               </thead>
               <tbody>
                 {followUps.map((f) => (
                   <tr key={f.id} className="border-b border-line align-top last:border-0">
                     <td className="px-3 py-2 font-medium">
-                      {f.name}
+                      <Link href={`/pipeline/${f.id}`} className={nameLink}>{f.name}</Link>
                       {f.state ? <span className="ml-2 text-xs font-normal text-muted">{f.state}</span> : null}
                     </td>
                     <td className="px-3 py-2"><Heat heat={f.heat} /></td>
@@ -143,6 +162,7 @@ export default async function PipelinePage({ searchParams }: PageProps<"/pipelin
                     </td>
                     <td className="max-w-md whitespace-pre-wrap px-3 py-2">{f.promised ?? <NoData />}</td>
                     <td className="whitespace-nowrap px-3 py-2 tabular-nums">{f.deal_label ?? <NoData />}</td>
+                    {isOwner ? <td className="px-3 py-2"><CloseFollowUp id={f.id} name={f.name} earliest={earliest} /></td> : null}
                   </tr>
                 ))}
               </tbody>
@@ -197,7 +217,7 @@ export default async function PipelinePage({ searchParams }: PageProps<"/pipelin
                 <tbody>
                   {s.prospects.map((p) => (
                     <tr key={p.id} className="border-b border-line align-top last:border-0">
-                      <td className="px-3 py-2 font-medium">{p.name}</td>
+                      <td className="px-3 py-2 font-medium"><Link href={`/pipeline/${p.id}`} className={nameLink}>{p.name}</Link></td>
                       <td className="px-3 py-2"><Heat heat={p.heat} /></td>
                       <td className="whitespace-nowrap px-3 py-2">{p.state ?? <NoData />}</td>
                       <td className="whitespace-nowrap px-3 py-2 tabular-nums">{p.call_label ?? <NoData />}</td>
@@ -232,6 +252,7 @@ export default async function PipelinePage({ searchParams }: PageProps<"/pipelin
                               <input type="date" name="follow_up_date" defaultValue={p.follow_up_date ?? ""} aria-label={`Follow-up date for ${p.name}`} className={`${field} text-xs`} />
                               <button type="submit" className={quiet}>Set</button>
                             </form>
+                            {p.can_close ? <CloseFollowUp id={p.id} name={p.name} earliest={earliest} /> : null}
                             <details>
                               <summary className="text-xs text-muted">Edit</summary>
                               <form action={editProspect} className="mt-2 grid w-80 gap-2 sm:grid-cols-2">

@@ -1,6 +1,7 @@
 // Turns queued reminders into Slack messages. Pure: no database, no network.
 // What is due is decided in SQL (reminder_candidates); this only words it.
 // Patients appear by first name only. Surnames, phones and emails never reach here.
+import { NOT_FOLLOWING_UP_REASONS } from "@/lib/pipeline/reasons";
 
 /** One unsent notification, as reminders_deliverable returns it. */
 export type Pending = {
@@ -83,6 +84,27 @@ export function actions(recordType: "tasks" | "exceptions", id: string): Block {
   };
 }
 
+/**
+ * The two ways to close a prospect follow-up without doing it: a reason menu
+ * ("Not following up") and a date picker ("Follow up later"). The block id names
+ * the prospect; a date picker carries no value of its own.
+ */
+export function prospectActions(id: string): Block {
+  return {
+    type: "actions",
+    block_id: `act:prospects:${id}`,
+    elements: [
+      {
+        type: "static_select",
+        action_id: "prospect_not_following_up",
+        placeholder: { type: "plain_text", text: "Not following up" },
+        options: NOT_FOLLOWING_UP_REASONS.map((r) => ({ text: { type: "plain_text", text: r.label }, value: r.key })),
+      },
+      { type: "datepicker", action_id: "prospect_follow_up_later", placeholder: { type: "plain_text", text: "Follow up later" } },
+    ],
+  };
+}
+
 /** Builds a message line by line; lines with buttons become their own blocks. */
 class Draft {
   private blocks: Block[] = [];
@@ -113,8 +135,8 @@ class Draft {
     for (const item of items.slice(0, MAX_LINES)) this.line(`• ${item}`);
     if (items.length > MAX_LINES) this.line(`…and ${items.length - MAX_LINES} more${moreUrl ? ` · ${link(moreUrl, "see all")}` : ""}`);
   }
-  /** A line with Done / Snooze 1h under it. */
-  item(recordType: "tasks" | "exceptions", id: string, mrkdwn: string) {
+  /** A line with its buttons under it: Done / Snooze 1h, or the two prospect controls. */
+  item(recordType: "tasks" | "exceptions" | "prospects", id: string, mrkdwn: string) {
     const key = `${recordType}:${id}`;
     if (this.seen.has(key) || this.actionable >= MAX_ACTIONABLE) {
       this.line(`• ${mrkdwn}`);
@@ -124,7 +146,7 @@ class Draft {
     this.actionable++;
     this.flush();
     this.blocks.push({ ...section(mrkdwn), block_id: `item:${key}` });
-    this.blocks.push(actions(recordType, id));
+    this.blocks.push(recordType === "prospects" ? prospectActions(id) : actions(recordType, id));
     this.lines.push(mrkdwn);
   }
   done(): Message {
@@ -309,11 +331,13 @@ function composeRule(rule: string, items: Pending[], appUrl: string): Message {
       }));
       break;
     case "prospect_follow_up":
-      d.bullets(items.map((i) => {
+      // Name, what was promised and a link only: contact details never leave the app.
+      // Each prospect gets "Not following up" and "Follow up later" under its line.
+      for (const i of items) {
         const p = i.payload;
         const late = num(p.days_overdue) ?? 0;
-        return `${link(`${appUrl}/pipeline?prospect=${str(i.record_id)}`, str(p.name))} · ${late > 0 ? `${plural(late, "day")} overdue` : "today"}${p.promised ? ` · promised: ${esc(p.promised)}` : ""}`;
-      }));
+        d.item("prospects", str(i.record_id), `${link(`${appUrl}/pipeline?prospect=${str(i.record_id)}`, str(p.name))} · ${late > 0 ? `${plural(late, "day")} overdue` : "today"}${p.promised ? ` · promised: ${esc(p.promised)}` : ""}`);
+      }
       break;
     case "sync_failure":
       d.bullets(items.map((i) => `${esc(i.payload.source)} · last success ${etTime(i.payload.last_success_at)}${i.payload.error ? ` · ${esc(i.payload.error)}` : ""}`));
