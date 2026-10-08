@@ -803,3 +803,19 @@ describe("Triage handled in Slack", () => {
     expect(await status(unanswered)).toBe("triage");
   });
 });
+
+describe("who counts as ours in the client workspace", () => {
+  it("anyone in the team workspace counts, matched by email, including accounts seen earlier", async () => {
+    const db2 = await freshDb();
+    await seedStaff(db2);
+    const save = async (u: string, e: string | null) => (await db2.query<{ r: boolean }>(`select router_save_person($1, $2, 'X') as r`, [u, e])).rows[0].r;
+    expect(await save("UFREELANCE", "freelancer@example.test")).toBe(false);
+    expect(await save("UCLINIC", "doctor@clinic.test")).toBe(false);
+    const n = (await db2.query<{ n: number }>(`select router_sync_team_people($1::jsonb) as n`, [JSON.stringify([{ id: "T1", email: "Freelancer@Example.test", real_name: "Free Lancer" }, { id: "T2", email: null, real_name: "No Email" }])])).rows[0].n;
+    expect(n).toBe(1);
+    const people = (await db2.query<{ slack_user_id: string; is_staff: boolean }>(`select slack_user_id, is_staff from slack_people where workspace = 'client' order by 1`)).rows;
+    expect(people).toEqual([{ slack_user_id: "UCLINIC", is_staff: false }, { slack_user_id: "UFREELANCE", is_staff: true }]);
+    expect(await save("UNEW", "freelancer@example.test")).toBe(true);
+    expect(await save("UGENEXA", "anyone@genexascaling.com")).toBe(true);
+  });
+});

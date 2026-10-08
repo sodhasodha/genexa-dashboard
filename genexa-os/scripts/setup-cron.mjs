@@ -32,6 +32,7 @@ const INTERVAL = [
   ["genexa-outcome-nudges", "0 * * * 1", "outcome-nudges", 120000], // Mondays only, hourly; each clinic is messaged at 10:00 its own time
   ["genexa-router-process", "1-59/5 * * * *", "router-process", 120000],
   ["genexa-router-replies", "3-59/5 * * * *", "router-replies", 60000],
+  ["genexa-router-handled", "4-59/10 * * * *", "router-handled", 120000], // Triage items we already answered in Slack
 ];
 // name, job, timezone, local hour, local minute, weekday (0 = Sunday, null = daily), timeout ms
 const LOCAL = [

@@ -67,6 +67,7 @@ npm run setup:cron -- https://ops.genexascaling.com
 | `attendance` | every 5 min | late / no-show status and alerts |
 | `reminders` | every 5 min | every Slack reminder to the team |
 | `router-process`, `router-replies` | every 5 min | client request router |
+| `router-handled` | every 10 min | clears Triage items a team member has already answered in Slack |
 | `daily-snapshot` | 00:05 ET | stores the week's scores; freezes last month on the 1st |
 | `pay-run` | Sunday 23:59 ET | builds the week's draft pay run and DMs the owner |
 | `outcome-nudges` | Mondays, 10:00 clinic time | one short message in each clinic's General channel with the count of overdue outcomes and a link; nothing if there are none |
