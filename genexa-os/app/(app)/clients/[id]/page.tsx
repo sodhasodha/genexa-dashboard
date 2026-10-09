@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DataTable } from "@/components/DataTable";
-import { addLocation, addTouch, removeLocation, updateClient, updateLocation } from "@/lib/actions/clients";
+import { addLocation, addTouch, removeLocation, updateClient, updateLocation, saveDashboardLogin } from "@/lib/actions/clients";
 import { requireStaff } from "@/lib/auth/staff";
 import { formatValue, type Unit } from "@/lib/format";
-import { PODS, STAGES, getClientProfile, type ClientMtd } from "@/lib/queries/clients";
+import { PODS, STAGES, getClientProfile, getDashboardLogin, type ClientMtd } from "@/lib/queries/clients";
 
 const NO_DATA = <span className="text-stale">no data</span>;
 const ERRORS: Record<string, string> = {
@@ -16,7 +16,7 @@ const ERRORS: Record<string, string> = {
   location: "Location not saved: it needs a name, and the calendar link must be a full URL (https://...).",
 };
 const SAVED: Record<string, string> = {
-  client: "Client details saved.", touch: "Touch logged.", location: "Location saved.", location_removed: "Location removed.",
+  client: "Client details saved.", login: "Dashboard login saved.", touch: "Touch logged.", location: "Location saved.", location_removed: "Location removed.",
 };
 const TOUCH_KINDS = ["call", "loom", "report", "slack", "email"];
 const MTD: { key: keyof ClientMtd; label: string; unit: Unit | "ratio" }[] = [
@@ -45,6 +45,7 @@ export default async function ClientPage({ params, searchParams }: PageProps<"/c
   if (!profile) notFound();
   const { client: c, health, renewal, scope, ads_state, mtd } = profile;
   const isOwner = me.role === "owner";
+  const login = isOwner ? await getDashboardLogin(id) : null;
   const error = typeof query.error === "string" ? ERRORS[query.error] : undefined;
   const saved = typeof query.saved === "string" ? SAVED[query.saved] : undefined;
 
@@ -129,6 +130,21 @@ export default async function ClientPage({ params, searchParams }: PageProps<"/c
               <button type="submit" className={button}>Save client details</button>
               <span className="ml-3 text-xs text-muted">Monthly fee is worked out from the fee per cycle. Dates are ET.</span>
             </div>
+          </form>
+        </details>
+      ) : null}
+
+      {isOwner ? (
+        <details className="rounded-lg border border-line bg-panel">
+          <summary className="px-4 py-3 text-sm font-semibold">Client dashboard login <span className="font-normal text-muted">· {login ? `saved (${login.username})` : "not saved"}</span></summary>
+          <form action={saveDashboardLogin} className="grid gap-3 border-t border-line p-4 sm:grid-cols-3">
+            <input type="hidden" name="id" value={c.id} />
+            <label className={label}>Username<input name="username" required maxLength={200} defaultValue={login?.username ?? ""} autoComplete="off" className={input} /></label>
+            <label className={label}>Password<input name="password" required maxLength={200} defaultValue={login?.password ?? ""} autoComplete="off" className={input} /></label>
+            <div className="flex items-end">
+              <button type="submit" className={button}>Save login</button>
+            </div>
+            <p className="text-xs text-muted sm:col-span-3">Only you can see this. It is posted to this clinic&apos;s own General channel in the Monday outcome message.</p>
           </form>
         </details>
       ) : null}

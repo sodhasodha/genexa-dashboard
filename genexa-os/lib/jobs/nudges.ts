@@ -17,9 +17,10 @@ const postToClientChannel: NudgeSender = async (channel, text) => {
   return { ok: json.ok, ts: json.ts, error: json.error };
 };
 
-/** The whole message a clinic gets. A count and a link: no patient names. */
-export function nudgeText(clinic: string, count: number, link: string): string {
-  return `Hi ${clinic} 👋 You have ${count} patient ${count === 1 ? "outcome" : "outcomes"} waiting to be updated. Please log them here: ${link}. Thanks!`;
+/** The whole message a clinic gets. A count, a link and (when stored) the clinic's own dashboard login: no patient names. */
+export function nudgeText(clinic: string, count: number, link: string, login?: { username: string; password: string } | null): string {
+  const creds = login ? `\nUsername: ${login.username}\nPassword: ${login.password}` : "";
+  return `Hi ${clinic} 👋 You have ${count} patient ${count === 1 ? "outcome" : "outcomes"} waiting to be updated. Please log them here: ${link}${creds ? creds + "\n" : ". "}Thanks!`;
 }
 
 /** Mondays, at this clinic-local hour. */
@@ -35,13 +36,16 @@ export const NUDGE_ISODOW = 1;
 export async function runOutcomeNudges(opts: { db?: SupabaseClient; send?: NudgeSender; hour?: number; isodow?: number } = {}) {
   const db = opts.db ?? createAdminClient();
   const send = opts.send ?? postToClientChannel;
-  const summary = { enabled: true, clinics_due: 0, sent: 0, outcomes: 0, not_their_time: 0, already_sent: 0, nothing_definite: [] as string[], no_channel: [] as string[], no_link: [] as string[], failed: [] as string[] };
+  const summary = { enabled: true, clinics_due: 0, sent: 0, outcomes: 0, not_their_time: 0, already_sent: 0, nothing_definite: [] as string[], no_channel: [] as string[], no_link: [] as string[], without_login: [] as string[], failed: [] as string[] };
   const { data: setting } = await db.from("app_settings").select("value").eq("key", "client_outcome_nudges").maybeSingle();
   const { data: rule } = await db.from("reminder_rules").select("enabled").eq("key", "outcome_nudge").maybeSingle();
   if (setting?.value !== true || rule?.enabled === false) return { ok: true, summary: { ...summary, enabled: false } };
 
   const { data, error } = await db.from("outcome_nudges_due").select("*");
   if (error) throw new Error(`outcome_nudges_due: ${error.message}`);
+  // Each clinic's own dashboard login, sent only to that clinic's own channel.
+  const { data: logins } = await db.from("client_dashboard_logins").select("client_id, username, password");
+  const loginOf = new Map((logins ?? []).map((l) => [l.client_id as string, { username: l.username as string, password: l.password as string }]));
   for (const row of data ?? []) {
     if (Number(row.local_dow) !== (opts.isodow ?? NUDGE_ISODOW) || Number(row.local_hour) !== (opts.hour ?? NUDGE_HOUR)) { summary.not_their_time++; continue; }
     // Only consults that are definitely unlogged are counted; a clinic with none gets no message.
@@ -55,7 +59,7 @@ export async function runOutcomeNudges(opts: { db?: SupabaseClient; send?: Nudge
       .insert({ rule_key: "outcome_nudge", channel: row.channel, record_type: "clients", record_id: row.client_id, window_key: row.local_date })
       .select("id").single();
     if (noteError || !note) { summary.already_sent++; continue; }
-    const r = await send(row.channel as string, nudgeText(row.name as string, Number(row.overdue_count), row.link as string));
+    const r = await send(row.channel as string, nudgeText(row.name as string, Number(row.overdue_count), row.link as string, loginOf.get(row.client_id as string) ?? null));
     const now = new Date().toISOString();
     if (!r.ok) {
       // Freed so the next hourly run can try again the same day.
@@ -65,6 +69,7 @@ export async function runOutcomeNudges(opts: { db?: SupabaseClient; send?: Nudge
     }
     await db.from("notifications").update({ sent_at: now, slack_ts: r.ts ?? "sent" }).eq("id", note.id);
     summary.sent++;
+    if (!loginOf.has(row.client_id as string)) summary.without_login.push(row.name as string);
     summary.outcomes += Number(row.overdue_count);
   }
   return { ok: summary.failed.length === 0, summary };

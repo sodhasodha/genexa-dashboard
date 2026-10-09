@@ -152,3 +152,17 @@ export async function removeLocation(formData: FormData) {
   refreshed(id);
   back(id, "saved=location_removed");
 }
+
+/** Owner stores a clinic's client-dashboard login (sent to the clinic in its Monday outcome message). */
+export async function saveDashboardLogin(formData: FormData) {
+  const me = await requireStaff();
+  const id = Id.parse(formData.get("id"));
+  if (me.role !== "owner") back(id, "error=owner_only");
+  const username = String(formData.get("username") ?? "").trim();
+  const password = String(formData.get("password") ?? "").trim();
+  if (!username || !password || username.length > 200 || password.length > 200) back(id, "error=invalid");
+  const supabase = await createClient();
+  const { error } = await supabase.from("client_dashboard_logins").upsert({ client_id: id, username, password, updated_by: me.id }, { onConflict: "client_id" });
+  if (error) back(id, "error=save");
+  back(id, "saved=login");
+}

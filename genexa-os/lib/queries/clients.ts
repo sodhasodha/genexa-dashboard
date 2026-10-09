@@ -229,3 +229,10 @@ export async function getClientProfile(id: string): Promise<ClientProfile | null
     locations: (locations.data ?? []).map((l) => ({ ...l, doctors: (l.doctors ?? []) as string[] })),
   };
 }
+
+/** A clinic's client-dashboard login. Row security returns nothing to anyone but the owner. */
+export async function getDashboardLogin(clientId: string): Promise<{ username: string; password: string } | null> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("client_dashboard_logins").select("username, password").eq("client_id", clientId).maybeSingle();
+  return data ? { username: data.username as string, password: data.password as string } : null;
+}

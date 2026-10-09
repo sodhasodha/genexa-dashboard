@@ -11,4 +11,10 @@ describe("outcome nudge wording", () => {
     );
     expect(nudgeText("Regen RX", 1, "https://example.test/o")).toContain("You have 1 patient outcome waiting");
   });
+
+  it("adds the clinic's own dashboard login when one is stored", () => {
+    expect(nudgeText("Regen RX", 4, "https://client.genexascaling.com", { username: "regenrx", password: "Example-Pass1" })).toBe(
+      "Hi Regen RX 👋 You have 4 patient outcomes waiting to be updated. Please log them here: https://client.genexascaling.com\nUsername: regenrx\nPassword: Example-Pass1\nThanks!",
+    );
+  });
 });
