@@ -29,7 +29,12 @@ beforeEach(async () => {
 });
 
 const spend = (clientId: string, daysAgo: number, amount: number) =>
-  db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today() - $2::int, $3)`, [clientId, daysAgo, amount]);
+  // A $0 yesterday comes with today's own reading (also $0 so far): the rule needs both.
+  db.query(
+    `insert into ad_metrics_daily (client_id, date, spend)
+     select $1, d, s from (values (app_today() - $2::int, $3::numeric), (app_today(), case when $2::int = 1 and $3::numeric = 0 then 0::numeric end)) v(d, s)
+     where s is not null on conflict (client_id, date) do update set spend = excluded.spend`,
+    [clientId, daysAgo, amount]);
 
 describe("zero spend", () => {
   it("opens once for the media buyer with the renewal amount at risk, then refreshes, then auto-resolves", async () => {
@@ -45,7 +50,7 @@ describe("zero spend", () => {
     expect(second.map((r) => r.action)).toEqual(["refreshed"]);
     expect((await open("zero_spend")).length).toBe(1);
 
-    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 42.5)`, [clinic]);
+    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 42.5) on conflict (client_id, date) do update set spend = excluded.spend`, [clinic]);
     const third = await run();
     expect(third.map((r) => r.action)).toEqual(["resolved"]);
     expect(await open("zero_spend")).toEqual([]);
@@ -86,7 +91,7 @@ describe("stale sources", () => {
     await run();
     await db.query(`update exceptions set last_detected_at = now() - interval '3 hours'`);
     // Spend comes back, but the source then goes stale: we cannot know, so nothing changes.
-    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 80)`, [clinic]);
+    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 80) on conflict (client_id, date) do update set spend = excluded.spend`, [clinic]);
     await fresh("cortana", 500);
     expect(await run()).toEqual([]);
     const [ex] = await open("zero_spend");
@@ -237,7 +242,7 @@ describe("snooze and reopen", () => {
     await spend(clinic, 1, 0);
     await run();
     await db.query(`update exceptions set status = 'resolved', resolved_at = now(), resolved_by = 'Ryan'`);
-    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 30)`, [clinic]);
+    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 30) on conflict (client_id, date) do update set spend = excluded.spend`, [clinic]);
     expect(await run()).toEqual([]); // cleared: nothing to open, the hold is let go
     const released = await db.query<{ held: boolean; hold_release_reason: string }>(`select held, hold_release_reason from exceptions`);
     expect(released.rows[0]).toEqual({ held: false, hold_release_reason: "cleared" });
@@ -304,7 +309,7 @@ describe("snooze and reopen", () => {
   it("the engine resolving on its own puts no hold on: it reopens as before", async () => {
     await spend(clinic, 1, 0);
     await run();
-    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 30)`, [clinic]);
+    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 30) on conflict (client_id, date) do update set spend = excluded.spend`, [clinic]);
     expect((await run()).map((r) => r.action)).toEqual(["resolved"]);
     expect((await db.query<{ held: boolean }>(`select held from exceptions`)).rows[0].held).toBe(false);
     await db.query(`update ad_metrics_daily set spend = 0 where client_id = $1 and date = app_today()`, [clinic]);
@@ -319,5 +324,100 @@ describe("snooze and reopen", () => {
     await run();
     const after = (await db.query<{ n: number }>(`select count(*)::int as n from audit_log where table_name = 'exceptions'`)).rows[0].n;
     expect(after).toBe(before);
+  });
+});
+
+describe("the $0-spend rule and the ad account's own day", () => {
+  const hour = (h: number) => db.query(`select set_config('test.ad_hour', $1, false)`, [String(h)]);
+  const zero = async () => (await db.query(`select 1 from exception_detections where type = 'zero_spend'`)).rows.length;
+
+  it("the real clock gives the date and hour in the account's timezone, not UTC or UK", async () => {
+    const at = async (tz: string, ts: string) => (await db.query<{ d: string; h: number }>(`select local_date::text as d, local_hour as h from ad_clock_at($1, $2::timestamptz)`, [tz, ts])).rows[0];
+    // 08:30 UTC on 9 Oct is 01:30 the same day in Los Angeles and 04:30 in New York.
+    expect(await at("America/Los_Angeles", "2026-10-09T08:30:00Z")).toEqual({ d: "2026-10-09", h: 1 });
+    expect(await at("America/New_York", "2026-10-09T08:30:00Z")).toEqual({ d: "2026-10-09", h: 4 });
+    // 05:00 UTC is still the previous evening on the US west coast.
+    expect(await at("America/Los_Angeles", "2026-10-09T05:00:00Z")).toEqual({ d: "2026-10-08", h: 22 });
+    expect(await at("Europe/London", "2026-10-09T05:00:00Z")).toEqual({ d: "2026-10-09", h: 6 });
+  });
+
+  it("never fires before 12:00 account time, however empty today looks", async () => {
+    await spend(clinic, 1, 0);
+    await hour(3);
+    expect(await zero()).toBe(0);
+    await hour(11);
+    expect(await zero()).toBe(0);
+    await hour(12);
+    expect(await zero()).toBe(1);
+    await hour(15);
+  });
+
+  it("an unfinished day is never a $0 day: spend yesterday and nothing yet today does not fire", async () => {
+    await spend(clinic, 1, 44.76);
+    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 0)`, [clinic]);
+    expect(await zero()).toBe(0);
+  });
+
+  it("needs a reading of today taken after 12:00, and a reading of yesterday taken after it ended", async () => {
+    await spend(clinic, 1, 0);
+    expect(await zero()).toBe(1);
+    // Today was last read long before noon account time: not enough to say "nothing today".
+    await db.query(`update ad_metrics_daily set synced_at = now() - interval '3 days' where client_id = $1 and date = app_today()`, [clinic]);
+    expect(await zero()).toBe(0);
+    await db.query(`update ad_metrics_daily set synced_at = now() where client_id = $1 and date = app_today()`, [clinic]);
+    // Yesterday's zero was stored while that day was still running.
+    await db.query(`update ad_metrics_daily set synced_at = now() - interval '3 days' where client_id = $1 and date = app_today() - 1`, [clinic]);
+    expect(await zero()).toBe(0);
+    // No reading of today at all.
+    await db.query(`update ad_metrics_daily set synced_at = now() where client_id = $1`, [clinic]);
+    await db.query(`update ad_metrics_daily set date = app_today() - 9 where client_id = $1 and date = app_today()`, [clinic]);
+    expect(await zero()).toBe(0);
+  });
+
+  it("resolves on the next run once spend appears, today or in a revised yesterday", async () => {
+    await spend(clinic, 1, 0);
+    expect((await run()).map((r) => r.action)).toEqual(["opened"]);
+    await db.query(`update ad_metrics_daily set spend = 44.76 where client_id = $1 and date = app_today() - 1`, [clinic]); // Cortana revised the day
+    expect((await run()).map((r) => r.action)).toEqual(["resolved"]);
+  });
+});
+
+describe("under-spending", () => {
+  const det = async () => (await db.query<{ severity: string; reason: string; owner_id: string; money_at_risk: string | null }>(
+    `select severity, reason, owner_id, money_at_risk from exception_detections where type = 'under_spend'`)).rows;
+  const day = (ago: number, amount: number, budget: number | null = null) =>
+    db.query(`insert into ad_metrics_daily (client_id, date, spend, daily_budget) values ($1, app_today() - $2::int, $3, $4)
+              on conflict (client_id, date) do update set spend = excluded.spend, daily_budget = excluded.daily_budget`, [clinic, ago, amount, budget]);
+
+  it("yesterday under 60% of the daily budget is an amber item for the media buyer, not urgent", async () => {
+    await day(1, 44.76, 100);
+    const d = await det();
+    expect(d.length).toBe(1);
+    expect(d[0]).toMatchObject({ severity: "amber", owner_id: people.aditya, money_at_risk: null });
+    expect(d[0].reason).toMatch(/^Zero Clinic spent \$45 vs \$100 budget on \w{3} \d\d \w{3}$/);
+    expect((await db.query<{ urgent: boolean }>(`select urgent from exception_rules where type = 'under_spend'`)).rows[0].urgent).toBe(false);
+    await day(1, 60, 100); // exactly 60%: fine
+    expect(await det()).toEqual([]);
+  });
+
+  it("with no budget it compares with the 7 days before, needs enough of them, and leaves a $0 day to the other rule", async () => {
+    await day(1, 30);
+    expect(await det()).toEqual([]); // nothing to compare with
+    for (const ago of [2, 3, 4, 5]) await day(ago, 100);
+    expect((await det())[0].reason).toMatch(/spent \$30 vs \$100 7-day average/);
+    await day(1, 70);
+    expect(await det()).toEqual([]);
+    await day(1, 0);
+    expect(await det()).toEqual([]);
+  });
+
+  it("waits until 12:00 account time, and resolves when a later day is back on budget", async () => {
+    await day(1, 20, 100);
+    await db.query(`select set_config('test.ad_hour', '9', false)`);
+    expect(await det()).toEqual([]);
+    await db.query(`select set_config('test.ad_hour', '15', false)`);
+    expect((await run()).filter((r) => r.exception_type === "under_spend").map((r) => r.action)).toEqual(["opened"]);
+    await day(1, 95, 100);
+    expect((await run()).filter((r) => r.exception_type === "under_spend").map((r) => r.action)).toEqual(["resolved"]);
   });
 });

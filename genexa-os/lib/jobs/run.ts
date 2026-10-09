@@ -18,6 +18,7 @@ import { syncFathom } from "@/lib/integrations/fathom/sync";
 import { syncWhop } from "@/lib/integrations/whop/sync";
 import { addDays, etToday } from "@/lib/time";
 import { runExceptionsEngine } from "@/lib/exceptions/engine";
+import { recheckZeroSpend } from "@/lib/integrations/cortana/sync";
 
 export type JobResult = { ok: boolean; summary: Record<string, unknown> };
 
@@ -32,11 +33,11 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
     const live = await createAdminClient().rpc("launches_auto_live");
     return { ok: r.ok && !live.error, summary: { ...r, went_live: live.error ? live.error.message : ((live.data ?? []) as { name: string; live_date: string }[]).map((x) => `${x.name} (${x.live_date})`) } };
   },
-  // 02:30 ET: re-read the last 4 days, so late attribution and Meta corrections land.
+  // 02:30 ET: re-read the last 3 days, so late attribution and Meta corrections land.
   // Sized to finish inside the 300s function limit (about 1.9s per Cortana call, 96 calls);
   // the hourly job already refreshes the per-ad windows.
   "cortana-full": async () => {
-    const r = await syncCortana({ db: createAdminClient(), cortana: cortana(), days: 4, windows: false });
+    const r = await syncCortana({ db: createAdminClient(), cortana: cortana(), days: 3, windows: false });
     return { ok: r.ok, summary: r };
   },
   // Funnel and outcome events. Re-reads 14 days each time: clinics log shows and sales late.
@@ -78,6 +79,10 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
     return { ok: r.ok, summary: r };
   },
   exceptions: async () => {
+    // $0 spend is only believed after a fresh read from Cortana (it revises recent days).
+    // If Cortana cannot be read, nothing is opened this round; the next run tries again.
+    const recheck = process.env.CORTANA_API_KEY ? await recheckZeroSpend({ db: createAdminClient(), cortana: cortana() }) : { checked: [], error: null };
+    if (recheck.error) return { ok: false, summary: { skipped: "could not re-check $0 spend against Cortana", error: recheck.error } };
     const r = await runExceptionsEngine(createAdminClient());
     return { ok: true, summary: r };
   },

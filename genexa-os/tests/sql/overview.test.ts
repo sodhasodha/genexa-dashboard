@@ -59,7 +59,7 @@ describe("client_health", () => {
       `insert into clients (name, stage, cortana_business_id, billing_cycle, cycle_fee, launch_date, last_reply_client)
        values ('Health Clinic', 'live', 'b1', '30', 2000, app_today() - 40, now() - interval '9 days') returning id`,
     );
-    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today() - 1, 0)`, [c]);
+    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today() - 1, 0), ($1, app_today(), 0)`, [c]);
     const health = () => one<{ colour: string; reasons: string | null; sources_missing: string[] }>(`select colour, reasons, sources_missing from client_health where client_id = $1`, [c]);
 
     // Nothing has synced: only the rule with no source (client reply) counts. The unpaid renewal and $0 spend do not.
@@ -78,7 +78,7 @@ describe("client_health", () => {
     expect(h.reasons).toMatch(/^Renewal overdue since \d\d \w{3} · \$0 ad spend 24h\+ · No client reply for 9 days$/);
 
     await db.query(`update clients set last_reply_client = now() - interval '2 days' where id = $1`, [c]);
-    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 60)`, [c]);
+    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today(), 60) on conflict (client_id, date) do update set spend = excluded.spend`, [c]);
     await db.query(`insert into payments (client_id, whop_payment_id, amount, paid_at, product_title) values ($1, 'h1', 2000, now() - interval '8 days', 'Growth')`, [c]);
     expect((await health()).colour).toBe("green");
   });

@@ -17,6 +17,10 @@ export async function freshDb(): Promise<PGlite> {
       throw new Error(`${file}: ${(err as Error).message}`);
     }
   }
+  // Tests run at any hour: the ad-account clock is pinned to "today in ET, 15:00", in a zone far
+  // enough east that noon of that date is always in the past. The real clock is tested on its own.
+  await db.exec(`create or replace function ad_account_clock(p_client uuid) returns table (tz text, local_date date, local_hour integer)
+    language sql stable as $$ select 'Etc/GMT-14'::text, app_today(), coalesce(nullif(current_setting('test.ad_hour', true), '')::int, 15) $$`);
   return db;
 }
 

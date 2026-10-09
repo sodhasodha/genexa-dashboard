@@ -39,3 +39,13 @@ export function etRange(from: string, to: string): { start: string; end: string 
     end: new Date(etMidnight(addDays(to, 1)).getTime() - 1).toISOString(),
   };
 }
+
+/**
+ * [start, end] of AD ACCOUNT days from..to inclusive. Cortana files each account
+ * day's delivery (spend, impressions, clicks) under that date at 00:00 UTC, so
+ * the account day D is asked for as the UTC day D. Asking with ET midnights
+ * returns the next account day instead.
+ */
+export function accountDayRange(from: string, to: string): { start: string; end: string } {
+  return { start: `${from}T00:00:00.000Z`, end: `${to}T23:59:59.999Z` };
+}

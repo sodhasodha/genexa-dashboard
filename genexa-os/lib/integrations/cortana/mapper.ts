@@ -15,6 +15,9 @@ export const AttributionRow = z
     // Meta campaign id (groupBy=campaign) or ad id (groupBy=ad).
     platformEntityId: z.string().nullable().optional(),
     effectiveStatus: z.string().nullable().optional(),
+    // The budget this row runs under, and a key shared by rows under the same budget.
+    summaryDailyBudget: z.number().nullable().optional(),
+    summaryBudgetKey: z.string().nullable().optional(),
     spent: num,
     impressions: num,
     clicks: num,
@@ -92,6 +95,8 @@ export type AccountTotals = {
   cortana_booked: number;
   cortana_revenue: number;
   campaigns_in_scope: number;
+  /** Daily budget of the campaigns that were running (active now, or spent in the window). Null when Cortana gives none. */
+  daily_budget: number | null;
 };
 
 /**
@@ -107,6 +112,13 @@ export function accountTotals(rows: AttributionRow[], scope: CampaignScope | nul
   const clicks = sum((r) => r.clicks);
   const reach = sum((r) => r.reach);
   const spendExact = sum((r) => r.spent);
+  // One budget can cover several rows: count each budget once.
+  const budgets = new Map<string, number>();
+  for (const r of mine) {
+    if (typeof r.summaryDailyBudget !== "number" || r.summaryDailyBudget <= 0) continue;
+    if ((r.spent ?? 0) <= 0 && r.effectiveStatus !== "ACTIVE") continue;
+    budgets.set(r.summaryBudgetKey ?? `row:${r.platformEntityId ?? r.dimension}`, r.summaryDailyBudget);
+  }
   return {
     spend: cents(spendExact),
     impressions,
@@ -120,6 +132,7 @@ export function accountTotals(rows: AttributionRow[], scope: CampaignScope | nul
     cortana_booked: sum((r) => uniq(r, EVENT.booked)),
     cortana_revenue: cents(sum((r) => r.conversions?.[EVENT.purchase]?.revenue)),
     campaigns_in_scope: mine.length,
+    daily_budget: budgets.size > 0 ? cents([...budgets.values()].reduce((a, b) => a + b, 0)) : null,
   };
 }
 

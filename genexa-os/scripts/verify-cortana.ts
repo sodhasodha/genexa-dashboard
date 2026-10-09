@@ -5,7 +5,7 @@
  * The Cortana side is summed here from the raw JSON, not through the app's mapper.
  */
 import { createClient } from "@supabase/supabase-js";
-import { addDays, etRange, etToday } from "../lib/time";
+import { accountDayRange, addDays, etToday } from "../lib/time";
 
 const env = (name: string) => {
   const v = process.env[name];
@@ -17,7 +17,7 @@ type Raw = { dimension: string | null; customerId?: string | null; spent?: numbe
 async function main() {
   const db = createClient(env("NEXT_PUBLIC_SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false } });
   const date = addDays(etToday(), -1);
-  const range = etRange(date, date);
+  const range = accountDayRange(date, date);
   const { data: clients } = await db.from("clients").select("id, name, cortana_business_id").not("cortana_business_id", "is", null).neq("stage", "churned").order("name");
   const { data: scopes } = await db.from("client_campaign_scope").select("client_id, campaign_name_contains, verified");
   const { data: stored } = await db.from("ad_metrics_daily").select("client_id, spend, synced_at").eq("date", date);
