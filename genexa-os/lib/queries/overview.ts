@@ -37,7 +37,7 @@ export async function getOverview(period: Period) {
     supabase.rpc("overview_period", { p_from: period.prevFrom, p_to: period.prevTo }).single(),
     supabase.from("source_freshness").select("source, freshness"),
     supabase.from("clients").select("id, stage").is("deleted_at", null),
-    supabase.from("scoring_config").select("key, value").in("key", ["rev_share_rate", "mrr_target"]),
+    supabase.from("scoring_config").select("key, value").in("key", ["mrr_target"]),
     supabase.from("ad_metrics_daily").select("date").order("date").limit(1).maybeSingle(),
   ]);
   const firstEvent = await supabase.from("cortana_events").select("occurred_at").order("occurred_at").limit(1).maybeSingle();
@@ -53,7 +53,12 @@ export async function getOverview(period: Period) {
   const p = Object.fromEntries(Object.entries(prev.data as Record<string, unknown>).map(([k, v]) => [k, n(v)])) as Totals;
   const freshness = new Map((fresh.data ?? []).map((f) => [f.source as string, f.freshness as string]));
   const cfg = new Map((config.data ?? []).map((x) => [x.key as string, Number(x.value)]));
-  const revShare = cfg.get("rev_share_rate") ?? null;
+  const owed = async (from: string, to: string) => {
+    const r = await supabase.rpc("rev_share_period", { p_from: from, p_to: to });
+    if (r.error) throw new Error(`rev_share_period: ${r.error.message}`);
+    return ((r.data ?? []) as { owed: number }[]).reduce((a, x) => a + Number(x.owed), 0);
+  };
+  const [owedNow, owedThen] = await Promise.all([owed(period.from, period.to), owed(period.prevFrom, period.prevTo)]);
 
   /** A number is only shown when every source behind it has synced. */
   const stateOf = (sources: string[]): { state: TileState; note: string | null } => {
@@ -98,9 +103,9 @@ export async function getOverview(period: Period) {
       sub: recurringThen !== null ? `${usd(recurringThen)} at end of last month` : `Target ${usd(cfg.get("mrr_target") ?? 0)}`,
     },
     tile("clinic_revenue", "Clinic revenue generated", "money", ["cortana"], c.clinic_revenue, ev(p.clinic_revenue), "good"),
+    // Each clinic's own terms: a share of revenue, a fixed amount per new paying patient, or nothing.
     tile("rev_share", "Rev share owed", "money", ["cortana"],
-      c.clinic_revenue === null || revShare === null ? null : c.clinic_revenue * revShare,
-      ev(p.clinic_revenue) === null || revShare === null ? null : (p.clinic_revenue as number) * revShare, "good"),
+      c.clinic_revenue === null ? null : owedNow, ev(p.clinic_revenue) === null ? null : owedThen, "good"),
   ];
   const profit: Tile[] = [
     tile("expenses", "Expenses", "money", ["mercury"], c.expenses, p.expenses, "bad"),

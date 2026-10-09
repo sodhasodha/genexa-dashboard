@@ -114,6 +114,15 @@ export default async function ClientPage({ params, searchParams }: PageProps<"/c
             <label className={label}>Last reply (client)<input name="last_reply_client" type="date" defaultValue={c.last_reply_client ?? ""} className={input} /></label>
             <label className={label}>Guarantee target ($)<input name="guarantee_target_amount" type="number" min="0" step="0.01" defaultValue={c.guarantee_target_amount ?? ""} className={input} /></label>
             <label className={label}>Guarantee deadline<input name="guarantee_deadline" type="date" defaultValue={c.guarantee_deadline ?? ""} className={input} /></label>
+            <label className={label}>Rev share
+              <select name="rev_share_type" defaultValue={c.rev_share_type} className={input}>
+                <option value="percent">% of clinic revenue</option>
+                <option value="per_patient">$ per new paying patient</option>
+                <option value="none">None</option>
+              </select>
+            </label>
+            <label className={label}>Rev share % (blank = standard)<input name="rev_share_percent" type="number" min="0" max="100" step="0.01" defaultValue={c.rev_share_rate !== null ? c.rev_share_rate * 100 : ""} className={input} /></label>
+            <label className={label}>Rev share $ per patient<input name="rev_share_per_patient" type="number" min="0" step="0.01" defaultValue={c.rev_share_per_patient ?? ""} className={input} /></label>
             <label className={`${label} sm:col-span-2 lg:col-span-4`}>Guarantee<textarea name="guarantee_text" rows={2} defaultValue={c.guarantee_text ?? ""} className={input} /></label>
             <label className={`${label} sm:col-span-2 lg:col-span-4`}>Next action<textarea name="next_action" rows={2} defaultValue={c.next_action ?? ""} className={input} /></label>
             <div className="sm:col-span-2 lg:col-span-4">

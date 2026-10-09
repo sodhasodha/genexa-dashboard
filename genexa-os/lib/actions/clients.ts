@@ -37,6 +37,10 @@ const ClientEdit = z.object({
   last_contact_us: DateStr.nullable(),
   last_reply_client: DateStr.nullable(),
   cortana_business_id: z.string().max(200).nullable(),
+  rev_share_type: z.enum(["percent", "per_patient", "none"]),
+  // Entered as a percentage (5 = 5%); blank = the standard rate.
+  rev_share_percent: z.coerce.number().min(0).max(100).nullable(),
+  rev_share_per_patient: z.coerce.number().min(0).max(1_000_000).nullable(),
 });
 
 /** Owner edits the client record. */
@@ -46,7 +50,9 @@ export async function updateClient(formData: FormData) {
   if (me.role !== "owner") back(id, "error=owner_only");
   const parsed = ClientEdit.safeParse(Object.fromEntries(Object.keys(ClientEdit.shape).map((k) => [k, blank(formData.get(k))])));
   if (!parsed.success) back(id, "error=invalid");
-  const { last_contact_us, last_reply_client, ...fields } = parsed.data!;
+  const { last_contact_us, last_reply_client, rev_share_percent, ...rest } = parsed.data!;
+  if (rest.rev_share_type === "per_patient" && rest.rev_share_per_patient === null) back(id, "error=invalid");
+  const fields = { ...rest, rev_share_rate: rev_share_percent === null ? null : rev_share_percent / 100 };
 
   const supabase = await createClient();
   const { data: current } = await supabase.from("clients").select("last_contact_us, last_reply_client").eq("id", id).maybeSingle();

@@ -69,6 +69,7 @@ export type ClientListRow = {
   days_live: number | null; monthly_fee: number | null;
   renewal_date: string | null; renewal_status: string | null; renewal_amount: number | null;
   guarantee_text: string | null; guarantee_target_amount: number | null; guarantee_deadline: string | null;
+  rev_share_type: string; rev_share_rate: number | null; rev_share_per_patient: number | null;
   ads_state: AdsState;
   spend: number | null; leads: number | null; booked: number | null; confirmed: number | null; shows: number | null;
   closes: number | null; revenue: number | null; cpl: number | null; cost_per_booked: number | null;
@@ -136,6 +137,7 @@ export type ClientRecord = {
   stage: string; pod: string | null; billing_cycle: string | null;
   cycle_fee: number | null; monthly_fee: number | null; launch_date: string | null;
   guarantee_text: string | null; guarantee_target_amount: number | null; guarantee_deadline: string | null;
+  rev_share_type: string; rev_share_rate: number | null; rev_share_per_patient: number | null;
   next_action: string | null;
   /** ET days of the stored timestamps. */
   last_contact_us: string | null; last_reply_client: string | null;
@@ -169,7 +171,7 @@ export async function getClientProfile(id: string): Promise<ClientProfile | null
   const supabase = await createClient();
   const { data: c, error } = await supabase
     .from("clients")
-    .select("id, name, contact_name, cortana_business_id, stage, pod, billing_cycle, cycle_fee, monthly_fee, launch_date, guarantee_text, guarantee_target_amount, guarantee_deadline, next_action, last_contact_us, last_reply_client")
+    .select("id, name, contact_name, cortana_business_id, stage, pod, billing_cycle, cycle_fee, monthly_fee, launch_date, guarantee_text, guarantee_target_amount, guarantee_deadline, rev_share_type, rev_share_rate, rev_share_per_patient, next_action, last_contact_us, last_reply_client")
     .eq("id", id).is("deleted_at", null).maybeSingle();
   if (error) throw new Error(`clients: ${error.message}`);
   if (!c) return null;
@@ -202,7 +204,7 @@ export async function getClientProfile(id: string): Promise<ClientProfile | null
   return {
     client: {
       ...c,
-      cycle_fee: n(c.cycle_fee), monthly_fee: n(c.monthly_fee), guarantee_target_amount: n(c.guarantee_target_amount),
+      cycle_fee: n(c.cycle_fee), monthly_fee: n(c.monthly_fee), guarantee_target_amount: n(c.guarantee_target_amount), rev_share_rate: n(c.rev_share_rate), rev_share_per_patient: n(c.rev_share_per_patient),
       last_contact_us: day(c.last_contact_us), last_reply_client: day(c.last_reply_client),
     },
     health: health.data,

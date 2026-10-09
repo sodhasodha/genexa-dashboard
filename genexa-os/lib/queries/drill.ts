@@ -57,10 +57,21 @@ export async function getDrill(metric: string, period: Period): Promise<DrillTab
     case "leads":
     case "booked":
     case "shows":
+    case "rev_share": {
+      const { data, error } = await db.rpc("rev_share_period", { p_from: period.from, p_to: period.to });
+      if (error) throw new Error(error.message);
+      const rows = ((data ?? []) as { name: string; terms: string; revenue: number; new_patients: number; owed: number }[]).sort((a, b) => Number(b.owed) - Number(a.owed));
+      return {
+        title: `Rev share owed · ${range(period)}`,
+        note: "Each clinic's own terms. A new paying patient is one whose first purchase at that clinic falls in the period. Revenue is what Cortana records; test contacts are left out.",
+        columns: ["Clinic", "Terms", "Clinic revenue", "New paying patients", "Owed"],
+        rows: rows.map((r) => [r.name, r.terms, fmt(Number(r.revenue), "money"), fmt(Number(r.new_patients), "count"), fmt(Number(r.owed), "money")]),
+        total: `${fmt(rows.reduce((a, r) => a + Number(r.owed), 0), "money")} owed`,
+      };
+    }
     case "show_rate":
     case "closes":
-    case "clinic_revenue":
-    case "rev_share": {
+    case "clinic_revenue": {
       const spec: Record<string, { title: string; events: string[] }> = {
         leads: { title: "Leads", events: ["lead"] },
         booked: { title: "Booked", events: ["unconfirmed_appointment_booked"] },
@@ -68,7 +79,6 @@ export async function getDrill(metric: string, period: Period): Promise<DrillTab
         show_rate: { title: "Shows and no-shows", events: ["appointment_shown", "appointment_no_show"] },
         closes: { title: "Closes", events: ["purchase"] },
         clinic_revenue: { title: "Clinic revenue", events: ["purchase"] },
-        rev_share: { title: "Clinic revenue (rev share is 5% of this)", events: ["purchase"] },
       };
       const { title, events } = spec[metric];
       const [{ data, error }, { data: unverified }] = await Promise.all([
