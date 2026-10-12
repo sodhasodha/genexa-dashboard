@@ -48,11 +48,11 @@ export async function syncCortana(opts: {
     if (opts.onlyClientIds?.length) q = q.in("id", opts.onlyClientIds);
     const { data: clients, error: clientsError } = await q.order("name");
     if (clientsError) throw new Error(`clients: ${clientsError.message}`);
-    const { data: scopes, error: scopeError } = await db.from("client_campaign_scope").select("client_id, campaign_name_contains, ad_account_ids");
+    const { data: scopes, error: scopeError } = await db.from("client_campaign_scope").select("client_id, campaign_name_contains, campaign_name_excludes, ad_account_ids");
     if (scopeError) throw new Error(`client_campaign_scope: ${scopeError.message}`);
     const scopeOf = (clientId: string): CampaignScope | null => {
       const s = scopes?.find((x) => x.client_id === clientId);
-      return s ? { campaign_name_contains: s.campaign_name_contains, ad_account_ids: s.ad_account_ids ?? [] } : null;
+      return s ? { campaign_name_contains: s.campaign_name_contains, campaign_name_excludes: s.campaign_name_excludes, ad_account_ids: s.ad_account_ids ?? [] } : null;
     };
 
     for (const client of (clients ?? []) as ClientRow[]) {

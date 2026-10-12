@@ -53,7 +53,7 @@ export function trackingTotals(response: z.infer<typeof AttributionResponse>): {
 /** Cortana's event names, confirmed against 30 days of real data (see PLAN.md section 8). */
 export const EVENT = { lead: "lead", booked: "unconfirmed_appointment_booked", purchase: "purchase" } as const;
 
-export type CampaignScope = { campaign_name_contains: string | null; ad_account_ids: string[] };
+export type CampaignScope = { campaign_name_contains: string | null; campaign_name_excludes?: string | null; ad_account_ids: string[] };
 
 export const isPaidMetaRow = (row: AttributionRow) => !!row.customerId && !!row.platformEntityId;
 
@@ -63,6 +63,8 @@ export function campaignInScope(row: AttributionRow, scope: CampaignScope | null
   if (!scope) return true;
   if (scope.ad_account_ids.length > 0 && !scope.ad_account_ids.includes(row.customerId as string)) return false;
   if (scope.campaign_name_contains && !(row.dimension ?? "").toLowerCase().includes(scope.campaign_name_contains.toLowerCase())) return false;
+  // A clinic sharing its ad account: the other clinic's campaigns are left out by name.
+  if (scope.campaign_name_excludes && (row.dimension ?? "").toLowerCase().includes(scope.campaign_name_excludes.toLowerCase())) return false;
   return true;
 }
 
@@ -71,7 +73,7 @@ export function campaignInScope(row: AttributionRow, scope: CampaignScope | null
  * applied to them. For those clinics ad-level data is not stored at all
  * rather than stored wrong.
  */
-export const adLevelAvailable = (scope: CampaignScope | null) => !scope?.campaign_name_contains;
+export const adLevelAvailable = (scope: CampaignScope | null) => !scope?.campaign_name_contains && !scope?.campaign_name_excludes;
 
 export function adInScope(row: AttributionRow, scope: CampaignScope | null): boolean {
   if (!isPaidMetaRow(row)) return false;

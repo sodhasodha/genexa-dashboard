@@ -11,6 +11,13 @@ export type McpHttpDeps = {
   data: () => McpData;
   /** Today's date in ET, YYYY-MM-DD. */
   today: () => string;
+  /** Read tools only: the write tools are neither listed nor callable. */
+  readOnly?: boolean;
+  /**
+   * The secret taken from the URL path instead of the Authorization header, for
+   * clients that cannot send a header (claude.ai custom connectors). Read-only only.
+   */
+  pathToken?: string;
 };
 
 const JSON_HEADERS = { "content-type": "application/json", "cache-control": "no-store" };
@@ -29,7 +36,9 @@ export function authorised(header: string | null, token: string | undefined): bo
 }
 
 export async function handleMcpPost(request: Request, deps: McpHttpDeps): Promise<Response> {
-  if (!authorised(request.headers.get("authorization"), deps.token)) {
+  const header = deps.pathToken !== undefined ? `Bearer ${deps.pathToken}` : request.headers.get("authorization");
+  // A secret in the URL is only ever accepted for the read-only connection.
+  if ((deps.pathToken !== undefined && !deps.readOnly) || !authorised(header, deps.token)) {
     return json({ error: "unauthorised" }, 401, { "www-authenticate": "Bearer" });
   }
   let body: unknown;
@@ -38,7 +47,7 @@ export async function handleMcpPost(request: Request, deps: McpHttpDeps): Promis
   } catch {
     return json(rpcError(null, RPC.PARSE_ERROR, "Parse error: the body is not valid JSON"), 400);
   }
-  const response = await handleBody(body, { data: deps.data(), today: deps.today() });
+  const response = await handleBody(body, { data: deps.data(), today: deps.today(), readOnly: deps.readOnly === true });
   // Only notifications (or responses): accepted, nothing to say.
   if (response === null) return new Response(null, { status: 202 });
   return json(response);

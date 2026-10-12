@@ -9,6 +9,8 @@ Lets Claude read the agency's numbers and write to its working lists. 14 read to
 - **Transport:** MCP streamable HTTP. `POST` JSON-RPC 2.0, one message or a batch array; the reply is a single `application/json` body (no SSE). `GET` returns 405. A notification (e.g. `notifications/initialized`) returns 202 with no body.
 - **Methods:** `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`. Protocol versions 2025-06-18, 2025-03-26, 2024-11-05.
 
+**Read-only connection (claude.ai):** `https://<APP_URL>/api/mcp/ro/<MCP_READONLY_TOKEN>`. For clients that cannot send a header, the secret is the last part of the URL. Only the 14 read tools exist on it: write tools are not listed and cannot be called. In claude.ai: Settings → Connectors → Add custom connector → paste the URL (no OAuth). To revoke it, change `MCP_READONLY_TOKEN` in Vercel and redeploy.
+
 Claude Code:
 
 ```bash

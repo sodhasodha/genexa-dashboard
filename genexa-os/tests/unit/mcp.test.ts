@@ -367,3 +367,52 @@ describe("supabaseData", () => {
     await expect(data.call("mcp_add_idea", { p_text: "", p_source: "x" })).rejects.toThrow(McpDbError);
   });
 });
+
+describe("the read-only connection (secret in the URL)", () => {
+  const RO = "read-only-secret-abcdefghijklmnop";
+  const ro = async (body: unknown, pathToken = RO, extra: { data?: McpData; header?: string } = {}) => {
+    const { data, calls } = fakeData({ mcp_get_overview: { ok: true } });
+    const res = await handleMcpPost(
+      new Request("https://os.example.test/api/mcp/ro/x", { method: "POST", headers: { "content-type": "application/json", ...(extra.header ? { authorization: extra.header } : {}) }, body: JSON.stringify(body) }),
+      { token: RO, pathToken, readOnly: true, data: () => extra.data ?? data, today: () => TODAY },
+    );
+    return { res, calls, json: res.status === 200 ? ((await res.json()) as { result?: unknown; error?: { code: number; message: string } }) : null };
+  };
+
+  it("lists only the read tools", async () => {
+    const { json } = await ro({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const names = (json!.result as { tools: { name: string; annotations: { readOnlyHint: boolean } }[] }).tools;
+    expect(names.length).toBe(TOOLS.filter((t) => t.readOnly).length);
+    expect(names.every((t) => t.annotations.readOnlyHint)).toBe(true);
+    expect(names.map((t) => t.name)).not.toContain("add_task");
+  });
+
+  it("refuses every write tool as if it did not exist, and never reaches the database", async () => {
+    for (const t of TOOLS.filter((x) => !x.readOnly)) {
+      const { json, calls } = await ro({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: t.name, arguments: {} } });
+      expect(json!.error?.code, t.name).toBe(RPC.INVALID_PARAMS);
+      expect(json!.error?.message).toBe(`Unknown tool: ${t.name}`);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it("still answers a read tool", async () => {
+    const { json, calls } = await ro({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "get_overview", arguments: { period: "week" } } });
+    expect(json!.error).toBeUndefined();
+    expect(calls.length).toBe(1);
+  });
+
+  it("a wrong secret is refused, and the write token in a header does not open it", async () => {
+    expect((await ro({ jsonrpc: "2.0", id: 4, method: "tools/list" }, "wrong-secret-abcdefghijklmnopqrs")).res.status).toBe(401);
+    expect((await ro({ jsonrpc: "2.0", id: 5, method: "tools/list" }, "x", { header: `Bearer ${RO}` })).res.status).toBe(401);
+  });
+
+  it("a secret in the URL can never open a connection that is not read-only", async () => {
+    const { data } = fakeData();
+    const res = await handleMcpPost(
+      new Request("https://os.example.test/api/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 6, method: "tools/list" }) }),
+      { token: TOKEN, pathToken: TOKEN, data: () => data, today: () => TODAY },
+    );
+    expect(res.status).toBe(401);
+  });
+});

@@ -8,6 +8,8 @@ export type ToolContext = {
   data: McpData;
   /** Today's date in ET, YYYY-MM-DD. */
   today: string;
+  /** The read-only connection: write tools do not exist for it. */
+  readOnly?: boolean;
 };
 
 type JsonSchema = {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { accountDayRange, etRange } from "@/lib/time";
-import { accountTotals, type AttributionRow } from "@/lib/integrations/cortana/mapper";
+import { accountTotals, adLevelAvailable, type AttributionRow } from "@/lib/integrations/cortana/mapper";
 
 const row = (o: Partial<AttributionRow> & Record<string, unknown>) =>
   ({ dimension: "Campaign", customerId: "act_1", platformEntityId: "c1", spent: 0, impressions: 0, clicks: 0, reach: 0, frequency: 0, ctr: 0, metaPlatformLeads: 0, ...o }) as AttributionRow;
@@ -24,5 +24,18 @@ describe("ad account days", () => {
     expect(t.daily_budget).toBe(150);
     expect(t.spend).toBe(49.76);
     expect(accountTotals([row({ spent: 10 })], null).daily_budget).toBeNull();
+  });
+
+  it("splits one ad account between two clinics by campaign name", () => {
+    const rows = [
+      row({ platformEntityId: "c1", dimension: "11 July Launch - $1499 Ads - IPC", spent: 100 }),
+      row({ platformEntityId: "c2", dimension: "Genexa | Cleveland | Img & UGC | 3rd OCT", spent: 40 }),
+      row({ platformEntityId: "c3", dimension: "Genexa | CLEVELAND | 11 Oct Launch", spent: 10 }),
+    ];
+    const cleveland = accountTotals(rows, { campaign_name_contains: "Cleveland", ad_account_ids: [] });
+    const knoxville = accountTotals(rows, { campaign_name_contains: null, campaign_name_excludes: "Cleveland", ad_account_ids: [] });
+    expect([cleveland.spend, knoxville.spend]).toEqual([50, 100]);
+    expect(cleveland.spend + knoxville.spend).toBe(accountTotals(rows, null).spend);
+    expect(adLevelAvailable({ campaign_name_contains: null, campaign_name_excludes: "Cleveland", ad_account_ids: [] })).toBe(false);
   });
 });

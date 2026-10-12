@@ -29,8 +29,8 @@ const toolResult = (value: Record<string, unknown>, isError = false): ToolResult
   ...(isError ? { isError: true as const } : {}),
 });
 
-export function listTools() {
-  return TOOLS.map((t) => ({
+export function listTools(readOnly = false) {
+  return TOOLS.filter((t) => !readOnly || t.readOnly).map((t) => ({
     name: t.name,
     description: t.description,
     inputSchema: t.inputSchema,
@@ -44,7 +44,8 @@ class InvalidParams extends Error {}
 export async function callTool(params: unknown, ctx: ToolContext): Promise<ToolResult> {
   if (!isObject(params) || typeof params.name !== "string") throw new InvalidParams("tools/call needs params.name (the tool to call)");
   const tool = findTool(params.name);
-  if (!tool) throw new InvalidParams(`Unknown tool: ${params.name}`);
+  // On the read-only connection a write tool is not there at all, whatever the caller asks for.
+  if (!tool || (ctx.readOnly && !tool.readOnly)) throw new InvalidParams(`Unknown tool: ${params.name}`);
   const given = params.arguments ?? {};
   if (!isObject(given)) throw new InvalidParams(`Invalid arguments for ${tool.name}: arguments must be an object`);
   const parsed = tool.args.safeParse(given);
@@ -74,12 +75,12 @@ export async function handleMessage(message: unknown, ctx: ToolContext): Promise
       case "initialize": {
         const asked = isObject(params) ? params.protocolVersion : undefined;
         const version = (SUPPORTED_PROTOCOL_VERSIONS as readonly unknown[]).includes(asked) ? (asked as string) : DEFAULT_PROTOCOL_VERSION;
-        return ok(id, { protocolVersion: version, capabilities: { tools: {} }, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS });
+        return ok(id, { protocolVersion: version, capabilities: { tools: {} }, serverInfo: SERVER_INFO, instructions: ctx.readOnly ? `${INSTRUCTIONS} This connection is read-only: it can look things up but cannot add or change anything.` : INSTRUCTIONS });
       }
       case "ping":
         return ok(id, {});
       case "tools/list":
-        return ok(id, { tools: listTools() });
+        return ok(id, { tools: listTools(ctx.readOnly === true) });
       case "tools/call":
         return ok(id, await callTool(params, ctx));
       default:
