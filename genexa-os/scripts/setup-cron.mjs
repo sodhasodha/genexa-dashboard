@@ -25,6 +25,7 @@ const INTERVAL = [
   ["genexa-cortana-events", "35 * * * *", "cortana-events", 290000],
   ["genexa-whop-sync", "20 * * * *", "whop-sync", 120000],
   ["genexa-ghl-appointments", "50 * * * *", "ghl-appointments", 290000],
+  ["genexa-cortana-verify", "15 */3 * * *", "cortana-verify", 290000], // every 3h: our copy checked against Cortana, longest-unchecked clinics first
   ["genexa-ghl-forms", "40 * * * *", "ghl-forms", 120000],
   ["genexa-fathom-sync", "45 * * * *", "fathom-sync", 120000],
   ["genexa-attendance", "*/5 * * * *", "attendance", 60000],

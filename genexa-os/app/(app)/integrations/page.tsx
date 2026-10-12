@@ -14,6 +14,8 @@ export default async function IntegrationsPage() {
   const { data: runs } = me.role === "owner"
     ? await supabase.from("job_runs").select("job, started_at, finished_at, ok, rows_processed, error").order("started_at", { ascending: false }).limit(25)
     : { data: null };
+  const { data: checks } = await supabase.from("cortana_check_latest")
+    .select("name, checked_at, matched, error, spend_ours, spend_cortana, events_cortana, added_7d, changed_7d, removed_7d, days_reread_7d").order("name");
   const at = (ts: string | null) => (ts ? new Date(ts).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) + " ET" : null);
   return (
     <div className="flex flex-col gap-5 p-4">
@@ -30,6 +32,20 @@ export default async function IntegrationsPage() {
           s.rows_processed === null ? null : String(s.rows_processed), s.error ?? "—",
         ])}
       />
+      <section>
+        <h2 className="mb-1 text-sm font-semibold">Checked against Cortana</h2>
+        <p className="mb-2 text-xs text-muted">Cortana is the record of each clinic&apos;s results. Our copy is compared with it through the day and corrected: events added, changed or removed, and ad days re-read. &quot;Matched&quot; means nothing needed correcting at the last check.</p>
+        <DataTable
+          columns={["Clinic", "Last check", "Result", "Ad spend, last 30 days (ours / Cortana)", "Events in Cortana", "Corrected in the last 7 days"]}
+          rows={(checks ?? []).map((k) => [
+            k.name, at(k.checked_at), k.error ? `problem: ${k.error}` : k.matched ? "matched" : "corrected",
+            k.spend_cortana === null ? "—" : `$${Number(k.spend_ours).toFixed(2)} / $${Number(k.spend_cortana).toFixed(2)}`,
+            k.events_cortana === null ? "—" : String(k.events_cortana),
+            k.added_7d + k.changed_7d + k.removed_7d + k.days_reread_7d === 0 ? "nothing"
+              : [k.added_7d ? `${k.added_7d} added` : "", k.changed_7d ? `${k.changed_7d} changed` : "", k.removed_7d ? `${k.removed_7d} removed` : "", k.days_reread_7d ? `${k.days_reread_7d} ad days re-read` : ""].filter(Boolean).join(" · "),
+          ])}
+        />
+      </section>
       {runs ? (
         <section>
           <h2 className="mb-2 text-sm font-semibold">Recent job runs</h2>

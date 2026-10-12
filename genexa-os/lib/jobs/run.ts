@@ -19,6 +19,7 @@ import { syncWhop } from "@/lib/integrations/whop/sync";
 import { addDays, etToday } from "@/lib/time";
 import { runExceptionsEngine } from "@/lib/exceptions/engine";
 import { recheckZeroSpend } from "@/lib/integrations/cortana/sync";
+import { verifyCortana } from "@/lib/integrations/cortana/verify";
 
 export type JobResult = { ok: boolean; summary: Record<string, unknown> };
 
@@ -55,6 +56,11 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
   // GHL consult calendars -> appointments, then outcomes copied across from Cortana.
   "ghl-appointments": async () => {
     const r = await syncGhlAppointments({ db: createAdminClient(), keys: JSON.parse(requireEnv("GHL_API_KEYS_JSON")) as GhlKeys });
+    return { ok: r.ok, summary: r };
+  },
+  // Our copy of each clinic's results is checked against Cortana and corrected (see cortana_checks).
+  "cortana-verify": async () => {
+    const r = await verifyCortana({ db: createAdminClient(), cortana: cortana() });
     return { ok: r.ok, summary: r };
   },
   // Genexa's own GHL sub-account: New Client Form -> client + launch, Onboarding Form -> "OB form complete".
