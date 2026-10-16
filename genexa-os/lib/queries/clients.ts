@@ -244,6 +244,7 @@ export type HealthRow = {
   ads_state: "ok" | "not_connected" | "unverified";
   spend: number | null; revenue: number | null; roas: number | null; cpl: number | null; cost_per_booked: number | null; cost_per_close: number | null;
   leads: number | null; booked: number | null; closes: number | null; window_from: string | null; window_to: string | null;
+  mtd_revenue: number | null;
 };
 
 /** One row per clinic for the daily check: health, its main bottleneck, and what the ads cost. Complete days only. */
@@ -251,7 +252,7 @@ export async function getHealthBoard(days: number): Promise<HealthRow[]> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("client_health_board", { p_days: days });
   if (error) throw new Error(`client_health_board: ${error.message}`);
-  const nums = ["spend", "revenue", "roas", "cpl", "cost_per_booked", "cost_per_close", "leads", "booked", "closes"] as const;
+  const nums = ["spend", "revenue", "roas", "cpl", "cost_per_booked", "cost_per_close", "leads", "booked", "closes", "mtd_revenue"] as const;
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({ ...r, ...Object.fromEntries(nums.map((k) => [k, n(r[k])])) }) as unknown as HealthRow);
 }
 

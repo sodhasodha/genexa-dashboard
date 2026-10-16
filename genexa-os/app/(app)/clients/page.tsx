@@ -44,6 +44,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
             <tr>
               <th className="px-3 py-2 font-normal">Clinic</th>
               <th className="px-3 py-2 font-normal">Main bottleneck</th>
+              <th className="px-3 py-2 text-right font-normal" title="This calendar month so far, from Cortana">MTD revenue</th>
               <th className="px-3 py-2 text-right font-normal">Ad spend</th>
               <th className="px-3 py-2 text-right font-normal">ROAS</th>
               <th className="px-3 py-2 text-right font-normal">CPL</th>
@@ -66,6 +67,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
                   </td>
                   {r.ads_state === "ok" ? (
                     <>
+                      <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums">{money(r.mtd_revenue)}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{money(r.spend)}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{r.roas === null ? <span className="text-stale">—</span> : `${r.roas.toFixed(2)}x`}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{money(r.cpl)}</td>
@@ -73,7 +75,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{money(r.cost_per_close)}</td>
                     </>
                   ) : (
-                    <td colSpan={5} className="px-3 py-2 text-center text-xs text-stale">{NOT_ADS[r.ads_state]}</td>
+                    <td colSpan={6} className="px-3 py-2 text-center text-xs text-stale">{NOT_ADS[r.ads_state]}</td>
                   )}
                 </tr>
               );
@@ -81,7 +83,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-muted">Hover a bottleneck for every reason. ROAS is clinic revenue over ad spend. A dash means nothing to divide by (no spend, leads, appointments or closes in the window).</p>
+      <p className="text-xs text-muted">Hover a bottleneck for every reason. MTD revenue is this calendar month so far; the other columns follow the window above. ROAS is clinic revenue over ad spend in the window. A dash means nothing to divide by (no spend, leads, appointments or closes in the window).</p>
 
       <DominationMap data={domination} canEdit={staff.role === "owner"} monthLabel="MTD" />
     </div>
