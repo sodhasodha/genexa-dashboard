@@ -2,7 +2,7 @@ import Link from "next/link";
 import { DominationMap } from "@/components/DominationMap";
 import { requireStaff } from "@/lib/auth/staff";
 import { formatValue } from "@/lib/format";
-import { HEALTH_WINDOWS, getHealthBoard } from "@/lib/queries/clients";
+import { HEALTH_WINDOWS, getCortanaFreshness, getHealthBoard } from "@/lib/queries/clients";
 import { getDominationData } from "@/lib/queries/domination";
 
 const TONE: Record<string, string> = { red: "bg-bad", amber: "bg-warn", green: "bg-good", grey: "bg-stale" };
@@ -13,7 +13,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
   const staff = await requireStaff();
   const params = await searchParams;
   const days = HEALTH_WINDOWS.find((w) => String(w.days) === params.days)?.days ?? 7;
-  const [rows, domination] = await Promise.all([getHealthBoard(days), getDominationData()]);
+  const [rows, domination, cortana] = await Promise.all([getHealthBoard(days), getDominationData(), getCortanaFreshness()]);
   const range = rows.find((r) => r.window_from && r.window_to);
   const money = (v: number | null) => formatValue(v, "money") ?? <span className="text-stale">—</span>;
   const counts = { red: rows.filter((r) => r.colour === "red").length, amber: rows.filter((r) => r.colour === "amber").length, green: rows.filter((r) => r.colour === "green").length };
@@ -25,7 +25,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
           <h1 className="text-lg font-semibold">Clients</h1>
           <p className="text-xs text-muted">
             {counts.red} red · {counts.amber} amber · {counts.green} green. Worst first. Numbers are {HEALTH_WINDOWS.find((w) => w.days === days)?.label.toLowerCase()}
-            {range ? ` (${range.window_from} to ${range.window_to})` : ""}, complete days, from Cortana. Full detail is on <Link href="/media-buying#clinic-detail" className="underline">Media Buying</Link>.
+            {range ? ` (${range.window_from} to ${range.window_to})` : ""}, complete days, from Cortana{cortana ? ` (last read ${cortana})` : ""}. Full detail is on <Link href="/media-buying#clinic-detail" className="underline">Media Buying</Link>.
           </p>
         </div>
         <div className="flex overflow-hidden rounded-md border border-line">

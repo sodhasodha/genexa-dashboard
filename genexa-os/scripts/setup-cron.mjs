@@ -21,8 +21,9 @@ const secret = need("CRON_SECRET");
 // UK and US daylight saving without anyone changing a schedule.
 // name, cron (UTC), job, timeout ms
 const INTERVAL = [
-  ["genexa-cortana-sync", "5 * * * *", "cortana-sync", 290000],
-  ["genexa-cortana-events", "35 * * * *", "cortana-events", 290000],
+  ["genexa-cortana-sync", "5 * * * *", "cortana-sync", 290000], // hourly: everything incl. per-ad rows and 7-day / all-time windows
+  ["genexa-cortana-spend", "20,35,50 * * * *", "cortana-spend", 290000], // and in between: account-level spend for today and yesterday
+  ["genexa-cortana-events", "*/10 * * * *", "cortana-events", 290000], // leads, bookings, shows, closes: every 10 minutes
   ["genexa-whop-sync", "20 * * * *", "whop-sync", 120000],
   ["genexa-ghl-appointments", "50 * * * *", "ghl-appointments", 290000],
   ["genexa-cortana-verify", "15 */3 * * *", "cortana-verify", 290000], // every 3h: our copy checked against Cortana, longest-unchecked clinics first

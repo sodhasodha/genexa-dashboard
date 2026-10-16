@@ -16,7 +16,7 @@ export type CortanaClient = {
   calls: () => number;
 };
 
-export function createCortanaClient(opts: { apiKey: string; baseUrl?: string; fetchImpl?: typeof fetch; minGapMs?: number }): CortanaClient {
+export function createCortanaClient(opts: { apiKey: string; baseUrl?: string; fetchImpl?: typeof fetch; minGapMs?: number; retryDelayMs?: number }): CortanaClient {
   const base = opts.baseUrl ?? DEFAULT_BASE;
   const doFetch = opts.fetchImpl ?? fetch;
   const gap = opts.minGapMs ?? MIN_GAP_MS;
@@ -30,11 +30,19 @@ export function createCortanaClient(opts: { apiKey: string; baseUrl?: string; fe
       if (wait > 0) await sleep(wait);
       nextAt = Date.now() + gap;
       calls++;
-      const res = await doFetch(`${base}/${path}`, {
-        headers: { Authorization: `Bearer ${opts.apiKey}`, "Content-Type": "application/json", "User-Agent": "genexa-os/1.0" },
-        cache: "no-store",
-      });
+      let res: Response;
+      try {
+        res = await doFetch(`${base}/${path}`, {
+          headers: { Authorization: `Bearer ${opts.apiKey}`, "Content-Type": "application/json", "User-Agent": "genexa-os/1.0" },
+          cache: "no-store",
+        });
+      } catch (err) {
+        // A dropped connection or timeout: try again shortly rather than lose the clinic for this run.
+        if (attempt < MAX_TRIES) { await sleep((opts.retryDelayMs ?? 2000) * attempt); continue; }
+        throw err;
+      }
       if (res.ok) return res.json();
+      if (res.status >= 500 && attempt < MAX_TRIES) { await sleep((opts.retryDelayMs ?? 2000) * attempt); continue; }
       if (res.status === 429 && attempt < MAX_TRIES) {
         await sleep((Number(res.headers.get("retry-after")) || 5 * attempt) * 1000);
         continue;

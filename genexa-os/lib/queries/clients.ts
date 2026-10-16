@@ -1,4 +1,5 @@
 import "server-only";
+import { formatAge } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { etToday } from "@/lib/time";
 
@@ -252,4 +253,11 @@ export async function getHealthBoard(days: number): Promise<HealthRow[]> {
   if (error) throw new Error(`client_health_board: ${error.message}`);
   const nums = ["spend", "revenue", "roas", "cpl", "cost_per_booked", "cost_per_close", "leads", "booked", "closes"] as const;
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({ ...r, ...Object.fromEntries(nums.map((k) => [k, n(r[k])])) }) as unknown as HealthRow);
+}
+
+/** "12 min ago": when Cortana was last read successfully. Null if never. */
+export async function getCortanaFreshness(): Promise<string | null> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("source_freshness").select("minutes_since_success").eq("source", "cortana").maybeSingle();
+  return data?.minutes_since_success === null || data?.minutes_since_success === undefined ? null : formatAge(Number(data.minutes_since_success));
 }

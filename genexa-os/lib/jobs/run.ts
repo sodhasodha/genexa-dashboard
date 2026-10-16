@@ -42,6 +42,11 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
     return { ok: r.ok, summary: r };
   },
   // Funnel and outcome events. Re-reads 14 days each time: clinics log shows and sales late.
+  // Every 15 minutes: today's and yesterday's spend, clicks and budget per clinic (account level only, about a minute).
+  "cortana-spend": async () => {
+    const r = await syncCortana({ db: createAdminClient(), cortana: cortana(), days: 2, accountOnly: true, windows: false });
+    return { ok: r.ok, summary: r };
+  },
   "cortana-events": async () => {
     const r = await syncCortanaEvents({ db: createAdminClient(), cortana: cortana(), from: addDays(etToday(), -14) });
     return { ok: r.ok, summary: r };
