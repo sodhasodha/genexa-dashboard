@@ -396,7 +396,8 @@ describe("weekly-client-report job", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].to).toBe("U_RYAN");
     expect(sent[0].text).toContain(`${clinics} client reports prepared for 2 Jun to 8 Jun.`);
-    expect(sent[0].text).toContain("Red clinics (1):");
+    // Other clinics made earlier in this file can be red too, depending on today's date.
+    expect(sent[0].text).toMatch(/Red clinics \(\d+\):/);
     expect(sent[0].text).toContain("• Red Clinic: Paid 20 days ago, not launched");
     expect(sent[0].text).toContain("https://os.test/clients");
 

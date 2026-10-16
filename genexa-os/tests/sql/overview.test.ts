@@ -142,6 +142,8 @@ describe("data_review_items", () => {
 
   it("counts missing EODs only from the go-live date", async () => {
     const n = async () => (await one<{ n: number }>(`select count(*)::int as n from data_review_items where kind = 'eod_issue'`)).n;
+    // Before go-live nothing counts (pinned to the future: the real go-live date is in the past now).
+    await db.query(`update app_settings set value = to_jsonb((app_today() + 3)::text) where key = 'go_live_date'`);
     expect(await n()).toBe(0);
     await db.query(`update app_settings set value = to_jsonb((app_today() - 3)::text) where key = 'go_live_date'`);
     expect(await n()).toBeGreaterThan(0);

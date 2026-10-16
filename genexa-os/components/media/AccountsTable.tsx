@@ -3,7 +3,8 @@ import type { AccountRow, Thresholds } from "@/lib/queries/media";
 import { NoData, Num, PILL, show, td, th } from "./Cells";
 
 const COLUMNS = [
-  "Spend", "CPL", "Cost per booked", "Booking rate", "Cost per show", "Cost per close", "Frequency (approx.)", "CTR", "CPM", "Days live", "SOP stage", "Verdict (7d)",
+  "Spend", "Leads", "Booked", "Shows", "Closes", "Revenue", "ROAS", "CPL", "Cost per booked", "Booking rate", "Cost per show", "Cost per close",
+  "Frequency (approx.)", "CTR", "CPM", "Days live", "SOP stage", "Verdict (7d)",
 ];
 const VERDICT: Record<string, string> = { green: "On target", amber: "Watch", red: "Over" };
 
@@ -58,6 +59,12 @@ export function AccountsTable({
                           </Link>
                         )}
                       </td>
+                      <Num value={r.leads} kind="count" />
+                      <Num value={r.booked} kind="count" />
+                      <Num value={r.shows} kind="count" />
+                      <Num value={r.closes} kind="count" />
+                      <Num value={r.revenue} kind="money" />
+                      <Num value={r.spend !== null && r.spend > 0 && r.revenue !== null ? r.revenue / r.spend : null} kind="times" />
                       <Num value={r.cpl} kind="money" />
                       <td className={`${td} text-right`}>
                         {r.cost_per_booked === null ? <NoData /> : (

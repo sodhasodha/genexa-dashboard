@@ -5,6 +5,7 @@ import { AdExceptions } from "@/components/media/AdExceptions";
 import { AdsTable } from "@/components/media/AdsTable";
 import { ClinicDaily } from "@/components/media/ClinicDaily";
 import { Scorecards } from "@/components/media/Scorecard";
+import { ClientDetail } from "@/components/clients/ClientDetail";
 import { requireStaff } from "@/lib/auth/staff";
 import { AD_PAGE_SIZE, WINDOWS, getAccounts, getAdExceptions, getAds, getClinicDaily, getNotConnected, getScorecards, getThresholds, parseWindow } from "@/lib/queries/media";
 import { etToday } from "@/lib/time";
@@ -100,6 +101,8 @@ export default async function MediaBuyingPage({ searchParams }: PageProps<"/medi
         scopedNames={clinic ? [] : accounts.filter((a) => a.campaign_scoped && !a.unverified).map((a) => a.name)}
         truncatedAt={null}
       />
+
+      <ClientDetail base={{ path: "/media-buying", keep: { window: windowKey } }} params={params} />
     </div>
   );
 }

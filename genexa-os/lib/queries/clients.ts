@@ -236,3 +236,20 @@ export async function getDashboardLogin(clientId: string): Promise<{ username: s
   const { data } = await supabase.from("client_dashboard_logins").select("username, password").eq("client_id", clientId).maybeSingle();
   return data ? { username: data.username as string, password: data.password as string } : null;
 }
+
+export const HEALTH_WINDOWS = [{ days: 7, label: "Last 7 days" }, { days: 30, label: "Last 30 days" }] as const;
+export type HealthRow = {
+  client_id: string; name: string; stage: string; colour: string | null; bottleneck: string | null; reasons: string | null;
+  ads_state: "ok" | "not_connected" | "unverified";
+  spend: number | null; revenue: number | null; roas: number | null; cpl: number | null; cost_per_booked: number | null; cost_per_close: number | null;
+  leads: number | null; booked: number | null; closes: number | null; window_from: string | null; window_to: string | null;
+};
+
+/** One row per clinic for the daily check: health, its main bottleneck, and what the ads cost. Complete days only. */
+export async function getHealthBoard(days: number): Promise<HealthRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("client_health_board", { p_days: days });
+  if (error) throw new Error(`client_health_board: ${error.message}`);
+  const nums = ["spend", "revenue", "roas", "cpl", "cost_per_booked", "cost_per_close", "leads", "booked", "closes"] as const;
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({ ...r, ...Object.fromEntries(nums.map((k) => [k, n(r[k])])) }) as unknown as HealthRow);
+}
