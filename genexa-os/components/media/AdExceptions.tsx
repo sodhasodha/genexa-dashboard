@@ -28,7 +28,7 @@ export function AdExceptions({ exceptions, meId, isOwner, slaNote }: { exception
             <tbody>
               {exceptions.map((e) => (
                 <tr key={e.id} id={`exception-${e.id}`} className="border-t border-line align-top">
-                  <td className="px-3 py-2">
+                  <td className="min-w-44 px-3 py-2">
                     <span className={`mr-2 inline-block size-2 rounded-full ${e.severity === "red" ? "bg-bad" : "bg-warn"}`} />
                     {e.reason}
                     {e.status === "snoozed" ? <span className="ml-2 rounded bg-stale-bg px-1.5 py-0.5 text-xs text-stale">snoozed</span> : null}
@@ -36,7 +36,7 @@ export function AdExceptions({ exceptions, meId, isOwner, slaNote }: { exception
                   <td className="whitespace-nowrap px-3 py-2 text-muted">{e.type_label}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-muted">{e.owner_name ?? "—"}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-muted" title={`First detected ${e.detected} ET`}>{e.age}</td>
-                  <td className="px-3 py-2">
+                  <td className="min-w-44 px-3 py-2">
                     {isOwner || e.owner_id === meId ? (
                       <form action={saveActionTaken} className="flex gap-1">
                         <input type="hidden" name="id" value={e.id} />

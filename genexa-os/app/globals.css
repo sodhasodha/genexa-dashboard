@@ -45,3 +45,46 @@ textarea {
 summary {
   cursor: pointer;
 }
+
+/* Phones ------------------------------------------------------------------ */
+/* Installed to the home screen the app draws under the status bar and home indicator.
+   The top inset is taken by the sticky nav bar (Sidebar), so it stays clear while scrolling. */
+body {
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+@media (max-width: 767px) {
+  /* iOS zooms the page when a focused field's text is under 16px. */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+  /* Wide tables: the first column stays put while the rest scrolls sideways. */
+  .overflow-x-auto table th:first-child:not([colspan]),
+  .overflow-x-auto table td:first-child:not([colspan]) {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    min-width: 8.5rem;
+    max-width: 46vw;
+    white-space: normal;
+    background: var(--color-panel);
+    box-shadow: 1px 0 0 var(--color-line);
+  }
+  /* Side-scrolling tables and strips: smooth, and don't drag the whole page sideways. */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+}
+
+/* Finger-sized controls on touch screens. */
+@media (pointer: coarse) {
+  button,
+  select,
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea {
+    min-height: 36px;
+  }
+}

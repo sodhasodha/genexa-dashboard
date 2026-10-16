@@ -12,9 +12,9 @@ export function PeopleCards({ people }: { people: PersonCard[] }) {
       <h2 className="mb-2 text-sm font-semibold">People</h2>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {people.map((p) => (
-          <div key={p.id} className="rounded-lg border border-line bg-panel p-3">
-            <div className="flex items-center gap-2">
-              <span className={`size-2.5 rounded-full ${p.colour ? DOT[p.colour] : "bg-stale"}`} title={p.colour ?? "no score yet"} />
+          <div key={p.id} className="min-w-0 rounded-lg border border-line bg-panel p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`size-2.5 shrink-0 rounded-full ${p.colour ? DOT[p.colour] : "bg-stale"}`} title={p.colour ?? "no score yet"} />
               <span className="font-medium">{p.name}</span>
               <span className="text-xs text-muted">{ROLE[p.role] ?? p.role}{p.pod ? ` · ${p.pod.replace("pod_", "Pod ")}` : ""}</span>
               {p.status === "at_risk" ? <span className="ml-auto rounded bg-bad-bg px-1.5 py-0.5 text-xs text-bad">at risk</span> : null}

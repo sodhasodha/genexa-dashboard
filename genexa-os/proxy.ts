@@ -35,5 +35,6 @@ export async function proxy(request: NextRequest) {
 export const config = {
   // Everything except static assets and /api (API routes authenticate themselves:
   // webhook secret, cron secret, MCP bearer token).
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  // The manifest and icons must load without a session (phones fetch them with no cookies).
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|manifest.webmanifest|icon|apple-icon|icons/|logo.png).*)"],
 };

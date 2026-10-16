@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { signIn } from "./actions";
 
 const ERRORS: Record<string, string> = {
@@ -15,7 +16,10 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   return (
     <main className="flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-sm rounded-lg border border-line bg-panel p-6">
-        <h1 className="text-lg font-semibold">Genexa OS</h1>
+        <h1 className="flex items-center gap-2.5 text-lg font-semibold">
+          <Image src="/logo.png" alt="" width={36} height={36} className="rounded-lg" priority />
+          Genexa Operations
+        </h1>
         <form action={signIn} className="mt-4 flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-sm">
             Email

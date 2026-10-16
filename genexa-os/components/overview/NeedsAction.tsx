@@ -207,7 +207,7 @@ export function NeedsAction({
               <tbody>
                 {bottlenecks.map((b) => (
                   <tr key={b.id} id={`exception-${b.id}`} className="border-t border-line align-top">
-                    <td className="px-4 py-2">
+                    <td className="min-w-44 px-4 py-2">
                       <span className={`mr-2 inline-block size-2 rounded-full ${b.severity === "red" ? "bg-bad" : "bg-warn"}`} />
                       {b.reason}
                       {b.action_taken ? <div className="pl-4 text-xs text-muted">Action taken: {b.action_taken}</div> : null}
@@ -216,7 +216,7 @@ export function NeedsAction({
                     <td className="px-2 py-2 text-muted">{b.owner_name ?? "—"}</td>
                     <td className="px-2 py-2 text-muted">{b.age}</td>
                     <td className="px-2 py-2 text-right tabular-nums">{b.money_at_risk ? formatValue(b.money_at_risk, "money") : "—"}</td>
-                    <td className="px-4 py-2">
+                    <td className="min-w-44 px-4 py-2">
                       <form className="flex gap-1">
                         <input type="hidden" name="id" value={b.id} />
                         <input name="note" required placeholder="Reason / note" aria-label="Reason or note" className="w-36 rounded border border-line px-1.5 py-1 text-xs" />
