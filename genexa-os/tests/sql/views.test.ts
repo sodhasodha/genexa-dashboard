@@ -189,7 +189,8 @@ describe("source_freshness", () => {
 describe("person_scores_weekly: EODs", () => {
   it("scores on EODs missed so far, per the thresholds in scoring_config", async () => {
     const lastWeek = `app_week_start(app_today()) - 7`;
-    // Before a go-live date is set nobody is scored.
+    // Before go-live nobody is scored (pinned to the future: the real go-live date is in the past now).
+    await db.query(`update app_settings set value = to_jsonb((app_today() + 3)::text) where key = 'go_live_date'`);
     const before = await db.query(`select 1 from person_scores_weekly where metric = 'eods' and week_start = ${lastWeek}`);
     expect(before.rows.length).toBe(0);
     await db.query(`update app_settings set value = to_jsonb((app_today() - 60)::text) where key = 'go_live_date'`);

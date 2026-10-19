@@ -56,7 +56,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
             {rows.map((r) => {
               const colour = r.colour ?? "grey";
               return (
-                <tr key={r.client_id} className="border-b border-line last:border-0">
+                <tr key={r.client_id} className={`border-b border-line last:border-0 ${r.ads_state === "ok" && r.roas_bad ? "bg-bad-bg" : ""}`}>
                   <td className="whitespace-nowrap px-3 py-2">
                     <span className={`mr-2 inline-block h-2.5 w-2.5 rounded-full align-middle ${TONE[colour] ?? TONE.grey}`} />
                     <Link href={`/clients/${r.client_id}`} className="font-medium underline decoration-line underline-offset-2 hover:decoration-ink">{r.name}</Link>
@@ -69,7 +69,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
                     <>
                       <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums">{money(r.mtd_revenue)}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{money(r.spend)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{r.roas === null ? <span className="text-stale">—</span> : `${r.roas.toFixed(2)}x`}</td>
+                      <td className={`whitespace-nowrap px-3 py-2 text-right tabular-nums ${r.roas_bad ? "font-bold text-bad" : ""}`}>{r.roas === null ? <span className="text-stale">—</span> : `${r.roas.toFixed(2)}x`}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{money(r.cpl)}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{money(r.cost_per_booked)}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{money(r.cost_per_close)}</td>
@@ -83,7 +83,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-muted">Hover a bottleneck for every reason. MTD revenue is this calendar month so far; the other columns follow the window above. ROAS is clinic revenue over ad spend in the window. A dash means nothing to divide by (no spend, leads, appointments or closes in the window).</p>
+      <p className="text-xs text-muted">Hover a bottleneck for every reason. MTD revenue is this calendar month so far; the other columns follow the window above. ROAS is clinic revenue over ad spend in the window; rows in red are under 3x. A dash means nothing to divide by (no spend, leads, appointments or closes in the window).</p>
 
       <DominationMap data={domination} canEdit={staff.role === "owner"} monthLabel="MTD" />
     </div>

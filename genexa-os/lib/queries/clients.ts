@@ -245,6 +245,8 @@ export type HealthRow = {
   spend: number | null; revenue: number | null; roas: number | null; cpl: number | null; cost_per_booked: number | null; cost_per_close: number | null;
   leads: number | null; booked: number | null; closes: number | null; window_from: string | null; window_to: string | null;
   mtd_revenue: number | null;
+  /** ROAS in the window under the red line (3x). */
+  roas_bad: boolean;
 };
 
 /** One row per clinic for the daily check: health, its main bottleneck, and what the ads cost. Complete days only. */
