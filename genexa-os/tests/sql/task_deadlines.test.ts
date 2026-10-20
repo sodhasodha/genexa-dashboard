@@ -400,9 +400,13 @@ describe("the request router gives the work a deadline", () => {
       p_channel: "C0GENERAL", p_ts: `${Math.floor(Date.now() / 1000) + ++n}.000100`, p_user: "U_CLIENT", p_sender_name: "Dana", p_text: text, p_thread_ts: null, p_mode: "live",
     });
     const c = { is_request: true, owner: "ads", title: text, due_at: null, urgency: "normal", confidence: 0.95, tech_type: null, ...over };
-    const result = await r<RouteResult>("route_client_request", {
+    await r<RouteResult>("route_client_request", {
       p_id: stored!.id, p_is_request: c.is_request, p_owner: c.owner, p_title: c.title, p_due_at: c.due_at, p_urgency: c.urgency, p_confidence: c.confidence, p_tech_type: c.tech_type,
     });
+    // Tech and media buyer requests wait for Aryan: he approves them here.
+    const waiting = (await one<{ status: string }>(`select status from client_requests where id = $1`, [stored!.id])).status === "pending_approval";
+    const result = waiting ? await r<RouteResult>("router_decide", { p_id: stored!.id, p_action: "approve" })
+      : await r<RouteResult>("router_result", { p_id: stored!.id });
     return { id: stored!.id, result };
   };
   const deadline = (id: string) => one<{ deadline_at: Date | null; source: string; can_change: boolean }>(`select deadline_at, source, can_change from client_request_deadlines where request_id = $1`, [id]);

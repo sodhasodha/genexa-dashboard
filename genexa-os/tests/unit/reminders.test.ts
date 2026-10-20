@@ -242,3 +242,29 @@ describe("prospect follow-up controls", () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe("client request approval in Slack", () => {
+  it("each request gets Approve / Deny buttons; the reply replaces them with what happened", async () => {
+    const { composeAll } = await import("@/lib/reminders/compose");
+    const { handleInteraction } = await import("@/lib/reminders/interaction");
+    const id = "11111111-1111-4111-8111-111111111111";
+    const [g] = composeAll([{
+      id: "n1", rule_key: "request_approval", staff_id: "s", staff_name: "Ryan", slack_user_id: "U1", email: null, channel: null,
+      record_type: "client_requests", record_id: id, window_key: "", template: "Client request to approve",
+      payload: { clinic: "Pivotal Health", title: "Block Wednesday", owner: "tech", urgency: "urgent", permalink: "https://slack.com/archives/C/p1", due_at: null },
+    }] as never, "https://ops.test");
+    const blocks = JSON.stringify(g.message.blocks);
+    expect(blocks).toContain('"action_id":"request_approve"');
+    expect(blocks).toContain('"action_id":"request_reject"');
+    expect(blocks).toContain(`client_requests:${id}`);
+    expect(g.message.text).toContain("Pivotal Health");
+    const rpc = (async () => ({ result: "approved", actor: "Ryan", routed_table: "tech_jobs", assignee: "Sameer", due_at: "2026-10-21T15:00:00Z", title: "Block Wednesday" })) as never;
+    const reply = await handleInteraction({ type: "block_actions", user: { id: "U1" }, actions: [{ action_id: "request_approve", value: `client_requests:${id}` }],
+      message: { blocks: g.message.blocks as never } }, { rpc });
+    expect(reply.replace_original).toBe(true);
+    expect(reply.text).toMatch(/^✅ Approved by Ryan · Tech job for Sameer, due /);
+    const refused = await handleInteraction({ type: "block_actions", user: { id: "U2" }, actions: [{ action_id: "request_reject", value: `client_requests:${id}` }] },
+      { rpc: (async () => ({ result: "refused", actor: "Sameer" })) as never });
+    expect(refused).toMatchObject({ replace_original: false, response_type: "ephemeral" });
+  });
+});

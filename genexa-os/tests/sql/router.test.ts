@@ -32,11 +32,19 @@ const store = (ts: string, text: string, opts: { channel?: string; mode?: "live"
 const answer = (over: Partial<Classification> = {}): Classification => ({
   is_request: true, owner: "tech", title: "Block Wednesday 21 October on the calendar", due_at: null, urgency: "normal", confidence: 0.95, tech_type: "other", ...over,
 });
-const route = (id: string, over: Partial<Classification> = {}) => {
+/**
+ * Route a message with a classification. A live request for tech or the media buyer now waits
+ * for Aryan; these tests are about what approval then creates, so Aryan approves it here
+ * (pass approve: false to see the waiting state). The approval step itself is tested below.
+ */
+const route = async (id: string, over: Partial<Classification> = {}, opts: { approve?: boolean } = {}) => {
   const c = answer(over);
-  return rpc<RouteResult>("route_client_request", {
+  const r = await rpc<RouteResult>("route_client_request", {
     p_id: id, p_is_request: c.is_request, p_owner: c.owner, p_title: c.title, p_due_at: c.due_at, p_urgency: c.urgency, p_confidence: c.confidence, p_tech_type: c.tech_type,
   });
+  if (opts.approve === false || r?.status !== "pending_approval") return r;
+  const mode = (await db.query<{ mode: string }>(`select mode from client_requests where id = $1`, [id])).rows[0]?.mode;
+  return mode === "live" ? rpc<RouteResult>("router_decide", { p_id: id, p_action: "approve" }) : r;
 };
 /** Store a live message and route it with the given classification. */
 const ask = async (ts: string, text: string, over: Partial<Classification> = {}, opts: Parameters<typeof store>[2] = {}) => {
@@ -382,7 +390,8 @@ describe("classifying (database side)", () => {
     // Once the hold has gone stale the job takes it.
     await db.query(`update client_requests set claimed_at = now() - interval '10 minutes' where id = $1`, [a.id]);
     const r2 = await processPending(deps(async () => { calls++; return answer(); }));
-    expect(r2).toMatchObject({ picked: 1, routed: 1 });
+    // A tech request now waits for Aryan's approval instead of becoming a job at once.
+    expect(r2).toMatchObject({ picked: 1, pending_approval: 1 });
     expect(calls).toBe(2);
     expect((await processPending(deps(async () => answer()))).picked).toBe(0);
   });
@@ -817,5 +826,94 @@ describe("who counts as ours in the client workspace", () => {
     expect(people).toEqual([{ slack_user_id: "UCLINIC", is_staff: false }, { slack_user_id: "UFREELANCE", is_staff: true }]);
     expect(await save("UNEW", "freelancer@example.test")).toBe(true);
     expect(await save("UGENEXA", "anyone@genexascaling.com")).toBe(true);
+  });
+});
+
+describe("Aryan approves requests for tech and the media buyer", () => {
+  const decide = (slackUser: string, action: "approve" | "reject", id: string) =>
+    rpc<{ result: string; actor?: string; routed_table?: string; assignee?: string; status?: string }>("slack_router_decide", { p_slack_user: slackUser, p_action: action, p_request: id });
+  beforeEach(async () => {
+    await db.query(`update staff set slack_user_id = 'U_RYAN' where id = $1`, [people.ryan]);
+    await db.query(`update staff set slack_user_id = 'U_SAMEER' where id = $1`, [people.sameer]);
+  });
+
+  it("a live request for tech waits, creates nothing, and DMs Aryan with the title only", async () => {
+    const { id, result } = await ask(tsAgo(0), "Please block Wednesday, patient Jane Smith 555-0100 cancelled", {}, {});
+    expect(result).toMatchObject({ status: "routed" }); // the helper approved it; check a fresh one without approval
+    const s = (await store(tsAgo(0, 5), "Please change the Friday hours"))!;
+    const waiting = await route(s.id, { title: "Change Friday opening hours" }, { approve: false });
+    expect(waiting).toMatchObject({ status: "pending_approval" });
+    expect(await count("tech_jobs", `title like 'Change Friday%'`)).toBe(0);
+    const dm = await one<{ staff_id: string; payload: Record<string, unknown> }>(`select staff_id, payload from notifications where rule_key = 'request_approval' and record_id = $1`, [s.id]);
+    expect(dm.staff_id).toBe(people.ryan);
+    expect(dm.payload).toMatchObject({ clinic: "Pivotal Health", title: "Change Friday opening hours", owner: "tech" });
+    expect(JSON.stringify(dm.payload)).not.toMatch(/Jane|555|Smith/);
+    void id;
+  });
+
+  it("Approve from Slack creates the job for Sameer; Deny creates nothing; a second click changes nothing; only Aryan may decide", async () => {
+    const a = (await store(tsAgo(0, 1), "Please add a new calendar"))!;
+    await route(a.id, { title: "Add a new calendar" }, { approve: false });
+    expect(await decide("U_UNKNOWN", "approve", a.id)).toMatchObject({ result: "unknown_user" });
+    expect(await decide("U_SAMEER", "approve", a.id)).toMatchObject({ result: "refused" });
+    const ok = await decide("U_RYAN", "approve", a.id);
+    expect(ok).toMatchObject({ result: "approved", actor: "Ryan", routed_table: "tech_jobs", assignee: "Sameer" });
+    expect(await count("tech_jobs", `title = 'Add a new calendar'`)).toBe(1);
+    expect(await decide("U_RYAN", "approve", a.id)).toMatchObject({ result: "already", status: "routed" });
+
+    const b = (await store(tsAgo(0, 2), "Can you change the ad copy", { channel: SCHEDULING }))!;
+    await route(b.id, { owner: "ads", tech_type: null, title: "Change the ad copy" }, { approve: false });
+    expect(await decide("U_RYAN", "reject", b.id)).toMatchObject({ result: "rejected" });
+    expect(await count("tasks", `title = 'Change the ad copy'`)).toBe(0);
+    expect((await request(b.id)).status).toBe("rejected");
+  });
+
+  it("the assignee is told in Slack once Aryan approves", async () => {
+    const a = (await store(tsAgo(0, 3), "Please fix the form"))!;
+    await route(a.id, { title: "Fix the intake form", tech_type: "fix" }, { approve: false });
+    await decide("U_RYAN", "approve", a.id);
+    await rpc("reminders_enqueue", { p_now: new Date().toISOString() });
+    const job = await one<{ id: string }>(`select id from tech_jobs where title = 'Fix the intake form'`);
+    expect(await count("notifications", `rule_key = 'tech_job_new' and record_id = '${job.id}' and staff_id = '${people.sameer}'`)).toBe(1);
+  });
+
+  it("requests for Aryan himself still open at once", async () => {
+    const a = (await store(tsAgo(0, 4), "Can we talk about the invoice"))!;
+    const r = await route(a.id, { owner: "ryan", tech_type: null, title: "Talk about the invoice" }, { approve: false });
+    expect(r).toMatchObject({ status: "routed", routed_table: "exceptions" });
+  });
+
+  it("a staff reply in the request's thread means it was handled: Approve then creates nothing", async () => {
+    const root = tsAgo(0, 6);
+    const a = (await store(root, "Please update the booking link"))!;
+    await route(a.id, { title: "Update the booking link" }, { approve: false });
+    // A top-level staff post elsewhere in the channel does not touch a waiting request.
+    await rpc("router_mark_handled", { p_channel: GENERAL, p_ts: tsAgo(0, 7), p_thread_ts: null, p_by: "Sameer" });
+    expect((await request(a.id)).status).toBe("pending_approval");
+    await rpc("router_mark_handled", { p_channel: GENERAL, p_ts: tsAgo(0, 8), p_thread_ts: root, p_by: "Sameer" });
+    expect((await request(a.id)).status).toBe("handled");
+    expect(await decide("U_RYAN", "approve", a.id)).toMatchObject({ result: "already", status: "handled" });
+    expect(await count("tech_jobs", `title = 'Update the booking link'`)).toBe(0);
+  });
+});
+
+describe("missed deadlines reach Aryan", () => {
+  const missed = () => db.query<{ record_type: string; window_key: string; payload: { who: string; title: string } }>(
+    `select record_type, window_key, payload from notifications where rule_key = 'missed_deadline' order by created_at, record_type`);
+  it("once per deadline, for tech and the media buyer only, never for done work", async () => {
+    await db.query(`insert into tasks (owner_id, title, category, source, due_at) values ($1, 'Late ads task', 'ads', 'ryan', now() - interval '10 minutes')`, [people.aditya]);
+    await db.query(`insert into tasks (owner_id, title, source, due_at) values ($1, 'Ryan own task', 'ryan', now() - interval '10 minutes')`, [people.ryan]);
+    await db.query(`insert into tasks (owner_id, title, category, source, due_at, status) values ($1, 'Done ads task', 'ads', 'ryan', now() - interval '10 minutes', 'done')`, [people.aditya]);
+    await db.query(`insert into tasks (owner_id, title, category, source, due_at) values ($1, 'Future ads task', 'ads', 'ryan', now() + interval '2 hours')`, [people.aditya]);
+    await rpc("missed_deadline_enqueue", { p_now: new Date().toISOString() });
+    await rpc("missed_deadline_enqueue", { p_now: new Date().toISOString() });
+    let rows = (await missed()).rows;
+    expect(rows.map((r) => [r.payload.who, r.payload.title])).toEqual([["Aditya", "Late ads task"]]);
+    // The deadline is moved and missed again: Aryan hears again.
+    await db.query(`update tasks set due_at = now() - interval '1 minute' where title = 'Late ads task'`);
+    await rpc("missed_deadline_enqueue", { p_now: new Date().toISOString() });
+    rows = (await missed()).rows;
+    expect(rows.length).toBe(2);
+    expect(rows.every((r) => r.payload.who === "Aditya")).toBe(true);
   });
 });

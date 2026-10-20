@@ -106,6 +106,19 @@ export function prospectActions(id: string): Block {
   };
 }
 
+/** Approve / Deny on a client request waiting for the owner. */
+export function requestActions(id: string): Block {
+  const value = `client_requests:${id}`;
+  return {
+    type: "actions",
+    block_id: `act:${value}`,
+    elements: [
+      { type: "button", action_id: "request_approve", style: "primary", text: { type: "plain_text", text: "Approve" }, value },
+      { type: "button", action_id: "request_reject", style: "danger", text: { type: "plain_text", text: "Deny" }, value },
+    ],
+  };
+}
+
 /** Builds a message line by line; lines with buttons become their own blocks. */
 class Draft {
   private blocks: Block[] = [];
@@ -137,7 +150,7 @@ class Draft {
     if (items.length > MAX_LINES) this.line(`…and ${items.length - MAX_LINES} more${moreUrl ? ` · ${link(moreUrl, "see all")}` : ""}`);
   }
   /** A line with its buttons under it: Done / Snooze 1h, or the two prospect controls. */
-  item(recordType: "tasks" | "exceptions" | "prospects", id: string, mrkdwn: string) {
+  item(recordType: "tasks" | "exceptions" | "prospects" | "client_requests", id: string, mrkdwn: string) {
     const key = `${recordType}:${id}`;
     if (this.seen.has(key) || this.actionable >= MAX_ACTIONABLE) {
       this.line(`• ${mrkdwn}`);
@@ -147,7 +160,7 @@ class Draft {
     this.actionable++;
     this.flush();
     this.blocks.push({ ...section(mrkdwn), block_id: `item:${key}` });
-    this.blocks.push(recordType === "prospects" ? prospectActions(id) : actions(recordType, id));
+    this.blocks.push(recordType === "prospects" ? prospectActions(id) : recordType === "client_requests" ? requestActions(id) : actions(recordType, id));
     this.lines.push(mrkdwn);
   }
   done(): Message {
@@ -347,6 +360,21 @@ function composeRule(rule: string, items: Pending[], appUrl: string): Message {
         const late = num(p.days_overdue) ?? 0;
         d.item("prospects", str(i.record_id), `${link(`${appUrl}/pipeline?prospect=${str(i.record_id)}`, str(p.name))} · ${late > 0 ? `${plural(late, "day")} overdue` : "today"}${p.promised ? ` · promised: ${esc(p.promised)}` : ""}`);
       }
+      break;
+    case "request_approval": {
+      const WHO: Record<string, string> = { tech: "Sameer (tech)", ads: "the media buyer" };
+      for (const i of items) {
+        const p = i.payload;
+        const due = p.due_at ? ` · due ${etTime(p.due_at)}` : " · no deadline in the message (end of their next shift)";
+        d.item("client_requests", str(i.record_id),
+          `${p.urgency === "urgent" ? "🔴 *Urgent* · " : ""}*${esc(p.clinic)}*: ${esc(p.title)} → ${WHO[str(p.owner)] ?? esc(p.owner)}${due}${p.permalink ? ` · ${link(str(p.permalink), "message")}` : ""}`);
+      }
+      d.line(link(`${appUrl}/router`, "All requests on /router"));
+      break;
+    }
+    case "missed_deadline":
+      d.bullets(items.map((i) => `${esc(i.payload.who)} missed a ${esc(i.payload.what)}: ${esc(i.payload.title)}${i.payload.clinic ? ` (${esc(i.payload.clinic)})` : ""} · due ${etTime(i.payload.due_at)}`));
+      d.line(`${link(`${appUrl}/tasks`, "Tasks")} · ${link(`${appUrl}/tech`, "Tech")}`);
       break;
     case "launch_stuck": {
       const STAGE: Record<string, string> = {

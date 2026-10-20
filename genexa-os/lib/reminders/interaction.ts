@@ -64,6 +64,39 @@ function replaceBlock(payload: SlackPayload, blockId: string, outcome: string, t
   return original.length ? { replace_original: true, text, blocks } : { replace_original: true, text };
 }
 
+type RequestResult = { result: string; actor?: string; title?: string | null; routed_table?: string | null; assignee?: string | null; due_at?: string | null; status?: string; handled_by?: string | null };
+
+/** Approve / Deny on a client request waiting for the owner. */
+async function handleRequest(payload: SlackPayload, action: SlackAction, slackUser: string, rpc: Rpc): Promise<InteractionReply> {
+  const [recordType, id] = (action.value ?? "").split(":");
+  if (recordType !== "client_requests" || !UUID.test(id ?? "")) return refuse(NOT_UNDERSTOOD);
+  const approve = action.action_id === "request_approve";
+  const r = await rpc<RequestResult>("slack_router_decide", { p_slack_user: slackUser, p_action: approve ? "approve" : "reject", p_request: id });
+  const blockId = `act:client_requests:${id}`;
+  const title = r?.title ?? undefined;
+  switch (r?.result) {
+    case "unknown_user":
+      return refuse("Your Slack account is not linked to a Genexa OS login, so nothing was changed.");
+    case "refused":
+      return refuse("Only Aryan can approve or deny client requests. Nothing was changed.");
+    case "not_found":
+      return refuse("That request no longer exists. Nothing was changed.");
+    case "already":
+      return replaceBlock(payload, blockId,
+        r.status === "handled" ? `Already handled in Slack${r.handled_by ? ` by ${r.handled_by}` : ""}. Nothing was created.`
+        : r.status === "rejected" ? "Already denied." : "Already decided.", title);
+    case "approved": {
+      const what = r.routed_table === "tech_jobs" ? "Tech job" : r.routed_table === "tasks" ? "Task" : "Opened";
+      const due = r.due_at ? `, due ${day(r.due_at)}` : "";
+      return replaceBlock(payload, blockId, `✅ Approved by ${r.actor} · ${what} for ${r.assignee ?? "the team"}${due}. They have been told in Slack.`, title);
+    }
+    case "rejected":
+      return replaceBlock(payload, blockId, `🚫 Denied by ${r.actor}. Nothing was created.`, title);
+    default:
+      return refuse("Nothing was changed.");
+  }
+}
+
 /** "Not following up" (a reason menu) and "Follow up later" (a date picker) on a prospect reminder. */
 async function handleProspect(payload: SlackPayload, action: SlackAction, slackUser: string, rpc: Rpc): Promise<InteractionReply> {
   const [prefix, recordType, prospectId] = (action.block_id ?? "").split(":");
@@ -109,6 +142,7 @@ export async function handleInteraction(payload: SlackPayload, deps: { rpc: Rpc;
   const slackUser = payload.user?.id;
   if (payload.type !== "block_actions" || !action || !slackUser) return refuse(NOT_UNDERSTOOD);
   if (PROSPECT_ACTIONS.includes(action.action_id ?? "")) return handleProspect(payload, action, slackUser, deps.rpc);
+  if (action.action_id === "request_approve" || action.action_id === "request_reject") return handleRequest(payload, action, slackUser, deps.rpc);
 
   const verb = action.action_id === "done" ? "done" : action.action_id === "snooze_1h" ? "snooze" : null;
   const [recordType, recordId] = (action.value ?? "").split(":");
