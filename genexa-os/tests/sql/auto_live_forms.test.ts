@@ -63,13 +63,13 @@ describe("GHL forms", () => {
     expect((await db.query(`select 1 from clients where name = 'Brand New Clinic'`)).rows.length).toBe(1);
   });
 
-  it("an Onboarding Form marks the open launch 'OB form complete' at the time it was submitted, and waits when no client fits", async () => {
+  it("an Onboarding Form moves the open launch to Assets in, recording when it was submitted, and waits when no client fits", async () => {
     const r = await intake("sub_2", "new_client", null, "Form Clinic");
     expect((await intake("sub_3", "onboarding", null, "Unknown Name")).result).toBe("unmatched");
     expect((await intake("sub_3", "onboarding", r.client_id as string, "Form Clinic LLC", "2026-10-02T09:30:00Z")).result).toBe("matched");
     const l = await one<{ at: string; stage: string }>(`select to_char(l.ob_form_done_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as at, b.stage from launches l join launch_board b on b.launch_id = l.id where l.client_id = $1`, [r.client_id]);
-    // The form is recorded on the launch; Ryan marks Assets in once everything else is in too.
-    expect(l).toEqual({ at: "2026-10-02 09:30", stage: "paid" });
+    // The form is recorded on the launch and moves it to Assets in.
+    expect(l).toEqual({ at: "2026-10-02 09:30", stage: "assets_in" });
     const stored = await one<{ p: Record<string, unknown> }>(`select payload as p from webhook_events where event_id = 'sub_3'`);
     expect(Object.keys(stored.p).sort()).toEqual(["at", "client_id", "kind", "organization"]);
   });

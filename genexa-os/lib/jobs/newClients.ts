@@ -23,6 +23,9 @@ export async function createNewClientsFromWhop(opts: { db: SupabaseClient; send?
   const attached = await db.rpc("whop_attach_known_contacts");
   if (attached.error) throw new Error(`whop_attach_known_contacts: ${attached.error.message}`);
   const made = await db.rpc("whop_create_new_clients");
+  // Every paying client still being onboarded has a card at Paid.
+  const cards = await db.rpc("launches_from_payments");
+  if (cards.error) throw new Error(`launches_from_payments: ${cards.error.message}`);
   if (made.error) throw new Error(`whop_create_new_clients: ${made.error.message}`);
   const rows = (made.data ?? []) as { client_id: string; name: string; amount: number; paid_at: string }[];
   out.created = rows.map((r) => r.name);

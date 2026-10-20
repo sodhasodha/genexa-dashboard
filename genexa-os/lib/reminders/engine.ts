@@ -105,6 +105,8 @@ export type RunResult = DeliverResult & { queued: number };
 export async function runReminders(deps: DeliverDeps): Promise<RunResult> {
   const now = (deps.now ?? new Date()).toISOString();
   const queued = await deps.rpc<number>("reminders_enqueue", { p_now: now });
+  // Launch cards past their stage limit: a ping to the stage's owner, then every 24 hours.
+  const stuck = await deps.rpc<number>("launch_stuck_enqueue", { p_now: now });
   const delivered = await deliverReminders(deps);
-  return { queued: Number(queued ?? 0), ...delivered };
+  return { queued: Number(queued ?? 0) + Number(stuck ?? 0), ...delivered };
 }

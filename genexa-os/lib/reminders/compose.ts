@@ -348,6 +348,20 @@ function composeRule(rule: string, items: Pending[], appUrl: string): Message {
         d.item("prospects", str(i.record_id), `${link(`${appUrl}/pipeline?prospect=${str(i.record_id)}`, str(p.name))} · ${late > 0 ? `${plural(late, "day")} overdue` : "today"}${p.promised ? ` · promised: ${esc(p.promised)}` : ""}`);
       }
       break;
+    case "launch_stuck": {
+      const STAGE: Record<string, string> = {
+        paid: "Paid: waiting for the assets (onboarding form, doctor availability, logo, Google Business profile, reviews, Meta access)",
+        assets_in: "Assets in: the tech build is due",
+        tech_built: "Tech built: tech QC is due",
+        tech_qc_passed: "Tech QC passed: the ads are due",
+        awaiting_approval: "Ads built: waiting for your approval",
+        approved: "Approved: the ads are not spending yet",
+      };
+      const hrs = (h: unknown) => { const v = Number(h); return v >= 48 ? `${Math.floor(v / 24)} days` : `${v}h`; };
+      d.bullets(items.map((i) => `${esc(i.payload.clinic)} · ${STAGE[str(i.payload.stage)] ?? esc(i.payload.stage)} · ${hrs(i.payload.hours)} in this stage (limit ${hrs(i.payload.limit)})`));
+      d.line(link(`${appUrl}/launches`, "Open Launches"));
+      break;
+    }
     case "launch_approval":
       d.bullets(items.map((i) => `${esc(i.payload.clinic)}: ads built, waiting for your approval`));
       d.line(link(`${appUrl}/launches`, "Open Launches to approve"));
