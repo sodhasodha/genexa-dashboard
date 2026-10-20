@@ -203,8 +203,8 @@ describe("tech rules", () => {
 
   it("a launch past 48h puts the cycle fee at risk", async () => {
     const l = await db.query<{ id: string }>(
-      `insert into launches (client_id, paid_at, ob_form_done_at, access_done_at, owner_id)
-       values ($1, now() - interval '10 days', now() - interval '5 days', now() - interval '4 days', $2) returning id`,
+      `insert into launches (client_id, paid_at, assets_in_at, owner_id)
+       values ($1, now() - interval '10 days', now() - interval '4 days', $2) returning id`,
       [clinic, people.sameer],
     );
     expect(l.rows.length).toBe(1);

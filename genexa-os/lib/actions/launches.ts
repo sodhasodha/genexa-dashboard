@@ -13,16 +13,14 @@ import { etMidnight, etToday } from "@/lib/time";
 // checks (LAUNCH_QC) and a step back by anyone but the app owner (LAUNCH_BACK).
 
 const Id = z.uuid();
-const Stage = z.enum(["paid", "ob_call_booked", "ob_call_done", "ob_form_complete", "access_granted", "built", "qc_passed", "live"]);
+const Stage = z.enum(["paid", "assets_in", "tech_built", "tech_qc_passed", "ads_built", "live"]);
 /** The timestamp each stage is defined by. */
 const STAMP: Record<z.infer<typeof Stage>, string> = {
   paid: "paid_at",
-  ob_call_booked: "ob_call_booked_at",
-  ob_call_done: "ob_call_done_at",
-  ob_form_complete: "ob_form_done_at",
-  access_granted: "access_done_at",
-  built: "build_done_at",
-  qc_passed: "qc_passed_at",
+  assets_in: "assets_in_at",
+  tech_built: "build_done_at",
+  tech_qc_passed: "qc_passed_at",
+  ads_built: "ads_built_at",
   live: "live_at",
 };
 const QC = ["qc_lead_access", "qc_calendar_tested", "qc_test_lead_deleted", "qc_pixel_firing", "qc_cortana_connected", "qc_clinic_sheet"] as const;
@@ -32,7 +30,9 @@ const refreshed = () => {
   revalidatePath("/launches");
   revalidatePath("/clients");
 };
-const codeFor = (message: string) => (message.includes("LAUNCH_QC") ? "qc" : message.includes("LAUNCH_BACK") ? "back" : "save");
+const codeFor = (message: string) =>
+  message.includes("LAUNCH_QC") ? "qc" : message.includes("LAUNCH_BACK") ? "back" : message.includes("LAUNCH_APPROVAL") ? "approval"
+  : message.includes("LAUNCH_ORDER") ? "order" : "save";
 
 /** Move a card one stage forward (timestamps that stage) or back (clears the current stage's timestamp; owner only). */
 export async function moveLaunch(formData: FormData) {
@@ -55,6 +55,20 @@ export async function moveLaunch(formData: FormData) {
   if (!data || data.length === 0) back("error=refused");
   refreshed();
   back("saved=moved");
+}
+
+/** Aryan approves a launch whose ads are built. It goes live on its own once the ads spend (or the media buyer moves it). */
+export async function approveLaunch(formData: FormData) {
+  const me = await requireStaff();
+  if (me.role !== "owner") back("error=approval");
+  const id = Id.parse(formData.get("launch_id"));
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("launches").update({ approved_at: new Date().toISOString(), approved_by: me.name })
+    .eq("id", id).not("ads_built_at", "is", null).is("approved_at", null).select("id");
+  if (error) back(`error=${codeFor(error.message)}`);
+  if (!data || data.length === 0) back("error=refused");
+  refreshed();
+  back("saved=approved");
 }
 
 /** Save the six QC checkboxes. */

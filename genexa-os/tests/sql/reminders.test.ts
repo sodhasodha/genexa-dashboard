@@ -504,17 +504,17 @@ describe("assignment, tech and launch rules", () => {
   it("launch_sla_warning: at 24h and at 6h left, naming the stage and the QC boxes still open", async () => {
     const c = (await one<{ id: string }>(`insert into clients (name, stage) values ('Launch Clinic', 'onboarding') returning id`)).id;
     const l = (await one<{ id: string }>(
-      `insert into launches (client_id, owner_id, paid_at, ob_form_done_at, access_done_at, qc_lead_access, qc_pixel_firing)
-       values ($1, $2, now() - interval '3 days', now() - interval '30 hours', now() - interval '30 hours', true, true) returning id`, [c, people.sameer])).id;
+      `insert into launches (client_id, owner_id, paid_at, assets_in_at, qc_lead_access, qc_pixel_firing)
+       values ($1, $2, now() - interval '3 days', now() - interval '30 hours', true, true) returning id`, [c, people.sameer])).id;
     const rows = async () => (await db.query<{ window_key: string; payload: { client: string; stage: string; qc_left: string[]; hours_left: number } }>(
       `select window_key, payload from reminder_candidates() where rule_key = 'launch_sla_warning'`)).rows;
     let r = await rows();
     expect(r.length).toBe(1);
     expect(r[0].window_key).toBe("24h");
-    expect(r[0].payload).toMatchObject({ client: "Launch Clinic", stage: "access_granted" });
+    expect(r[0].payload).toMatchObject({ client: "Launch Clinic", stage: "assets_in" });
     expect(r[0].payload.qc_left).toEqual(["calendar tested", "test lead deleted", "Cortana connected", "clinic sheet"]);
     expect(Number(r[0].payload.hours_left)).toBe(18);
-    await db.query(`update launches set ob_form_done_at = now() - interval '44 hours', access_done_at = now() - interval '44 hours' where id = $1`, [l]);
+    await db.query(`update launches set assets_in_at = now() - interval '44 hours' where id = $1`, [l]);
     r = await rows();
     expect(r[0].window_key).toBe("6h");
     // Before the clock starts, and once paused, there is nothing to warn about.

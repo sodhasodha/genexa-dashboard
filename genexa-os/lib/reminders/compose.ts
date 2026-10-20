@@ -348,6 +348,10 @@ function composeRule(rule: string, items: Pending[], appUrl: string): Message {
         d.item("prospects", str(i.record_id), `${link(`${appUrl}/pipeline?prospect=${str(i.record_id)}`, str(p.name))} · ${late > 0 ? `${plural(late, "day")} overdue` : "today"}${p.promised ? ` · promised: ${esc(p.promised)}` : ""}`);
       }
       break;
+    case "launch_approval":
+      d.bullets(items.map((i) => `${esc(i.payload.clinic)}: ads built, waiting for your approval`));
+      d.line(link(`${appUrl}/launches`, "Open Launches to approve"));
+      break;
     case "sync_failure":
       d.bullets(items.map((i) => `${esc(i.payload.source)} · last success ${etTime(i.payload.last_success_at)}${i.payload.error ? ` · ${esc(i.payload.error)}` : ""}`));
       d.line(link(`${appUrl}/integrations`, "Open integrations"));

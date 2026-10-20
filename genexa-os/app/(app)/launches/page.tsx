@@ -1,11 +1,19 @@
 import Link from "next/link";
-import { moveLaunch, pauseLaunch, resumeLaunch, saveQc, setBrokeWeek1, startLaunch } from "@/lib/actions/launches";
+import { approveLaunch, moveLaunch, pauseLaunch, resumeLaunch, saveQc, setBrokeWeek1, startLaunch } from "@/lib/actions/launches";
 import { requireStaff } from "@/lib/auth/staff";
 import { QC_FIELDS, getLaunchBoard, type LaunchCard, type LaunchStage, type QcField } from "@/lib/queries/launches";
 
 const STAGE_LABEL: Record<LaunchStage, string> = {
-  paid: "Paid", ob_call_booked: "Onboarding call booked", ob_call_done: "Onboarding call done", ob_form_complete: "OB form complete",
-  access_granted: "Access granted", built: "Built", qc_passed: "QC passed", live: "Live",
+  paid: "Paid", assets_in: "Assets in", tech_built: "Tech built", tech_qc_passed: "Tech QC passed", ads_built: "Ads built · waiting Aryan approval", live: "Live",
+};
+/** Who moves a card out of each column, and what they do. */
+const STAGE_NOTE: Record<LaunchStage, string> = {
+  paid: "Ryan: collect the onboarding form, doctor availability, logo, Google Business profile, reviews and Meta access (full control).",
+  assets_in: "Sameer, 24h: GHL sub-account, SignalHouse, calendars, custom values, AI dialer, Slack, Cortana, scripts. His tech job moves the card.",
+  tech_built: "Sameer: put one test lead through every step and tick the six QC boxes.",
+  tech_qc_passed: "Media buyer, 24h: campaign, creatives, lead form. Their task moves the card.",
+  ads_built: "Aryan approves. Live when the ads start spending.",
+  live: "The clinic's term has started.",
 };
 const QC_LABEL: Record<QcField, string> = {
   qc_lead_access: "Lead access", qc_calendar_tested: "Calendar tested", qc_test_lead_deleted: "Test lead deleted",
@@ -16,7 +24,9 @@ const PAUSE_REASON: Record<string, string> = {
   client_assets: "Waiting on client assets", third_party: "Waiting on a third party",
 };
 const ERRORS: Record<string, string> = {
-  qc: "LAUNCH_QC: all six QC checks must be ticked before QC passed / Live. Nothing was changed.",
+  qc: "All six QC checks must be ticked before Tech QC passed. Nothing was changed.",
+  approval: "Only Aryan can approve a launch, and a launch goes live only after his approval.",
+  order: "Not moved: the stage before it isn't done yet.",
   back: "Only the owner can move a launch back a stage.",
   refused: "Not saved: only the launch's owner or the app owner can change a launch.",
   owner_only: "Only the owner can start a launch.",
@@ -30,7 +40,7 @@ const ERRORS: Record<string, string> = {
   save: "Not saved: the database refused the change.",
 };
 const SAVED: Record<string, string> = {
-  moved: "Launch moved.", qc: "QC checks saved.", flag: "Flag saved.", paused: "SLA clock paused.", resumed: "SLA clock resumed.", started: "Launch started.",
+  moved: "Launch moved.", approved: "Launch approved. It goes live when the ads start spending.", qc: "QC checks saved.", flag: "Flag saved.", paused: "SLA clock paused.", resumed: "SLA clock resumed.", started: "Launch started.",
 };
 const WAIT_TONE: Record<string, string> = { green: "text-muted", amber: "text-warn", red: "text-bad" };
 const input = "rounded border border-line bg-raised px-2 py-1 text-xs";
@@ -39,8 +49,7 @@ const quiet = "cursor-pointer rounded border border-line px-2 py-1 text-xs text-
 
 function Sla({ card }: { card: LaunchCard }) {
   if (!card.clock_started) {
-    const waitingOn = [!card.ob_form_done ? "OB form" : null, !card.access_done ? "access" : null].filter(Boolean).join(" and ");
-    return <p className="text-xs text-muted">SLA: clock not started{waitingOn ? ` (needs ${waitingOn})` : ""}</p>;
+    return <p className="text-xs text-muted">SLA: clock starts when the assets are in{card.ob_form_done ? " (onboarding form received)" : ""}</p>;
   }
   const tone = card.is_overdue ? "text-bad font-semibold" : card.is_paused ? "text-warn" : "text-ink";
   return (
@@ -53,10 +62,11 @@ function Sla({ card }: { card: LaunchCard }) {
   );
 }
 
-function Card({ card }: { card: LaunchCard }) {
+function Card({ card, isOwner }: { card: LaunchCard; isOwner: boolean }) {
   const next = card.next_stage;
-  const needsQc = next === "qc_passed" || next === "live";
-  const blocked = needsQc && !card.qc_all;
+  const needsQc = next === "tech_qc_passed";
+  const waitingApproval = next === "live" && card.awaiting_approval;
+  const blocked = (needsQc && !card.qc_all) || waitingApproval;
   return (
     <div className="flex flex-col gap-2 rounded border border-line bg-raised p-2.5 text-sm">
       <div>
@@ -82,6 +92,19 @@ function Card({ card }: { card: LaunchCard }) {
         </p>
       ) : null}
       {card.broke_week1 ? <p className="rounded bg-bad-bg px-2 py-1 text-xs text-bad">Broke in week 1</p> : null}
+      {card.awaiting_approval ? (
+        <div className="rounded bg-warn-bg px-2 py-1.5 text-xs text-warn">
+          Waiting for Aryan&apos;s approval.
+          {isOwner ? (
+            <form action={approveLaunch} className="mt-1.5">
+              <input type="hidden" name="launch_id" value={card.launch_id} />
+              <button type="submit" className={button}>Approve launch</button>
+            </form>
+          ) : null}
+        </div>
+      ) : card.stage === "ads_built" && card.approved_on ? (
+        <p className="rounded bg-good-bg px-2 py-1 text-xs text-good">Approved {card.approved_on}. Goes live when the ads spend.</p>
+      ) : null}
 
       <form action={saveQc} className="flex flex-col gap-1 border-t border-line pt-2">
         <input type="hidden" name="launch_id" value={card.launch_id} />
@@ -102,10 +125,10 @@ function Card({ card }: { card: LaunchCard }) {
               <input type="hidden" name="launch_id" value={card.launch_id} />
               <input type="hidden" name="direction" value="forward" />
               <input type="hidden" name="to" value={next} />
-              <button type="submit" disabled={blocked} title={blocked ? "Tick and save all six QC checks first" : undefined} className={button}>
+              <button type="submit" disabled={blocked} title={blocked ? (waitingApproval ? "Waiting for Aryan's approval" : "Tick and save all six QC checks first") : undefined} className={button}>
                 Move to {STAGE_LABEL[next]}
               </button>
-              {blocked ? <p className="mt-1 text-xs text-muted">Needs all six QC checks.</p> : null}
+              {blocked ? <p className="mt-1 text-xs text-muted">{waitingApproval ? "Needs Aryan's approval." : "Needs all six QC checks."}</p> : null}
             </form>
           ) : null}
           {card.can_move_back && card.prev_stage ? (
@@ -162,7 +185,7 @@ export default async function LaunchesPage({ searchParams }: PageProps<"/launche
       <div>
         <h1 className="text-lg font-semibold">Launches</h1>
         <p className="text-xs text-muted">
-          A card sits in the furthest stage that has been timestamped. The SLA clock starts when the OB form and access are both done.
+          A card sits in the furthest stage reached. The SLA clock starts when the assets are in. Paid, Tech built, Ads built and Live move on their own (Whop payment, Sameer&apos;s build job, the media buyer&apos;s ads task, first ad spend after approval).
           {board.liveDays !== null ? ` Live launches leave the board after ${board.liveDays} days.` : ""} {isOwner ? "" : "You can act on launches you own; everything else is read-only."}
         </p>
         {error ? <p className="mt-2 rounded bg-bad-bg px-3 py-2 text-sm text-bad">{error}</p> : null}
@@ -201,7 +224,8 @@ export default async function LaunchesPage({ searchParams }: PageProps<"/launche
               {STAGE_LABEL[col.stage]}
               <span className="font-normal text-muted">{col.cards.length}</span>
             </h2>
-            {col.cards.map((card) => <Card key={card.launch_id} card={card} />)}
+            <p className="text-[11px] leading-snug text-muted">{STAGE_NOTE[col.stage]}</p>
+            {col.cards.map((card) => <Card key={card.launch_id} card={card} isOwner={isOwner} />)}
           </section>
         ))}
       </div>

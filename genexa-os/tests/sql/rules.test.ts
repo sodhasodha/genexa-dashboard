@@ -93,16 +93,16 @@ describe("task rules", () => {
 });
 
 describe("launch QC gate", () => {
-  it("refuses Live until all six QC boxes are ticked", async () => {
+  it("refuses Tech QC passed until all six QC boxes are ticked", async () => {
     const c = await one<{ id: string }>(`insert into clients (name) values ('QC Clinic') returning id`);
-    const l = await one<{ id: string }>(`insert into launches (client_id, paid_at) values ($1, now()) returning id`, [c.id]);
+    const l = await one<{ id: string }>(`insert into launches (client_id, paid_at, assets_in_at, build_done_at) values ($1, now(), now(), now()) returning id`, [c.id]);
     await db.query(
       `update launches set qc_lead_access = true, qc_calendar_tested = true, qc_test_lead_deleted = true,
          qc_pixel_firing = true, qc_cortana_connected = true where id = $1`,
       [l.id],
     );
-    await expect(db.query(`update launches set live_at = now() where id = $1`, [l.id])).rejects.toThrow(/LAUNCH_QC/);
-    await db.query(`update launches set qc_clinic_sheet = true, qc_passed_at = now(), live_at = now() where id = $1`, [l.id]);
+    await expect(db.query(`update launches set qc_passed_at = now() where id = $1`, [l.id])).rejects.toThrow(/LAUNCH_QC/);
+    await db.query(`update launches set qc_clinic_sheet = true, qc_passed_at = now() where id = $1`, [l.id]);
   });
 });
 

@@ -1,32 +1,36 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
-import { AUTH, asUser, freshDb, seedStaff, type TestPeople } from "./db";
+import { AUTH, asUser, freshDb, seedStaff } from "./db";
 
 let db: PGlite;
-let people: TestPeople;
 const one = async <T>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows[0];
+const QC = `qc_lead_access, qc_calendar_tested, qc_test_lead_deleted, qc_pixel_firing, qc_cortana_connected, qc_clinic_sheet`;
 const live = async () => (await db.query<{ name: string; live_date: string }>(`select name, live_date::text from launches_auto_live() order by name`)).rows;
 const intake = async (id: string, kind: string, client: string | null, org: string, at = "2026-10-01T15:00:00Z") =>
   (await one<{ r: { result: string; client_id?: string; launch_id?: string } }>(`select ghl_form_intake($1, $2, $3, $4, 'Jane Owner', $5) as r`, [id, kind, client, org, at])).r;
 
 beforeEach(async () => {
   db = await freshDb();
-  people = await seedStaff(db);
+  await seedStaff(db);
 });
 
 describe("live from the first day of ad spend", () => {
-  it("an onboarding clinic goes live the first day it spends, QC boxes or not; a clinic with no spend or unverified ads does not", async () => {
+  it("an approved launch goes live the first day its ads spend after approval; unapproved, quiet or unverified ones do not", async () => {
     const mk = async (name: string, biz: string | null) => (await one<{ id: string }>(`insert into clients (name, stage, cortana_business_id) values ($1, 'onboarding', $2) returning id`, [name, biz])).id;
     const spending = await mk("Spending Clinic", "biz-a");
     const quiet = await mk("Quiet Clinic", "biz-b");
     const unverified = await mk("Unverified Clinic", "biz-c");
     await db.query(`insert into client_campaign_scope (client_id, verified) values ($1, false)`, [unverified]);
-    await db.query(`insert into launches (client_id, paid_at) values ($1, now() - interval '6 days')`, [spending]);
+    await db.query(`insert into launches (client_id, paid_at, assets_in_at, build_done_at, ${QC}, qc_passed_at, ads_built_at)
+      values ($1, now() - interval '6 days', now() - interval '6 days', now() - interval '5 days', true, true, true, true, true, true, now() - interval '5 days', now() - interval '4 days')`, [spending]);
     await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today() - 3, 0), ($1, app_today() - 2, 41.5), ($1, app_today() - 1, 60), ($2, app_today() - 1, 0), ($3, app_today() - 1, 25)`, [spending, quiet, unverified]);
+    // Spending, but not approved yet: not live.
+    expect(await live()).toEqual([]);
+    await db.query(`update launches set approved_at = now() - interval '4 days' where client_id = $1`, [spending]);
     const went = await live();
     expect(went.map((w) => w.name)).toEqual(["Spending Clinic"]);
     const l = await one<{ live_source: string; d: boolean; qc: boolean }>(`select live_source, app_day(live_at) = app_today() - 2 as d, qc_lead_access as qc from launches where client_id = $1`, [spending]);
-    expect(l).toEqual({ live_source: "ad_spend", d: true, qc: false });
+    expect(l).toEqual({ live_source: "ad_spend", d: true, qc: true });
     const c = await one<{ stage: string; ld: boolean }>(`select stage, launch_date = app_today() - 2 as ld from clients where id = $1`, [spending]);
     expect(c).toEqual({ stage: "live", ld: true });
     expect(await live()).toEqual([]);
@@ -34,15 +38,16 @@ describe("live from the first day of ad spend", () => {
     expect((await one<{ stage: string }>(`select stage from clients where id = $1`, [unverified])).stage).toBe("onboarding");
   });
 
-  it("creates the launch when an onboarding clinic has none, and a person still cannot skip QC by hand", async () => {
-    const id = (await one<{ id: string }>(`insert into clients (name, stage, cortana_business_id) values ('No Launch Clinic', 'onboarding', 'biz-d') returning id`)).id;
-    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today() - 1, 12)`, [id]);
-    expect((await live()).length).toBe(1);
-    expect((await one<{ owner_id: string }>(`select owner_id from launches where client_id = $1`, [id])).owner_id).toBe(people.sameer);
+  it("spend before the approval does not count, and nobody can set Live by hand before Aryan approves", async () => {
+    const id = (await one<{ id: string }>(`insert into clients (name, stage, cortana_business_id) values ('Early Clinic', 'onboarding', 'biz-d') returning id`)).id;
+    await db.query(`insert into launches (client_id, paid_at, assets_in_at, build_done_at, ${QC}, qc_passed_at, ads_built_at, approved_at)
+      values ($1, now() - interval '9 days', now() - interval '9 days', now() - interval '8 days', true, true, true, true, true, true, now() - interval '8 days', now() - interval '7 days', now())`, [id]);
+    await db.query(`insert into ad_metrics_daily (client_id, date, spend) values ($1, app_today() - 3, 12)`, [id]); // a test spend before approval
+    expect(await live()).toEqual([]);
     const other = (await one<{ id: string }>(`insert into clients (name, stage) values ('Manual Clinic', 'onboarding') returning id`)).id;
     const launch = (await one<{ id: string }>(`insert into launches (client_id) values ($1) returning id`, [other])).id;
     await asUser(db, AUTH.ryan, async () => {
-      await expect(db.query(`update launches set live_at = now() where id = $1`, [launch])).rejects.toThrow(/LAUNCH_QC/);
+      await expect(db.query(`update launches set live_at = now() where id = $1`, [launch])).rejects.toThrow(/LAUNCH_APPROVAL/);
     });
   });
 });
@@ -63,7 +68,8 @@ describe("GHL forms", () => {
     expect((await intake("sub_3", "onboarding", null, "Unknown Name")).result).toBe("unmatched");
     expect((await intake("sub_3", "onboarding", r.client_id as string, "Form Clinic LLC", "2026-10-02T09:30:00Z")).result).toBe("matched");
     const l = await one<{ at: string; stage: string }>(`select to_char(l.ob_form_done_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as at, b.stage from launches l join launch_board b on b.launch_id = l.id where l.client_id = $1`, [r.client_id]);
-    expect(l).toEqual({ at: "2026-10-02 09:30", stage: "ob_form_complete" });
+    // The form is recorded on the launch; Ryan marks Assets in once everything else is in too.
+    expect(l).toEqual({ at: "2026-10-02 09:30", stage: "paid" });
     const stored = await one<{ p: Record<string, unknown> }>(`select payload as p from webhook_events where event_id = 'sub_3'`);
     expect(Object.keys(stored.p).sort()).toEqual(["at", "client_id", "kind", "organization"]);
   });

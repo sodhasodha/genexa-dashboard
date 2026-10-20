@@ -29,45 +29,46 @@ describe("launch_board", () => {
     let b = await card(l);
     expect(b.stage).toBe("paid");
     expect(b.prev_stage).toBeNull();
-    expect(b.next_stage).toBe("ob_call_booked");
+    expect(b.next_stage).toBe("assets_in");
     expect(b.days_waiting).toBe(3);
     expect(b.waiting_colour).toBe("green");
     expect(b.clock_started).toBe(false);
     expect(b.sla_hours_elapsed).toBeNull();
 
-    const steps: [string, string, string | null][] = [
-      ["ob_call_booked_at", "ob_call_booked", "ob_call_done"],
-      ["ob_call_done_at", "ob_call_done", "ob_form_complete"],
-      ["ob_form_done_at", "ob_form_complete", "access_granted"],
-      ["access_done_at", "access_granted", "built"],
-      ["build_done_at", "built", "qc_passed"],
-    ];
-    for (const [column, stage, next] of steps) {
-      await db.query(`update launches set ${column} = now() - interval '2 hours' where id = $1`, [l]);
-      b = await card(l);
-      expect(b.stage).toBe(stage);
-      expect(b.next_stage).toBe(next);
-    }
-    // OB form and access both done: the 48h clock is running.
+    // The old onboarding steps are history only: they no longer move the card or start the clock.
+    await db.query(`update launches set ob_call_booked_at = now(), ob_form_done_at = now(), access_done_at = now() where id = $1`, [l]);
+    expect((await card(l)).stage).toBe("paid");
+    expect((await card(l)).clock_started).toBe(false);
+
+    await db.query(`update launches set assets_in_at = now() - interval '2 hours' where id = $1`, [l]);
+    b = await card(l);
+    expect([b.stage, b.next_stage]).toEqual(["assets_in", "tech_built"]);
+    // Assets in: the 48h clock is running.
     expect(b.clock_started).toBe(true);
     expect(Number(b.sla_hours_elapsed)).toBe(2);
     expect(Number(b.sla_hours_allowed)).toBe(48);
     expect(b.is_overdue).toBe(false);
-    expect(b.qc_done).toBe(0);
-    expect(b.qc_all).toBe(false);
+
+    await db.query(`update launches set build_done_at = now() where id = $1`, [l]);
+    b = await card(l);
+    expect([b.stage, b.next_stage]).toEqual(["tech_built", "tech_qc_passed"]);
+    expect([b.qc_done, b.qc_all]).toEqual([0, false]);
 
     await db.query(`update launches set ${QC_ALL}, qc_passed_at = now() where id = $1`, [l]);
     b = await card(l);
-    expect(b.stage).toBe("qc_passed");
-    expect(b.next_stage).toBe("live");
-    expect(b.qc_done).toBe(6);
-    expect(b.qc_all).toBe(true);
+    expect([b.stage, b.next_stage, b.qc_done, b.qc_all]).toEqual(["tech_qc_passed", "ads_built", 6, true]);
 
+    await db.query(`update launches set ads_built_at = now() where id = $1`, [l]);
+    b = await card(l);
+    expect([b.stage, b.next_stage, (b as unknown as { awaiting_approval: boolean }).awaiting_approval]).toEqual(["ads_built", "live", true]);
+
+    await db.query(`update launches set approved_at = now(), approved_by = 'Ryan' where id = $1`, [l]);
+    expect((b = await card(l)) && (b as unknown as { awaiting_approval: boolean }).awaiting_approval).toBe(false);
     await db.query(`update launches set live_at = now() where id = $1`, [l]);
     b = await card(l);
     expect(b.stage).toBe("live");
     expect(b.next_stage).toBeNull();
-    expect(b.prev_stage).toBe("qc_passed");
+    expect(b.prev_stage).toBe("ads_built");
     expect(b.days_waiting).toBeNull();
     expect(b.days_paid_to_live).toBe(3);
   });
@@ -87,7 +88,7 @@ describe("launch_board", () => {
   it("shows an open pause, and drops live launches after 14 days", async () => {
     const c = await client("Paused Clinic");
     const l = (await one<{ id: string }>(
-      `insert into launches (client_id, paid_at, ob_form_done_at, access_done_at) values ($1, now() - interval '5 days', now() - interval '60 hours', now() - interval '60 hours') returning id`, [c])).id;
+      `insert into launches (client_id, paid_at, assets_in_at) values ($1, now() - interval '5 days', now() - interval '60 hours') returning id`, [c])).id;
     expect((await card(l)).is_overdue).toBe(true);
     await db.query(`insert into sla_pauses (launch_id, paused_at, reason, evidence_note) values ($1, now() - interval '30 hours', 'client_access', 'Asked for Meta access in Slack')`, [l]);
     const b = await card(l);
@@ -100,8 +101,8 @@ describe("launch_board", () => {
     const recent = await client("Recent Live Clinic");
     const ins = (cid: string, days: number) =>
       one<{ id: string }>(
-        `insert into launches (client_id, paid_at, qc_lead_access, qc_calendar_tested, qc_test_lead_deleted, qc_pixel_firing, qc_cortana_connected, qc_clinic_sheet, qc_passed_at, live_at)
-         values ($1, now() - interval '40 days', true, true, true, true, true, true, now() - ($2 || ' days')::interval, now() - ($2 || ' days')::interval) returning id`,
+        `insert into launches (client_id, paid_at, assets_in_at, build_done_at, qc_lead_access, qc_calendar_tested, qc_test_lead_deleted, qc_pixel_firing, qc_cortana_connected, qc_clinic_sheet, qc_passed_at, ads_built_at, approved_at, live_at)
+         values ($1, now() - interval '40 days', now() - interval '39 days', now() - interval '38 days', true, true, true, true, true, true, now() - ($2 || ' days')::interval, now() - ($2 || ' days')::interval, now() - ($2 || ' days')::interval, now() - ($2 || ' days')::interval) returning id`,
         [cid, String(days)]);
     const lo = (await ins(old, 15)).id;
     const lr = (await ins(recent, 13)).id;
@@ -111,29 +112,61 @@ describe("launch_board", () => {
 });
 
 describe("going live", () => {
-  it("the launch owner setting Live makes the clinic live and sets its launch date", async () => {
+  const card = (id: string) => one<{ stage: string }>(`select stage from launch_board where launch_id = $1`, [id]);
+  it("each person moves their own stages, the work is handed on, and Live needs Aryan's approval", async () => {
     const c = await client("Go Live Clinic");
     const l = (await one<{ id: string }>(`insert into launches (client_id, paid_at, owner_id) values ($1, now() - interval '4 days', $2) returning id`, [c, people.sameer])).id;
+    // Ryan: assets in. Sameer gets a build job due in 24 hours.
+    await asUser(db, AUTH.ryan, async () => { await db.query(`update launches set assets_in_at = now() where id = $1`, [l]); });
+    const job = await one<{ owner_id: string; type: string; title: string; hours: number }>(
+      `select owner_id, type, title, round(extract(epoch from due_at - requested_at) / 3600)::int as hours from tech_jobs where launch_id = $1`, [l]);
+    expect(job).toEqual({ owner_id: people.sameer, type: "launch", title: "Build Go Live Clinic", hours: 24 });
+    // Sameer finishing the job moves the card to Tech built.
+    await asUser(db, AUTH.sameer, async () => { await db.query(`update tech_jobs set status = 'done' where launch_id = $1`, [l]); });
+    expect((await card(l)).stage).toBe("tech_built");
     await asUser(db, AUTH.sameer, async () => {
-      // Sameer cannot update clients himself.
-      expect((await db.query(`update clients set stage = 'live' where id = $1 returning id`, [c])).rows.length).toBe(0);
-      await expect(db.query(`update launches set live_at = now() where id = $1`, [l])).rejects.toThrow(/LAUNCH_QC/);
+      await expect(db.query(`update launches set qc_passed_at = now() where id = $1`, [l])).rejects.toThrow(/LAUNCH_QC/);
       await db.query(`update launches set ${QC_ALL} where id = $1`, [l]);
       await db.query(`update launches set qc_passed_at = now() where id = $1`, [l]);
+    });
+    // Tech QC passed: the media buyer gets an ads task due in 24 hours, and finishing it moves the card to Ads built.
+    const task = await one<{ owner_id: string; category: string; title: string; hours: number }>(
+      `select owner_id, category, title, round(extract(epoch from due_at - now()) / 3600)::int as hours from tasks where launch_id = $1`, [l]);
+    expect(task).toEqual({ owner_id: people.aditya, category: "ads", title: "Build ads for Go Live Clinic", hours: 24 });
+    await asUser(db, AUTH.aditya, async () => { await db.query(`update tasks set status = 'done' where launch_id = $1`, [l]); });
+    expect((await card(l)).stage).toBe("ads_built");
+    // Aryan gets one DM; nobody but him can approve; nothing goes live before he does.
+    const dms = (await db.query<{ staff_id: string }>(`select staff_id from notifications where rule_key = 'launch_approval' and record_id = $1`, [l])).rows;
+    expect(dms).toEqual([{ staff_id: people.ryan }]);
+    await asUser(db, AUTH.aditya, async () => {
+      await expect(db.query(`update launches set live_at = now() where id = $1`, [l])).rejects.toThrow(/LAUNCH_APPROVAL/);
+      await expect(db.query(`update launches set approved_at = now() where id = $1`, [l])).rejects.toThrow(/LAUNCH_APPROVAL/);
+    });
+    await asUser(db, AUTH.ryan, async () => { await db.query(`update launches set approved_at = now(), approved_by = 'Ryan' where id = $1`, [l]); });
+    await asUser(db, AUTH.aditya, async () => {
+      // Aditya cannot update clients himself; the trigger does it.
+      expect((await db.query(`update clients set stage = 'live' where id = $1 returning id`, [c])).rows.length).toBe(0);
       await db.query(`update launches set live_at = now() where id = $1`, [l]);
     });
     const row = await one<{ stage: string; launch_date: string; today: string }>(`select stage, launch_date::text, app_today()::text as today from clients where id = $1`, [c]);
     expect(row.stage).toBe("live");
     expect(row.launch_date).toBe(row.today);
-    // The change is in the audit log under the person who pressed the button.
     const audit = await one<{ actor: string }>(`select actor from audit_log where table_name = 'clients' and row_id = $1 and field = 'stage' and new_value = 'live'`, [c]);
-    expect(audit.actor).toBe("Sameer");
+    expect(audit.actor).toBe("Aditya");
+  });
+
+  it("stages go in order", async () => {
+    const c = await client("Order Clinic");
+    const l = (await one<{ id: string }>(`insert into launches (client_id, paid_at) values ($1, now()) returning id`, [c])).id;
+    await expect(db.query(`update launches set build_done_at = now() where id = $1`, [l])).rejects.toThrow(/LAUNCH_ORDER/);
+    await expect(db.query(`update launches set ads_built_at = now() where id = $1`, [l])).rejects.toThrow(/LAUNCH_ORDER/);
+    await expect(db.query(`update launches set approved_at = now() where id = $1`, [l])).rejects.toThrow(/LAUNCH_ORDER/);
   });
 
   it("never overwrites a launch date that is already set", async () => {
     const c = await client("Relaunch Clinic", "paused", ", launch_date", ", date '2026-03-01'");
     const l = (await one<{ id: string }>(`insert into launches (client_id, paid_at) values ($1, now()) returning id`, [c])).id;
-    await db.query(`update launches set ${QC_ALL}, qc_passed_at = now(), live_at = now() where id = $1`, [l]);
+    await db.query(`update launches set assets_in_at = now(), build_done_at = now(), ${QC_ALL}, qc_passed_at = now(), ads_built_at = now(), approved_at = now(), live_at = now() where id = $1`, [l]);
     const row = await one<{ stage: string; launch_date: string }>(`select stage, launch_date::text from clients where id = $1`, [c]);
     expect(row.stage).toBe("live");
     expect(row.launch_date).toBe("2026-03-01");
@@ -141,17 +174,16 @@ describe("going live", () => {
 
   it("only the app owner can move a launch back a stage", async () => {
     const c = await client("Step Back Clinic");
-    const l = (await one<{ id: string }>(
-      `insert into launches (client_id, paid_at, ob_call_booked_at, owner_id) values ($1, now(), now(), $2) returning id`, [c, people.sameer])).id;
+    const l = (await one<{ id: string }>(`insert into launches (client_id, paid_at, assets_in_at, owner_id) values ($1, now(), now(), $2) returning id`, [c, people.sameer])).id;
     await asUser(db, AUTH.sameer, async () => {
-      await expect(db.query(`update launches set ob_call_booked_at = null where id = $1`, [l])).rejects.toThrow(/LAUNCH_BACK/);
+      await expect(db.query(`update launches set assets_in_at = null where id = $1`, [l])).rejects.toThrow(/LAUNCH_BACK/);
     });
-    await asUser(db, AUTH.aditya, async () => {
-      // Not his launch: RLS lets nothing through.
-      expect((await db.query(`update launches set ob_call_done_at = now() where id = $1 returning id`, [l])).rows.length).toBe(0);
+    await asUser(db, AUTH.marjorie, async () => {
+      // A CSR does not run launches: RLS lets nothing through.
+      expect((await db.query(`update launches set build_done_at = now() where id = $1 returning id`, [l])).rows.length).toBe(0);
     });
     await asUser(db, AUTH.ryan, async () => {
-      expect((await db.query(`update launches set ob_call_booked_at = null where id = $1 returning id`, [l])).rows.length).toBe(1);
+      expect((await db.query(`update launches set assets_in_at = null where id = $1 returning id`, [l])).rows.length).toBe(1);
     });
     expect((await one<{ stage: string }>(`select stage from launch_board where launch_id = $1`, [l])).stage).toBe("paid");
   });

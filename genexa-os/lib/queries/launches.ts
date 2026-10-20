@@ -3,7 +3,7 @@ import type { CurrentStaff } from "@/lib/auth/staff";
 import { createClient } from "@/lib/supabase/server";
 import { etToday } from "@/lib/time";
 
-export const LAUNCH_STAGES = ["paid", "ob_call_booked", "ob_call_done", "ob_form_complete", "access_granted", "built", "qc_passed", "live"] as const;
+export const LAUNCH_STAGES = ["paid", "assets_in", "tech_built", "tech_qc_passed", "ads_built", "live"] as const;
 export type LaunchStage = (typeof LAUNCH_STAGES)[number];
 export const QC_FIELDS = ["qc_lead_access", "qc_calendar_tested", "qc_test_lead_deleted", "qc_pixel_firing", "qc_cortana_connected", "qc_clinic_sheet"] as const;
 export type QcField = (typeof QC_FIELDS)[number];
@@ -21,6 +21,9 @@ export type LaunchCard = {
   live_on: string | null;
   ob_form_done: boolean;
   access_done: boolean;
+  /** Ads built and not yet approved by Aryan. */
+  awaiting_approval: boolean;
+  approved_on: string | null;
   qc: Record<QcField, boolean>;
   qc_done: number;
   qc_all: boolean;
@@ -81,6 +84,8 @@ export async function getLaunchBoard(me: CurrentStaff): Promise<LaunchBoard> {
     live_on: day(r.live_at as string | null),
     ob_form_done: r.ob_form_done_at !== null,
     access_done: r.access_done_at !== null,
+    awaiting_approval: r.awaiting_approval === true,
+    approved_on: day(r.approved_at as string | null),
     qc: Object.fromEntries(QC_FIELDS.map((f) => [f, r[f] === true])) as Record<QcField, boolean>,
     qc_done: Number(r.qc_done),
     qc_all: r.qc_all === true,
@@ -97,7 +102,8 @@ export async function getLaunchBoard(me: CurrentStaff): Promise<LaunchBoard> {
     pause_reason: r.pause_reason as string | null,
     pause_note: r.pause_note as string | null,
     paused_on: day(r.paused_at as string | null),
-    can_act: isOwner || r.owner_id === me.id,
+    // Ryan, tech and the media buyer each move the card through their own stages.
+    can_act: isOwner || r.owner_id === me.id || me.role === "tech" || me.role === "media_buyer",
     can_move_back: isOwner,
   }));
 

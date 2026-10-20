@@ -104,8 +104,8 @@ describe("onboarding_intake", () => {
     // A launch that has gone live is closed: a new one can be attached.
     const live = await id(`insert into clients (name, stage) values ('Relaunch Clinic', 'live') returning id`);
     await db.query(
-      `insert into launches (client_id, live_at, qc_passed_at, qc_lead_access, qc_calendar_tested, qc_test_lead_deleted, qc_pixel_firing, qc_cortana_connected, qc_clinic_sheet)
-       values ($1, now(), now(), true, true, true, true, true, true)`, [live]);
+      `insert into launches (client_id, approved_at, live_at, qc_passed_at, qc_lead_access, qc_calendar_tested, qc_test_lead_deleted, qc_pixel_firing, qc_cortana_connected, qc_clinic_sheet)
+       values ($1, now(), now(), now(), true, true, true, true, true, true)`, [live]);
     const b = await intake(`p_event_id => 'ev4', p_clinic_name => 'Relaunch Clinic'`);
     expect(b).toMatchObject({ client_id: live, launch_created: true });
     expect(await count("launches where client_id = $1", [live])).toBe(2);

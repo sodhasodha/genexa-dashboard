@@ -121,7 +121,7 @@ describe("Genexa time = elapsed - paused", () => {
     ).rejects.toThrow();
   });
 
-  it("the launch clock starts only when both the form and access are done", async () => {
+  it("the launch clock starts when the assets are in (the onboarding form alone does not start it)", async () => {
     const c = await one<{ id: string }>(`insert into clients (name) values ('SLA Clinic') returning id`);
     const l = await one<{ id: string }>(
       `insert into launches (client_id, paid_at, ob_form_done_at) values ($1, now() - interval '10 days', now() - interval '9 days') returning id`,
@@ -135,6 +135,8 @@ describe("Genexa time = elapsed - paused", () => {
     expect(sla.is_overdue).toBeNull();
     expect(sla.days_waiting_since_paid).toBeGreaterThanOrEqual(9);
     await db.query(`update launches set access_done_at = now() - interval '3 days' where id = $1`, [l.id]);
+    expect((await one<{ clock_start: string | null }>(`select clock_start from launch_sla where launch_id = $1`, [l.id])).clock_start).toBeNull();
+    await db.query(`update launches set assets_in_at = now() - interval '3 days' where id = $1`, [l.id]);
     sla = await one(`select * from launch_sla where launch_id = $1`, [l.id]);
     expect(sla.is_overdue).toBe(true);
   });

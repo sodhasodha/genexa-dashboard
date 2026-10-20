@@ -114,7 +114,7 @@ describe("score_tech_weekly", () => {
     // Clinic A's launch row (same clinic as the "Launch met" job) is flagged broken: 1 = amber.
     const qc = `qc_lead_access, qc_calendar_tested, qc_test_lead_deleted, qc_pixel_firing, qc_cortana_connected, qc_clinic_sheet`;
     await db.query(
-      `insert into launches (client_id, ${qc}, live_at, broke_week1) values ($1, true, true, true, true, true, true, ${at(1, 1, "12:00")}, true)`,
+      `insert into launches (client_id, ${qc}, approved_at, live_at, broke_week1) values ($1, true, true, true, true, true, true, ${at(1, 1, "12:00")}, ${at(1, 1, "12:00")}, true)`,
       [clinicA],
     );
     s = await scores(1);
