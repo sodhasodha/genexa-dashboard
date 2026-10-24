@@ -8,6 +8,7 @@ import { postFromEventBody } from "@/lib/router/events";
 import { ingestClientMessage } from "@/lib/router/ingest";
 import { processRequest } from "@/lib/router/process";
 import { classifierConfigured, ingestDeps, processDeps } from "@/lib/router/runtime";
+import { decideOutcome, outcomeProposalsConfigured, proposeOutcomes } from "@/lib/outcome-proposals/run";
 
 // Slack requests from both workspaces arrive here, each signed with its own
 // install's secret. Team workspace: the Done / Snooze 1h buttons on reminders, and
@@ -57,6 +58,12 @@ export async function POST(request: NextRequest) {
           await processRequest(stored.id, processDeps(db)).catch((err) => console.error("router: processing failed", err));
         });
       }
+      // A patient outcome the clinic mentions here instead of logging it: DM'd to the owner to confirm, never logged on its own.
+      if (stored.action === "stored" && outcomeProposalsConfigured()) {
+        after(async () => {
+          await proposeOutcomes(stored.id, db).catch((err) => console.error("outcome proposals: failed", err));
+        });
+      }
     } catch (err) {
       // Not stored: a 500 makes Slack send it again.
       console.error("router: could not store client message", { retry: request.headers.get("x-slack-retry-num"), err });
@@ -69,6 +76,15 @@ export async function POST(request: NextRequest) {
 
   const payload = parseInteractionBody(body);
   if (!payload) return NextResponse.json({ error: "no payload" }, { status: 400 });
+
+  // Confirm / Ignore on an outcome a clinic reported in Slack. Logging it calls the client dashboard, which can take
+  // longer than Slack's 3 seconds, so the answer goes to response_url afterwards.
+  if (payload.actions?.[0]?.action_id?.startsWith("outcome_")) {
+    after(async () => {
+      await decideOutcome(payload, createAdminClient()).catch((err) => console.error("outcome decision failed", err));
+    });
+    return new NextResponse(null, { status: 200 });
+  }
 
   let reply: InteractionReply;
   try {
