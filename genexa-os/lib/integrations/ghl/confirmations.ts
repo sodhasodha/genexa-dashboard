@@ -104,7 +104,8 @@ export async function syncConfirmationDesk(opts: {
       }
       const mainIds = new Set(calendars.filter((c) => c.kind === "main").map((c) => c.calendar_id));
       const mainContacts = new Set(events.filter((x) => x.cal.kind === "main" && !isCancelled(x.e) && x.e.contactId).map((x) => x.e.contactId as string));
-      const unconfirmed = events.filter((x) => x.cal.kind === "unconfirmed" && !isCancelled(x.e));
+      // GHL's window is loose and returns some that already started: those never reach the desk.
+      const unconfirmed = events.filter((x) => x.cal.kind === "unconfirmed" && !isCancelled(x.e) && new Date(x.e.startTime).getTime() > from);
 
       const { data: existing } = await db.from("confirmation_appointments")
         .select("id, ghl_appointment_id, ghl_contact_id, status, status_source, scheduled_for, patient_name, phone")

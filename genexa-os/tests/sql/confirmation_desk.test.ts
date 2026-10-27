@@ -123,3 +123,26 @@ describe("call centre numbers", () => {
     expect(Number(t.appointments)).toBeGreaterThan(0);
   });
 });
+
+describe("desk totals", () => {
+  it("leave out appointments that first showed up inside the last 3 hours (never on the desk)", async () => {
+    const before = await one<{ appointments: string; expired: string }>(`select * from confirmation_desk_totals(app_today() - 2, app_today() + 2)`);
+    const late = await appt(2);
+    await db.query(`update confirmation_appointments set first_seen_at = now() where id = $1`, [late]);
+    await db.query(`select confirmations_expire()`);
+    const after = await one<{ appointments: string; expired: string }>(`select * from confirmation_desk_totals(app_today() - 2, app_today() + 2)`);
+    expect([after.appointments, after.expired]).toEqual([before.appointments, before.expired]);
+  });
+});
+
+describe("CSRs are off EODs and attendance", () => {
+  it("are not listed as missing EODs or scored on them", async () => {
+    await db.query(`insert into app_settings (key, value) values ('go_live_date', to_jsonb((current_date - 10)::text)) on conflict (key) do update set value = excluded.value`);
+    await db.query(`update staff set working_days = '{1,2,3,4,5,6,7}' where id = $1`, [people.amanda]);
+    for (const v of ["eod_status_7d", "data_review_items", "score_eods_weekly", "score_attendance_weekly"]) {
+      const sql = (await one<{ d: string }>(`select pg_get_viewdef($1::regclass) as d`, [v])).d;
+      expect(sql, v).not.toContain(`'csr'::text, 'tech'`);
+    }
+    expect((await db.query(`select 1 from eod_status_7d where staff_id = $1`, [people.amanda])).rows).toEqual([]);
+  });
+});
