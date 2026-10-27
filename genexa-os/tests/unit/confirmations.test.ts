@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => { throw new Error("not used"); } }));
-import { ghlVerdict, isCancelled, locationLabel, patientName } from "@/lib/integrations/ghl/confirmations";
+import { confirmedCalendarAdds, ghlVerdict, isCancelled, locationLabel, patientName } from "@/lib/integrations/ghl/confirmations";
 import { matchesStatus, parseDeskFilters, telLink, timeLeft } from "@/lib/queries/confirmations";
 
 const ev = (o: Record<string, unknown> = {}) => ({ id: "e1", calendarId: "CAL_U", contactId: "c1", startTime: "2026-10-28T15:00:00-04:00", appointmentStatus: "confirmed", ...o });
@@ -42,5 +42,21 @@ describe("desk formatting and filters", () => {
     expect(matchesStatus({ status: "cancelled" }, "needs_action")).toBe(false);
     expect(parseDeskFilters({ clinic: "11111111-1111-4111-8111-111111111111,bad", status: "confirmed" })).toEqual({ clinics: ["11111111-1111-4111-8111-111111111111"], status: "confirmed" });
     expect(parseDeskFilters({ status: "nope" }).status).toBe("needs_action");
+  });
+});
+
+describe("desk sync: appointments booked on the Confirmed calendar", () => {
+  const from = Date.parse("2026-10-28T00:00:00Z");
+  const main = (o: Record<string, unknown>) => ev({ calendarId: "CAL_MAIN", ...o }) as never;
+  it("adds upcoming ones; skips cancelled, already started, already tracked, and patients the desk has from the Unconfirmed calendar", () => {
+    const events = [
+      main({ id: "new", contactId: "c-new" }),
+      main({ id: "gone", contactId: "c-x", appointmentStatus: "cancelled" }),
+      main({ id: "past", contactId: "c-y", startTime: "2026-10-27T20:00:00Z" }),
+      main({ id: "tracked", contactId: "c-z" }),
+      main({ id: "moved", contactId: "c-moved" }),
+      main({ id: "no-contact", contactId: null }),
+    ];
+    expect(confirmedCalendarAdds(events, new Set(["tracked"]), new Set(["c-moved"]), from).map((e: { id: string }) => e.id)).toEqual(["new", "no-contact"]);
   });
 });

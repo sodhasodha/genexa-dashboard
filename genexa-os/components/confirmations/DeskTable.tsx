@@ -73,6 +73,7 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
                 <td className="whitespace-nowrap px-3 py-2">
                   {STATUS[r.status] ?? r.status}
                   {r.status === "confirmed" && !r.on_main_calendar ? <span className="block text-xs text-warn">not moved in GHL yet</span> : null}
+                  {r.booked_on === "main" ? <span className="block text-xs text-muted">booked on Confirmed calendar</span> : null}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{r.attempts}/{MAX}</td>
                 <td className="px-3 py-2 text-xs text-muted">{r.last_text ?? "No calls yet"}</td>

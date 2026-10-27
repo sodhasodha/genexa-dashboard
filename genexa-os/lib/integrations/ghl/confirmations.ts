@@ -39,7 +39,7 @@ export function patientName(contact: { firstName?: string | null; lastName?: str
   return n || title?.trim() || null;
 }
 
-type Tracked = { id: string; ghl_appointment_id: string; ghl_contact_id: string | null; status: string; status_source: string | null; scheduled_for: string; patient_name: string | null; phone: string | null };
+type Tracked = { id: string; ghl_appointment_id: string; ghl_contact_id: string | null; status: string; status_source: string | null; scheduled_for: string; patient_name: string | null; phone: string | null; booked_on: "unconfirmed" | "main" };
 type Cal = { calendar_id: string; kind: "unconfirmed" | "main"; name: string; location_label: string | null };
 
 /**
@@ -61,7 +61,18 @@ export function ghlVerdict(
   return { scheduled_for: new Date(found.startTime).toISOString(), ghl_status: found.appointmentStatus ?? null };
 }
 
-export type DeskSyncResult = { ok: boolean; clinics: number; on_desk: number; added: number; confirmed_in_ghl: number; cancelled_in_ghl: number; expired: number; skipped: string[]; errors: string[] };
+/**
+ * Appointments on the Confirmed (main) calendar to add to the desk as Confirmed (pure):
+ * upcoming, not cancelled, not already tracked, and not a patient the desk already
+ * has from the Unconfirmed calendar (moving one in GHL can give it a new id).
+ */
+export function confirmedCalendarAdds(
+  main: DeskEvent[], trackedIds: Set<string>, knownContacts: Set<string>, from: number,
+): DeskEvent[] {
+  return main.filter((e) => !isCancelled(e) && new Date(e.startTime).getTime() > from && !trackedIds.has(e.id) && !(e.contactId && knownContacts.has(e.contactId)));
+}
+
+export type DeskSyncResult = { ok: boolean; clinics: number; on_desk: number; added: number; added_confirmed: number; confirmed_in_ghl: number; cancelled_in_ghl: number; expired: number; skipped: string[]; errors: string[] };
 
 export async function syncConfirmationDesk(opts: {
   db: SupabaseClient; keys: Record<string, { location_id: string; api_key: string }>; fetchImpl?: typeof fetch; now?: Date;
@@ -69,7 +80,7 @@ export async function syncConfirmationDesk(opts: {
   const { db } = opts;
   const doFetch = opts.fetchImpl ?? fetch;
   const now = opts.now ?? new Date();
-  const out: DeskSyncResult = { ok: false, clinics: 0, on_desk: 0, added: 0, confirmed_in_ghl: 0, cancelled_in_ghl: 0, expired: 0, skipped: [], errors: [] };
+  const out: DeskSyncResult = { ok: false, clinics: 0, on_desk: 0, added: 0, added_confirmed: 0, confirmed_in_ghl: 0, cancelled_in_ghl: 0, expired: 0, skipped: [], errors: [] };
   const keyByLocation = new Map(Object.values(opts.keys).map((k) => [k.location_id, k.api_key]));
   const get = async (apiKey: string, path: string, version = "2021-04-15"): Promise<{ status: number; body: unknown }> => {
     const res = await doFetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${apiKey}`, Version: version, Accept: "application/json" }, cache: "no-store" });
@@ -108,14 +119,13 @@ export async function syncConfirmationDesk(opts: {
       const unconfirmed = events.filter((x) => x.cal.kind === "unconfirmed" && !isCancelled(x.e) && new Date(x.e.startTime).getTime() > from);
 
       const { data: existing } = await db.from("confirmation_appointments")
-        .select("id, ghl_appointment_id, ghl_contact_id, status, status_source, scheduled_for, patient_name, phone")
+        .select("id, ghl_appointment_id, ghl_contact_id, status, status_source, scheduled_for, patient_name, phone, booked_on")
         .eq("client_id", client.id).gt("scheduled_for", new Date(from - 3_600_000).toISOString());
       const tracked = new Map(((existing ?? []) as Tracked[]).map((t) => [t.ghl_appointment_id, t]));
       const known = new Map(((existing ?? []) as Tracked[]).filter((t) => t.ghl_contact_id).map((t) => [t.ghl_contact_id as string, t]));
 
-      // New and still-unconfirmed appointments.
-      for (const { e, cal } of unconfirmed) {
-        const row = tracked.get(e.id);
+      /** Name and phone: from the desk's own row, another row for the same patient, or GHL. */
+      const person = async (e: DeskEvent, row: Tracked | undefined) => {
         let name = row?.patient_name ?? null;
         let phone = row?.phone ?? null;
         const reuse = e.contactId ? known.get(e.contactId) : undefined;
@@ -127,9 +137,15 @@ export async function syncConfirmationDesk(opts: {
           name = name ?? patientName(contact, e.title);
           phone = phone ?? contact?.phone?.trim() ?? null;
         }
+        return { patient_name: name ?? e.title ?? null, phone };
+      };
+
+      // New and still-unconfirmed appointments.
+      for (const { e, cal } of unconfirmed) {
+        const row = tracked.get(e.id);
         const values = {
-          client_id: client.id, ghl_appointment_id: e.id, ghl_contact_id: e.contactId ?? null, unconfirmed_calendar_id: cal.calendar_id,
-          location_label: cal.location_label, patient_name: name ?? e.title ?? null, phone, scheduled_for: new Date(e.startTime).toISOString(),
+          client_id: client.id, ghl_appointment_id: e.id, ghl_contact_id: e.contactId ?? null, calendar_id: cal.calendar_id,
+          location_label: cal.location_label, ...(await person(e, row)), scheduled_for: new Date(e.startTime).toISOString(),
           clinic_timezone: tz, ghl_status: e.appointmentStatus ?? null, last_seen_at: seen,
         };
         const { error: upsertError } = await db.from("confirmation_appointments").upsert(values, { onConflict: "client_id,ghl_appointment_id" });
@@ -137,10 +153,25 @@ export async function syncConfirmationDesk(opts: {
         if (!row) out.added++;
       }
 
+      // Booked straight onto the Confirmed calendar: on the desk as Confirmed, nobody to call.
+      const knownContacts = new Set([...known.keys(), ...unconfirmed.flatMap((x) => (x.e.contactId ? [x.e.contactId] : []))]);
+      const mainEvents = events.filter((x) => x.cal.kind === "main");
+      for (const e of confirmedCalendarAdds(mainEvents.map((x) => x.e), new Set(tracked.keys()), knownContacts, from)) {
+        const cal = mainEvents.find((x) => x.e.id === e.id)!.cal;
+        const { error: insertError } = await db.from("confirmation_appointments").upsert({
+          client_id: client.id, ghl_appointment_id: e.id, ghl_contact_id: e.contactId ?? null, calendar_id: cal.calendar_id,
+          location_label: cal.location_label, ...(await person(e, undefined)), scheduled_for: new Date(e.startTime).toISOString(),
+          clinic_timezone: tz, ghl_status: e.appointmentStatus ?? null, last_seen_at: seen,
+          booked_on: "main", status: "confirmed", status_source: "ghl", status_at: seen, on_main_calendar: true,
+        }, { onConflict: "client_id,ghl_appointment_id" });
+        if (insertError) throw new Error(`confirmation_appointments: ${insertError.message}`);
+        out.added_confirmed++;
+      }
+
       // Tracked appointments that are no longer on the Unconfirmed calendar list: ask GHL what happened.
       const onList = new Set(unconfirmed.map((x) => x.e.id));
       for (const t of tracked.values()) {
-        const open = t.status === "unconfirmed" || t.status === "unreachable" || (t.status === "confirmed" && t.status_source === "csr");
+        const open = t.status === "unconfirmed" || t.status === "unreachable" || (t.status === "confirmed" && (t.status_source === "csr" || t.booked_on === "main"));
         if (!open) continue;
         const onMainList = events.find((x) => x.e.id === t.ghl_appointment_id && x.cal.kind === "main")?.e ?? null;
         let found: DeskEvent | null = onMainList ?? (onList.has(t.ghl_appointment_id) ? unconfirmed.find((x) => x.e.id === t.ghl_appointment_id)!.e : null);
@@ -156,7 +187,9 @@ export async function syncConfirmationDesk(opts: {
         if (v.on_main) patch.on_main_calendar = true;
         if (v.status === "confirmed" && t.status !== "confirmed") { Object.assign(patch, { status: "confirmed", status_source: "ghl", status_at: seen }); out.confirmed_in_ghl++; }
         if (v.status === "confirmed" && t.status === "confirmed") patch.status_source = "ghl";
-        if (v.status === "cancelled" && t.status !== "confirmed") { Object.assign(patch, { status: "cancelled", status_source: "ghl", status_at: seen }); out.cancelled_in_ghl++; }
+        // A desk confirmation is kept when GHL loses the old appointment (it may have been moved);
+        // one booked on the Confirmed calendar is only as good as that booking.
+        if (v.status === "cancelled" && (t.status !== "confirmed" || t.booked_on === "main")) { Object.assign(patch, { status: "cancelled", status_source: "ghl", status_at: seen }); out.cancelled_in_ghl++; }
         if (Object.keys(patch).length) await db.from("confirmation_appointments").update(patch).eq("id", t.id);
       }
       out.clinics++;

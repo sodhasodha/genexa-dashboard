@@ -17,7 +17,7 @@ const PH = "Asia/Manila";
 
 export type DeskRow = {
   id: string; client_id: string; clinic: string; location_label: string | null; patient_name: string | null; phone: string | null;
-  scheduled_for: string; clinic_timezone: string; status: DeskStatus; on_main_calendar: boolean; minutes_left: number;
+  scheduled_for: string; clinic_timezone: string; status: DeskStatus; on_main_calendar: boolean; booked_on: "unconfirmed" | "main"; minutes_left: number;
   attempts: number; last_at: string | null; last_outcome: Outcome | null; last_by: string | null; urgency: "red" | "amber" | "green" | "grey" | "none";
   /** Shown text, worked out here so the page only lays it out. */
   clinic_time: string; ph_time: string; time_left: string; last_text: string | null; tel: string | null;

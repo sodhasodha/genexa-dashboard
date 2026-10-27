@@ -15,7 +15,9 @@ export async function signIn(formData: FormData) {
   if (!parsed.success) redirect("/login?error=invalid");
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword(parsed.data);
+  const { data, error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error) redirect(`/login?error=${error.status === 429 ? "rate" : "wrong"}&email=${encodeURIComponent(parsed.data.email)}`);
-  redirect("/");
+  // CSRs go straight to the desk, so the address bar says /confirmations and the desk's filters work.
+  const { data: me } = await supabase.from("staff").select("role").eq("auth_user_id", data.user.id).neq("status", "left").maybeSingle();
+  redirect(me?.role === "csr" ? "/confirmations" : "/");
 }

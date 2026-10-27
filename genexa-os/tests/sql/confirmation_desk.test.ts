@@ -9,7 +9,7 @@ let n = 0;
 const one = async <T>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows[0];
 const appt = async (hoursAhead: number, name = `Patient ${++n}`) =>
   (await one<{ id: string }>(
-    `insert into confirmation_appointments (client_id, ghl_appointment_id, ghl_contact_id, unconfirmed_calendar_id, patient_name, phone, scheduled_for, clinic_timezone)
+    `insert into confirmation_appointments (client_id, ghl_appointment_id, ghl_contact_id, calendar_id, patient_name, phone, scheduled_for, clinic_timezone)
      values ($1, $2, $2, 'CAL_U', $3, '+15550100123', now() + make_interval(mins => $4::int), 'America/New_York') returning id`,
     [clinic, `ghl_${n}_${Math.random()}`, name, Math.round(hoursAhead * 60)])).id;
 const log = (id: string, outcome: string) => db.query<{ r: { attempt: number; status: string } }>(`select confirmation_log_call($1, $2) as r`, [id, outcome]);
@@ -157,5 +157,17 @@ describe("desk totals by time on the desk", () => {
     const gone = await appt(2); // left the desk (inside 3h) and only showed up now: never on it
     await db.query(`update confirmation_appointments set first_seen_at = now() where id = $1`, [gone]);
     expect(await t()).toBe(before + 1);
+  });
+});
+
+describe("booked on the Confirmed calendar", () => {
+  it("shows on the desk as confirmed and green, can't be logged, and stays out of the call centre totals", async () => {
+    const before = await one<{ appointments: string }>(`select appointments from confirmation_desk_totals(app_today(), app_today())`);
+    const id = (await one<{ id: string }>(
+      `insert into confirmation_appointments (client_id, ghl_appointment_id, calendar_id, patient_name, scheduled_for, clinic_timezone, booked_on, status, status_source, on_main_calendar)
+       values ($1, 'main_1', 'CAL_MAIN', 'Booked Confirmed', now() + interval '20 hours', 'America/New_York', 'main', 'confirmed', 'ghl', true) returning id`, [clinic])).id;
+    expect(await one(`select status, urgency, booked_on from confirmation_desk where id = $1`, [id])).toEqual({ status: "confirmed", urgency: "green", booked_on: "main" });
+    await asUser(db, AUTH.marjorie, async () => { await expect(log(id, "no_answer")).rejects.toThrow(/DESK_CLOSED/); });
+    expect((await one<{ appointments: string }>(`select appointments from confirmation_desk_totals(app_today(), app_today())`)).appointments).toBe(before.appointments);
   });
 });
