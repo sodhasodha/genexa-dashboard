@@ -146,3 +146,16 @@ describe("CSRs are off EODs and attendance", () => {
     expect((await db.query(`select 1 from eod_status_7d where staff_id = $1`, [people.amanda])).rows).toEqual([]);
   });
 });
+
+describe("desk totals by time on the desk", () => {
+  it("today counts tomorrow's appointments that are on the desk now, not ones that leave it before today", async () => {
+    const t = async () => Number((await one<{ appointments: string }>(`select appointments from confirmation_desk_totals(app_today(), app_today())`)).appointments);
+    const before = await t();
+    await appt(30); // on the desk now, scheduled tomorrow or later
+    expect(await t()).toBe(before + 1);
+    await appt(110); // reaches the desk in 76 hours: not today
+    const gone = await appt(2); // left the desk (inside 3h) and only showed up now: never on it
+    await db.query(`update confirmation_appointments set first_seen_at = now() where id = $1`, [gone]);
+    expect(await t()).toBe(before + 1);
+  });
+});

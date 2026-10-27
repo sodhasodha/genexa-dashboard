@@ -82,7 +82,7 @@ export default async function CallCentrePage({ searchParams }: PageProps<"/call-
 
       {totals ? (
         <section>
-          <h2 className="mb-2 text-sm font-semibold">The desk (appointments in this period)</h2>
+          <h2 className="mb-2 text-sm font-semibold">The desk (appointments on it during this period)</h2>
           <div className="flex flex-wrap gap-2 text-sm">
             {[
               { label: "Reached the desk", value: totals.appointments },
