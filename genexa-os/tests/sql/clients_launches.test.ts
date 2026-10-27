@@ -192,10 +192,14 @@ describe("going live", () => {
 describe("touches", () => {
   it("any staff member logging a touch moves last contact (us) forward, never back", async () => {
     const c = await client("Touch Clinic", "live");
-    await asUser(db, AUTH.amanda, async () => {
-      await db.query(`insert into touches (client_id, kind, note, by_id, at) values ($1, 'call', 'Weekly check-in', $2, now() - interval '2 days')`, [c, people.amanda]);
+    await asUser(db, AUTH.aditya, async () => {
+      await db.query(`insert into touches (client_id, kind, note, by_id, at) values ($1, 'call', 'Weekly check-in', $2, now() - interval '2 days')`, [c, people.aditya]);
       // Logging one as somebody else is refused by RLS.
       await expect(db.query(`insert into touches (client_id, kind, by_id) values ($1, 'slack', $2)`, [c, people.sameer])).rejects.toThrow();
+    });
+    // CSRs are not staff here (0063): not even as themselves.
+    await asUser(db, AUTH.amanda, async () => {
+      await expect(db.query(`insert into touches (client_id, kind, by_id) values ($1, 'call', $2)`, [c, people.amanda])).rejects.toThrow(/row-level security/);
     });
     const first = await one<{ ok: boolean }>(`select last_contact_us = (select max(at) from touches where client_id = $1) as ok from clients where id = $1`, [c]);
     expect(first.ok).toBe(true);

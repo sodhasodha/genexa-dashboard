@@ -44,9 +44,16 @@ describe("overview_period", () => {
     const r = await one<Record<string, string | null>>(`select * from overview_period(app_today() - 400, app_today() - 390)`);
     expect(r.ad_spend).toBeNull();
     expect(r.expenses).toBeNull();
-    await asUser(db, AUTH.amanda, async () => {
+    await asUser(db, AUTH.aditya, async () => {
       const s = await one<Record<string, string | null>>(`select * from overview_period(app_today() - 1, app_today())`);
       expect(Number(s.ad_spend)).toBe(150);
+      expect(s.expenses).toBeNull();
+      expect(s.bank_revenue).toBeNull();
+    });
+    // A CSR sees no numbers at all, not even ad spend.
+    await asUser(db, AUTH.amanda, async () => {
+      const s = await one<Record<string, string | null>>(`select * from overview_period(app_today() - 1, app_today())`);
+      expect(s.ad_spend).toBeNull();
       expect(s.expenses).toBeNull();
       expect(s.bank_revenue).toBeNull();
     });

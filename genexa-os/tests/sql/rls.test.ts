@@ -6,6 +6,7 @@ let db: PGlite;
 let people: TestPeople;
 let clientId: string;
 let amandaTask: string;
+let adityaTask: string;
 let sameerJob: string;
 
 const count = async (table: string) =>
@@ -20,10 +21,26 @@ beforeAll(async () => {
   amandaTask = (
     await db.query<{ id: string }>(`insert into tasks (owner_id, title, source) values ($1, 'Call back patient', 'ryan') returning id`, [people.amanda])
   ).rows[0].id;
+  adityaTask = (
+    await db.query<{ id: string }>(`insert into tasks (owner_id, title, category, source) values ($1, 'Check ad spend', 'ads', 'ryan') returning id`, [
+      people.aditya,
+    ])
+  ).rows[0].id;
   sameerJob = (
     await db.query<{ id: string }>(`insert into tech_jobs (type, title, owner_id) values ('fix', 'Fix calendar', $1) returning id`, [people.sameer])
   ).rows[0].id;
   await db.query(`insert into agency_month (month, snapshot) values ('2026-09-01', '{"profit": 1}')`);
+  // Rows in the tables a CSR must not see, so "reads nothing" is not just "nothing there".
+  const lead = (
+    await db.query<{ id: string }>(`insert into leads (client_id, ghl_contact_id, name, created_at) values ($1, 'rls1', 'Pat Lead', now()) returning id`, [
+      clientId,
+    ])
+  ).rows[0].id;
+  await db.query(`insert into appointments (lead_id, client_id, scheduled_for) values ($1, $2, now() + interval '1 day')`, [lead, clientId]);
+  await db.query(`insert into exceptions (type, severity, reason, dedupe_key, owner_pod) values ('lead_not_called', 'red', 'r', 'k0', 'pod_2')`);
+  await db.query(`insert into prospects (name, stage) values ('Seed Prospect', 'chase')`);
+  await db.query(`insert into ideas (text) values ('Seed idea')`);
+  await db.query(`insert into touches (client_id, kind) values ($1, 'call')`, [clientId]);
 });
 
 describe("owner", () => {
@@ -47,7 +64,6 @@ describe("owner", () => {
 describe.each([
   ["media buyer", "aditya"],
   ["tech", "sameer"],
-  ["csr", "amanda"],
 ] as const)("%s", (_label, who) => {
   it("reads operational data but not pay, finance, audit or agency month", async () => {
     await asUser(db, AUTH[who], async () => {
@@ -93,56 +109,137 @@ describe.each([
   });
 });
 
-describe("staff writes", () => {
-  it("a CSR files their own EOD for today, not someone else's and not yesterday's", async () => {
+describe("csr", () => {
+  // CSRs use the confirmation desk and nothing else (0063). Aditya is the comparison: each of
+  // these has rows that ordinary staff can see.
+  const operational = [
+    "clients", "tasks", "tech_jobs", "exceptions", "prospects", "leads", "appointments", "touches", "ideas", "scoring_config",
+    "task_list", "tech_jobs_board",
+  ];
+
+  it("reads nothing from operational tables, nor pay, finance, audit or agency month", async () => {
+    for (const table of operational) {
+      await asUser(db, AUTH.aditya, async () => expect(await count(table), table).toBeGreaterThan(0));
+      await asUser(db, AUTH.amanda, async () => expect(await count(table), table).toBe(0));
+    }
     await asUser(db, AUTH.amanda, async () => {
-      await db.query(
-        `insert into eods (staff_id, date, answers) values ($1, (now() at time zone 'America/New_York')::date, '{"focus": 4}')`,
-        [people.amanda],
+      for (const table of ["staff_pay", "finance_transactions", "finance_rules", "audit_log", "agency_month", "eods", "attendance", "eod_status_7d"]) {
+        expect(await count(table), table).toBe(0);
+      }
+    });
+  });
+
+  it("reads their own staff row and no one else's", async () => {
+    await asUser(db, AUTH.amanda, async () => {
+      const r = await db.query<{ id: string }>(`select id from staff`);
+      expect(r.rows).toEqual([{ id: people.amanda }]);
+    });
+  });
+
+  it("cannot write anywhere outside the desk", async () => {
+    const today = `(now() at time zone 'America/New_York')::date`;
+    const inserts: [string, unknown[], RegExp][] = [
+      [`insert into clients (name) values ('Sneaky')`, [], /row-level security/],
+      [`insert into staff_pay (staff_id, weekly_pay) values ($1, 9999)`, [people.amanda], /row-level security/],
+      [`insert into tasks (owner_id, title, source) values ($1, 'My own task', 'staff')`, [people.amanda], /row-level security/],
+      [`insert into tech_jobs (type, title, owner_id) values ('fix', 'Request from amanda', $1)`, [people.sameer], /row-level security/],
+      [`insert into touches (client_id, kind, by_id) values ($1, 'call', $2)`, [clientId, people.amanda], /row-level security/],
+      [`insert into ideas (text, source) values ('An idea', 'Amanda')`, [], /row-level security/],
+      [`insert into eods (staff_id, date, answers) values ($1, ${today}, '{"v": 1}')`, [people.amanda], /EOD_OWN/],
+      [
+        `insert into sla_pauses (tech_job_id, reason, evidence_note, paused_by) values ($1, 'client_access', 'pls', $2)`,
+        [sameerJob, people.amanda],
+        /row-level security/,
+      ],
+    ];
+    await asUser(db, AUTH.amanda, async () => {
+      for (const sql of [
+        `update clients set cycle_fee = 1 returning id`,
+        `update staff set role = 'owner' returning id`,
+        `update scoring_config set green = 0 returning id`,
+        `update tasks set status = 'doing' returning id`,
+        `update tech_jobs set status = 'done' returning id`,
+        `update exceptions set action_taken = 'Called' returning id`,
+      ]) {
+        expect((await db.query(sql)).rows.length, sql).toBe(0);
+      }
+      for (const [sql, params, error] of inserts) {
+        await expect(db.query(sql, params), sql).rejects.toThrow(error);
+      }
+    });
+    const task = await db.query<{ status: string }>(`select status from tasks where id = $1`, [amandaTask]);
+    expect(task.rows[0].status).toBe("todo");
+  });
+
+  it("reads the desk tables and logs calls through the desk function", async () => {
+    await asUser(db, AUTH.amanda, async () => {
+      expect(await count("confirmation_appointments")).toBe(0);
+      expect(await count("confirmation_calls")).toBe(0);
+      // Let in: the refusal is about the appointment, not about who is calling.
+      await expect(db.query(`select confirmation_log_call(gen_random_uuid(), 'confirmed')`)).rejects.toThrow(/DESK_NOT_FOUND/);
+    });
+  });
+});
+
+describe("staff writes", () => {
+  const today = `(now() at time zone 'America/New_York')::date`;
+
+  it("a staff member files their own EOD for today, not someone else's and not yesterday's; a CSR files none", async () => {
+    await asUser(db, AUTH.aditya, async () => {
+      await db.query(`insert into eods (staff_id, date, answers) values ($1, ${today}, '{"focus": 4}')`, [people.aditya]);
+      await expect(db.query(`insert into eods (staff_id, date) values ($1, ${today})`, [people.sameer])).rejects.toThrow(
+        /row-level security|EOD_OWN/,
       );
-      await expect(
-        db.query(`insert into eods (staff_id, date) values ($1, (now() at time zone 'America/New_York')::date)`, [people.marjorie]),
-      ).rejects.toThrow(/row-level security|EOD_OWN/);
-      await expect(
-        db.query(`insert into eods (staff_id, date) values ($1, (now() at time zone 'America/New_York')::date - 1)`, [people.amanda]),
-      ).rejects.toThrow(/EOD_CLOSED/);
+      await expect(db.query(`insert into eods (staff_id, date) values ($1, ${today} - 1)`, [people.aditya])).rejects.toThrow(/EOD_CLOSED/);
       // Editable the same day.
-      const r = await db.query(`update eods set answers = '{"focus": 5}' where staff_id = $1 returning id`, [people.amanda]);
+      const r = await db.query(`update eods set answers = '{"focus": 5}' where staff_id = $1 returning id`, [people.aditya]);
       expect(r.rows.length).toBe(1);
     });
-    const role = await db.query<{ role: string }>(`select role from eods where staff_id = $1`, [people.amanda]);
-    expect(role.rows[0].role).toBe("csr");
-  });
-
-  it("a CSR changes the status of their own task, nothing else, and nobody else's task", async () => {
-    await asUser(db, AUTH.amanda, async () => {
-      const ok = await db.query(`update tasks set status = 'doing' where id = $1 returning id`, [amandaTask]);
-      expect(ok.rows.length).toBe(1);
-      await expect(db.query(`update tasks set title = 'Easier task' where id = $1`, [amandaTask])).rejects.toThrow(/TASK_STATUS_ONLY/);
-      await expect(db.query(`update tasks set deleted_at = now() where id = $1`, [amandaTask])).rejects.toThrow(/TASK_STATUS_ONLY/);
-    });
-    await asUser(db, AUTH.marjorie, async () => {
-      const r = await db.query(`update tasks set status = 'done' where id = $1 returning id`, [amandaTask]);
-      expect(r.rows.length).toBe(0);
-    });
-  });
-
-  it("a CSR cannot add to Ryan's list", async () => {
+    const role = await db.query<{ role: string }>(`select role from eods where staff_id = $1`, [people.aditya]);
+    expect(role.rows[0].role).toBe("media_buyer");
     await asUser(db, AUTH.amanda, async () => {
       await expect(
-        db.query(`insert into tasks (owner_id, title, source) values ($1, 'Pay me more', 'ryan')`, [people.ryan]),
+        db.query(`insert into eods (staff_id, date, answers) values ($1, ${today}, '{"focus": 4}')`, [people.amanda]),
+      ).rejects.toThrow(/EOD_OWN/);
+    });
+    expect((await db.query(`select 1 from eods where staff_id = $1`, [people.amanda])).rows).toHaveLength(0);
+  });
+
+  it("staff change the status of their own task, nothing else, and nobody else's task; a CSR not even their own", async () => {
+    await asUser(db, AUTH.aditya, async () => {
+      const ok = await db.query(`update tasks set status = 'doing' where id = $1 returning id`, [adityaTask]);
+      expect(ok.rows.length).toBe(1);
+      await expect(db.query(`update tasks set title = 'Easier task' where id = $1`, [adityaTask])).rejects.toThrow(/TASK_STATUS_ONLY/);
+      await expect(db.query(`update tasks set deleted_at = now() where id = $1`, [adityaTask])).rejects.toThrow(/TASK_STATUS_ONLY/);
+    });
+    await asUser(db, AUTH.sameer, async () => {
+      const r = await db.query(`update tasks set status = 'done' where id = $1 returning id`, [adityaTask]);
+      expect(r.rows.length).toBe(0);
+    });
+    await asUser(db, AUTH.amanda, async () => {
+      const r = await db.query(`update tasks set status = 'doing' where id = $1 returning id`, [amandaTask]);
+      expect(r.rows.length).toBe(0);
+    });
+    const statuses = await db.query<{ id: string; status: string }>(`select id, status from tasks where id in ($1, $2)`, [adityaTask, amandaTask]);
+    expect(Object.fromEntries(statuses.rows.map((t) => [t.id, t.status]))).toEqual({ [adityaTask]: "doing", [amandaTask]: "todo" });
+  });
+
+  it("staff cannot add to Ryan's list", async () => {
+    await asUser(db, AUTH.aditya, async () => {
+      await expect(
+        db.query(`insert into tasks (owner_id, title, category, source) values ($1, 'Pay me more', 'ads', 'ryan')`, [people.ryan]),
       ).rejects.toThrow(/TASK_OWNER_LIST/);
     });
   });
 
   it("only the job's owner can work or pause a tech job, and a pause needs evidence", async () => {
-    await asUser(db, AUTH.amanda, async () => {
+    await asUser(db, AUTH.aditya, async () => {
       const r = await db.query(`update tech_jobs set status = 'done' where id = $1 returning id`, [sameerJob]);
       expect(r.rows.length).toBe(0);
       await expect(
         db.query(
           `insert into sla_pauses (tech_job_id, reason, evidence_note, paused_by) values ($1, 'client_access', 'pls', $2)`,
-          [sameerJob, people.amanda],
+          [sameerJob, people.aditya],
         ),
       ).rejects.toThrow(/row-level security/);
     });
@@ -168,12 +265,25 @@ describe("staff writes", () => {
       expect((await db.query(`update exceptions set action_taken = 'Raised budget' where dedupe_key = 'k1' returning id`)).rows.length).toBe(1);
       expect((await db.query(`update exceptions set action_taken = 'x' where dedupe_key = 'k2' returning id`)).rows.length).toBe(0);
     });
-    await asUser(db, AUTH.amanda, async () => {
-      expect((await db.query(`update exceptions set action_taken = 'Called' where dedupe_key = 'k2' returning id`)).rows.length).toBe(1);
-    });
-    await asUser(db, AUTH.marjorie, async () => {
-      expect((await db.query(`update exceptions set action_taken = 'x' where dedupe_key = 'k2' returning id`)).rows.length).toBe(0);
-    });
+    // The seeded pod members are CSRs, who no longer action anything: put the non-CSR staff in pods.
+    await db.query(`update staff set pod = 'pod_2' where id = $1`, [people.sameer]);
+    await db.query(`update staff set pod = 'pod_1' where id = $1`, [people.aditya]);
+    try {
+      await asUser(db, AUTH.sameer, async () => {
+        expect((await db.query(`update exceptions set action_taken = 'Called' where dedupe_key = 'k2' returning id`)).rows.length).toBe(1);
+      });
+      await asUser(db, AUTH.aditya, async () => {
+        expect((await db.query(`update exceptions set action_taken = 'x' where dedupe_key = 'k2' returning id`)).rows.length).toBe(0);
+      });
+      // A CSR in the owning pod cannot action it.
+      await asUser(db, AUTH.amanda, async () => {
+        expect((await db.query(`update exceptions set action_taken = 'x' where dedupe_key = 'k2' returning id`)).rows.length).toBe(0);
+      });
+    } finally {
+      await db.query(`update staff set pod = null where id in ($1, $2)`, [people.sameer, people.aditya]);
+    }
+    const k2 = await db.query<{ action_taken: string }>(`select action_taken from exceptions where dedupe_key = 'k2'`);
+    expect(k2.rows[0].action_taken).toBe("Called");
   });
 });
 
@@ -202,10 +312,15 @@ describe("prospect contact details are owner only", () => {
     await db.query(`insert into prospect_contacts (prospect_id, contact) values ($1, 'dr@example.org / 555-0100')`, [p]);
     const cols = await db.query(`select 1 from information_schema.columns where table_name = 'prospects' and column_name = 'contact'`);
     expect(cols.rows.length).toBe(0);
-    await asUser(db, AUTH.amanda, async () => {
+    await asUser(db, AUTH.aditya, async () => {
       expect(await count("prospects")).toBeGreaterThanOrEqual(1);
       expect(await count("prospect_contacts")).toBe(0);
       await expect(db.query(`insert into prospect_contacts (prospect_id, contact) values ($1, 'x')`, [p])).rejects.toThrow(/row-level security|duplicate/);
+    });
+    // A CSR reads neither.
+    await asUser(db, AUTH.amanda, async () => {
+      expect(await count("prospects")).toBe(0);
+      expect(await count("prospect_contacts")).toBe(0);
     });
     await asUser(db, AUTH.ryan, async () => {
       expect(await count("prospect_contacts")).toBe(1);
