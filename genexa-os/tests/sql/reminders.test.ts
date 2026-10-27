@@ -253,17 +253,20 @@ describe("acceptance 3: shift hours", () => {
     expect((await notes(`rule_key = 'tech_job_new'`)).rows[0].channel).toBe("skipped:resolved");
   });
 
-  it("someone with no shift entered gets nothing except urgent rules", async () => {
+  it("someone with no shift entered gets nothing except urgent rules and new tasks", async () => {
     const noon = await at(1, "12:00");
     await job("build", "Media build", people.aditya, plus(noon, -5)); // Aditya has no shift
     await db.query(`insert into tasks (owner_id, title, due, source, category) values ($1, 'Check the ads', app_today() + 1, 'ryan', 'ads')`, [people.aditya]);
     await run(noon);
-    expect(to("aditya")).toEqual([]);
-    expect((await notes(`staff_id = $1`, [people.aditya])).rows).toEqual([]);
+    // The new task reaches him (0068); the build job does not.
+    expect(to("aditya").map((m) => m.text.split("\n")[0])).toEqual([expect.stringMatching(/^New task/)]);
+    expect(to("aditya")[0].text).toContain("Check the ads");
+    expect(to("aditya")[0].text).not.toContain("Media build");
+    expect((await notes(`staff_id = $1`, [people.aditya])).rows.map((r) => r.rule_key)).toEqual(["task_assigned"]);
     await job("fix", "Ad account locked", people.aditya, plus(noon, -1));
     await run(plus(noon, 5));
-    expect(to("aditya").length).toBe(1);
-    expect(to("aditya")[0].text).toContain("Ad account locked");
+    expect(to("aditya").length).toBe(2);
+    expect(to("aditya")[1].text).toContain("Ad account locked");
   });
 
   it("the owner with no shift entered gets owner messages at their stated time (07:00 Europe/London)", async () => {
@@ -486,6 +489,29 @@ describe("assignment, tech and launch rules", () => {
     expect(dms[0].text).not.toContain("My own note");
     await run(plus(now, 5));
     expect(to("sameer").filter((m) => m.text.startsWith("New task")).length).toBe(1);
+  });
+
+  it("task_assigned: someone with no shift entered gets it straight away, even at night", async () => {
+    await db.query(`update staff set shift_start = null, shift_end = null where id = $1`, [people.aditya]);
+    const night = await at(1, "03:00");
+    await db.query(`select set_config('app.actor', 'Ryan', false)`);
+    await db.query(`insert into tasks (owner_id, title, due, due_at, source, category, created_at) values ($1, 'For Aditya overnight', app_today() + 5, $2::timestamptz + interval '5 days', 'ryan', 'ads', $2)`, [people.aditya, plus(night, -1)]);
+    await db.query(`select set_config('app.actor', '', false)`);
+    await run(night);
+    const dms = to("aditya").filter((m) => m.text.startsWith("New task"));
+    expect(dms.length).toBe(1);
+    expect(dms[0].text).toContain("For Aditya overnight");
+    expect(dms[0].text).toContain("from Ryan");
+    await run(plus(night, 5));
+    expect(to("aditya").filter((m) => m.text.startsWith("New task")).length).toBe(1);
+    // One the request router made says it came from Slack.
+    await db.query(`select set_config('app.actor', 'request-router', false)`);
+    await db.query(`insert into tasks (owner_id, title, due, due_at, source, category, created_at) values ($1, 'From a client channel', app_today() + 5, $2::timestamptz + interval '5 days', 'slack', 'ads', $2)`, [people.aditya, plus(night, 6)]);
+    await db.query(`select set_config('app.actor', '', false)`);
+    await run(plus(night, 10));
+    const slack = to("aditya").filter((m) => m.text.includes("From a client channel"));
+    expect(slack.length).toBe(1);
+    expect(slack[0].text).toContain("from Slack");
   });
 
   it("tech_job_sla_warning: fires once 75% of a launch job's 48h is used, with the time left", async () => {
