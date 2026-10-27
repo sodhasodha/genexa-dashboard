@@ -100,8 +100,11 @@ describe("task_list", () => {
 
 describe("task rules through a staff login", () => {
   it("staff can add to their own or a colleague's list, never to Ryan's", async () => {
-    await asUser(db, AUTH.amanda, async () => {
-      await db.query(`insert into tasks (owner_id, title, source) values ($1, 'My own task', 'staff')`, [people.amanda]);
+    await asUser(db, AUTH.aditya, async () => {
+      // The media buyer's own tasks must be ads or call centre (TASK_CATEGORY, checked below) and carry a deadline (0047).
+      await db.query(`insert into tasks (owner_id, title, category, source, due_at) values ($1, 'My own task', 'ads', 'staff', now() + interval '1 day')`, [
+        people.aditya,
+      ]);
       // Sameer's tasks need a date and time deadline (0047): a person adding one without it is refused.
       await expect(db.query(`insert into tasks (owner_id, title, source) values ($1, 'For Sameer', 'staff')`, [people.sameer])).rejects.toThrow(/TASK_DEADLINE_REQUIRED/);
       await db.query(`insert into tasks (owner_id, title, source, due_at) values ($1, 'For Sameer', 'staff', now() + interval '3 days')`, [people.sameer]);
@@ -109,6 +112,10 @@ describe("task rules through a staff login", () => {
       await expect(
         db.query(`insert into tasks (owner_id, title, category, source) values ($1, 'Tech thing', 'tech', 'staff')`, [people.aditya]),
       ).rejects.toThrow(/TASK_CATEGORY/);
+    });
+    // A CSR adds nothing, not even to her own list (0063).
+    await asUser(db, AUTH.amanda, async () => {
+      await expect(db.query(`insert into tasks (owner_id, title, source) values ($1, 'CSR task', 'staff')`, [people.amanda])).rejects.toThrow(/row-level security/);
     });
     await asUser(db, AUTH.ryan, async () => {
       await db.query(`insert into tasks (owner_id, title, source) values ($1, 'Ryan adds his own', 'ryan')`, [people.ryan]);
@@ -118,7 +125,7 @@ describe("task rules through a staff login", () => {
   it("staff can change status and group on their own task, but not edit, delete or touch someone else's", async () => {
     const mine = await one<{ id: string }>(`select id from tasks where title = 'My own task'`);
     const theirs = await one<{ id: string }>(`select id from tasks where title = 'For Sameer'`);
-    await asUser(db, AUTH.amanda, async () => {
+    await asUser(db, AUTH.aditya, async () => {
       const moved = await db.query(`update tasks set task_group = 'today' where id = $1 returning id`, [mine.id]);
       expect(moved.rows.length).toBe(1);
       const done = await db.query<{ task_group: string }>(`update tasks set status = 'done' where id = $1 returning task_group`, [mine.id]);
@@ -172,22 +179,26 @@ describe("prospect_follow_ups", () => {
 
 describe("ideas and prospects: who may write", () => {
   it("a non-owner staff member can add an idea but cannot edit a prospect", async () => {
-    await asUser(db, AUTH.amanda, async () => {
-      await db.query(`insert into ideas (text, source) values ('Text reminders the night before consults', 'Amanda')`);
+    await asUser(db, AUTH.aditya, async () => {
+      await db.query(`insert into ideas (text, source) values ('Text reminders the night before consults', 'Aditya')`);
       const edit = await db.query(`update prospects set stage = 'paid', follow_up_date = null returning id`);
       expect(edit.rows.length).toBe(0);
       await expect(db.query(`insert into prospects (name) values ('Sneaky prospect')`)).rejects.toThrow(/row-level security/);
     });
     const idea = await one<{ text: string; source: string | null }>(`select text, source from idea_list`);
-    expect(idea).toEqual({ text: "Text reminders the night before consults", source: "Amanda" });
+    expect(idea).toEqual({ text: "Text reminders the night before consults", source: "Aditya" });
     const stages = await one<{ n: number }>(`select count(*)::int as n from prospects where stage = 'paid' and name <> 'Late but paid'`);
     expect(stages.n).toBe(0);
     const audit = await one<{ actor: string }>(`select actor from audit_log where table_name = 'ideas' order by at desc limit 1`);
-    expect(audit.actor).toBe("Amanda Harder");
+    expect(audit.actor).toBe("Aditya");
+    // A CSR cannot add an idea (0063).
+    await asUser(db, AUTH.amanda, async () => {
+      await expect(db.query(`insert into ideas (text, source) values ('CSR idea', 'Amanda')`)).rejects.toThrow(/row-level security/);
+    });
   });
 
   it("staff cannot edit or soft-delete an idea, or add one that is already deleted; the owner can", async () => {
-    await asUser(db, AUTH.amanda, async () => {
+    await asUser(db, AUTH.aditya, async () => {
       expect((await db.query(`update ideas set deleted_at = now() returning id`)).rows.length).toBe(0);
       expect((await db.query(`update ideas set text = 'changed' returning id`)).rows.length).toBe(0);
       await expect(db.query(`insert into ideas (text, deleted_at) values ('Hidden', now())`)).rejects.toThrow(/row-level security/);

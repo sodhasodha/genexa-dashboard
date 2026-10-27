@@ -143,61 +143,76 @@ describe("filing rules", () => {
   const today = `(now() at time zone 'America/New_York')::date`;
 
   it("a staff member cannot file an EOD for someone else", async () => {
-    await asUser(db, AUTH.marjorie, async () => {
+    await asUser(db, AUTH.sameer, async () => {
       await expect(
-        db.query(`insert into eods (staff_id, date, answers) values ($1, ${today}, '{"v": 1}')`, [people.amanda]),
+        db.query(`insert into eods (staff_id, date, answers) values ($1, ${today}, '{"v": 1}')`, [people.aditya]),
       ).rejects.toThrow(/row-level security|EOD_OWN/);
     });
   });
 
   it("a staff member cannot file or edit an EOD for yesterday", async () => {
-    await asUser(db, AUTH.marjorie, async () => {
+    await asUser(db, AUTH.sameer, async () => {
       await expect(
-        db.query(`insert into eods (staff_id, date, answers) values ($1, ${today} - 1, '{"v": 1}')`, [people.marjorie]),
+        db.query(`insert into eods (staff_id, date, answers) values ($1, ${today} - 1, '{"v": 1}')`, [people.sameer]),
       ).rejects.toThrow(/EOD_CLOSED/);
     });
-    // Amanda's EOD for yesterday exists (filed above by the server); she cannot change it now.
-    await asUser(db, AUTH.amanda, async () => {
+    // Aditya's EOD for yesterday exists (filed by the server); he cannot change it now.
+    await db.query(`insert into eods (staff_id, date, answers) values ($1, ${today} - 1, '{"v": 1}')`, [people.aditya]);
+    await asUser(db, AUTH.aditya, async () => {
       await expect(
-        db.query(`update eods set answers = '{"v": 1, "focus": 5}' where staff_id = $1 and date = ${today} - 1`, [people.amanda]),
+        db.query(`update eods set answers = '{"v": 1, "focus": 5}' where staff_id = $1 and date = ${today} - 1`, [people.aditya]),
       ).rejects.toThrow(/EOD_CLOSED/);
+    });
+    // Amanda's EOD for yesterday (filed above by the server) is not hers to touch either: a CSR files no EODs (0063).
+    await asUser(db, AUTH.amanda, async () => {
+      const r = await db.query(`update eods set answers = '{"v": 1, "focus": 5}' where staff_id = $1 and date = ${today} - 1 returning id`, [
+        people.amanda,
+      ]);
+      expect(r.rows).toHaveLength(0);
     });
   });
 
   it("files today's EOD and edits it with the same upsert the app uses", async () => {
-    const upsert = (focus: number) =>
+    await db.query(`update staff set working_days = '{1,2,3,4,5,6,7}' where id = $1`, [people.sameer]);
+    const upsert = (staffId: string, role: string, focus: number) =>
       db.query(
-        `insert into eods (staff_id, date, role, answers) values ($1, ${today}, 'csr', $2)
+        `insert into eods (staff_id, date, role, answers) values ($1, ${today}, $2, $3)
          on conflict (staff_id, date) do update set role = excluded.role, answers = excluded.answers`,
-        [people.marjorie, JSON.stringify({ v: 1, hours_worked: 8, blocker: "none", blocker_other: null, patient_flag: null, focus })],
+        [staffId, role, JSON.stringify({ v: 1, hours_worked: 8, blocker: "none", blocker_other: null, patient_flag: null, focus })],
       );
-    await asUser(db, AUTH.marjorie, async () => {
-      await upsert(3);
-      await upsert(5);
+    await asUser(db, AUTH.sameer, async () => {
+      await upsert(people.sameer, "tech", 3);
+      await upsert(people.sameer, "tech", 5);
     });
     const rows = (await db.query<{ focus: number; role: string }>(
       `select (answers ->> 'focus')::int as focus, role from eods where staff_id = $1 and date = ${today}`,
-      [people.marjorie],
+      [people.sameer],
     )).rows;
-    expect(rows).toEqual([{ focus: 5, role: "csr" }]);
-    const marjorieToday = (await status(people.marjorie)).find((r) => r.is_today);
-    expect(marjorieToday?.filed).toBe(true);
+    expect(rows).toEqual([{ focus: 5, role: "tech" }]);
+    const sameerToday = (await status(people.sameer)).find((r) => r.is_today);
+    expect(sameerToday?.filed).toBe(true);
+    // A CSR cannot file her own any more (0063).
+    await asUser(db, AUTH.amanda, async () => {
+      await expect(upsert(people.amanda, "csr", 4)).rejects.toThrow(/EOD_OWN/);
+    });
+    expect((await db.query(`select 1 from eods where staff_id = $1 and date = ${today}`, [people.amanda])).rows).toHaveLength(0);
   });
 
   it("the day is the person's own: today in their timezone is open, the day before is closed", async () => {
-    await db.query(`update staff set timezone = 'Pacific/Kiritimati' where id = $1`, [people.amanda]);
+    await db.query(`update staff set timezone = 'Pacific/Kiritimati' where id = $1`, [people.aditya]);
     const local = `(now() at time zone 'Pacific/Kiritimati')::date`;
-    await asUser(db, AUTH.amanda, async () => {
+    await asUser(db, AUTH.aditya, async () => {
       // Clear of the dates used above: local today is at least ET today.
       const r = await db.query(
         `insert into eods (staff_id, date, answers) values ($1, ${local}, '{"v": 1}')
          on conflict (staff_id, date) do update set answers = excluded.answers returning id`,
-        [people.amanda],
+        [people.aditya],
       );
       expect(r.rows.length).toBe(1);
       await expect(
-        db.query(`insert into eods (staff_id, date, answers) values ($1, ${local} - 2, '{"v": 1}')`, [people.amanda]),
+        db.query(`insert into eods (staff_id, date, answers) values ($1, ${local} - 2, '{"v": 1}')`, [people.aditya]),
       ).rejects.toThrow(/EOD_CLOSED/);
     });
+    await db.query(`update staff set timezone = 'America/New_York' where id = $1`, [people.aditya]);
   });
 });

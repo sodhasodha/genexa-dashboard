@@ -175,39 +175,51 @@ describe("attendance_tick", () => {
 
 describe("who can do what", () => {
   it("a person clocks in and out only as themselves, on the database clock", async () => {
-    await asUser(db, AUTH.amanda, async () => {
+    await asUser(db, AUTH.aditya, async () => {
       const r = await db.query<{ staff_id: string; ok: boolean }>(`select staff_id, abs(extract(epoch from (clock_in - now()))) < 5 as ok from clock_in()`);
-      expect(r.rows[0]).toEqual({ staff_id: people.amanda, ok: true });
+      expect(r.rows[0]).toEqual({ staff_id: people.aditya, ok: true });
       await expect(db.query(`select * from clock_in()`)).rejects.toThrow(/ATTENDANCE_ALREADY_IN/);
       // No way to name another person or another time.
       await expect(db.query(`select * from attendance_clock_in($1, now())`, [people.sameer])).rejects.toThrow(/permission denied/);
       await expect(db.query(`select * from attendance_clock_out($1, now())`, [people.sameer])).rejects.toThrow(/permission denied/);
       await expect(db.query(`select * from attendance_tick()`)).rejects.toThrow(/permission denied/);
       // No direct writes.
-      await expect(db.query(`insert into attendance (staff_id, date, status) values ($1, ${ET_TODAY} - 1, 'on_time')`, [people.amanda])).rejects.toThrow(/row-level security/);
-      const upd = await db.query(`update attendance set status = 'on_time', clock_in = now() - interval '3 hours' where staff_id = $1 returning id`, [people.amanda]);
+      await expect(db.query(`insert into attendance (staff_id, date, status) values ($1, ${ET_TODAY} - 1, 'on_time')`, [people.aditya])).rejects.toThrow(/row-level security/);
+      const upd = await db.query(`update attendance set status = 'on_time', clock_in = now() - interval '3 hours' where staff_id = $1 returning id`, [people.aditya]);
       expect(upd.rows).toHaveLength(0);
       await expect(db.query(`select * from attendance_owner_edit((select id from attendance limit 1), 'on_time', null, null, false, 'me')`)).rejects.toThrow(/ATTENDANCE_OWNER_ONLY/);
       const out = await db.query<{ staff_id: string }>(`select staff_id from clock_out()`);
-      expect(out.rows[0].staff_id).toBe(people.amanda);
+      expect(out.rows[0].staff_id).toBe(people.aditya);
     });
-    expect((await db.query(`select 1 from attendance where staff_id <> $1`, [people.amanda])).rows).toHaveLength(0);
+    expect((await db.query(`select 1 from attendance where staff_id <> $1`, [people.aditya])).rows).toHaveLength(0);
+  });
+
+  it("a CSR cannot clock in or out at all (the confirmation desk is all they use)", async () => {
+    await asUser(db, AUTH.amanda, async () => {
+      await expect(db.query(`select * from clock_in()`)).rejects.toThrow(/ATTENDANCE_NOT_STAFF/);
+      await expect(db.query(`select * from clock_out()`)).rejects.toThrow(/ATTENDANCE_NOT_STAFF/);
+      await expect(db.query(`select * from attendance_clock_in($1, now())`, [people.amanda])).rejects.toThrow(/permission denied/);
+    });
+    expect((await db.query(`select 1 from attendance`)).rows).toHaveLength(0);
   });
 
   it("my_attendance gives the caller the state for the clock control", async () => {
     type Mine = { staff_id: string; rostered: boolean; shift_label: string | null; state: string; show: boolean; clock_in_label: string | null };
     const mine = (who: string) => asUser(db, who, async () => (await db.query<Mine>(`select * from my_attendance()`)).rows);
-    let rows = await mine(AUTH.amanda);
+    await shift(people.aditya);
+    let rows = await mine(AUTH.aditya);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ staff_id: people.amanda, rostered: true, shift_label: "09:00–17:00", state: "not_clocked_in", show: true });
-    await asUser(db, AUTH.amanda, () => db.query(`select * from clock_in()`));
-    rows = await mine(AUTH.amanda);
+    expect(rows[0]).toMatchObject({ staff_id: people.aditya, rostered: true, shift_label: "09:00–17:00", state: "not_clocked_in", show: true });
+    await asUser(db, AUTH.aditya, () => db.query(`select * from clock_in()`));
+    rows = await mine(AUTH.aditya);
     expect(rows[0].state).toBe("clocked_in");
     expect(rows[0].clock_in_label).toMatch(/^\d\d:\d\d$/);
-    await asUser(db, AUTH.amanda, () => db.query(`select * from clock_out()`));
-    expect((await mine(AUTH.amanda))[0].state).toBe("clocked_out");
+    await asUser(db, AUTH.aditya, () => db.query(`select * from clock_out()`));
+    expect((await mine(AUTH.aditya))[0].state).toBe("clocked_out");
     // Not rostered and never clocked in: nothing to show.
-    expect((await mine(AUTH.marjorie))[0]).toMatchObject({ show: false, state: "not_clocked_in" });
+    expect((await mine(AUTH.sameer))[0]).toMatchObject({ show: false, state: "not_clocked_in" });
+    // A CSR, even one on a shift, gets no clock control.
+    expect(await mine(AUTH.amanda)).toHaveLength(0);
   });
 
   it("the owner edits any row with a note; the edit is audited and marks the row manual", async () => {

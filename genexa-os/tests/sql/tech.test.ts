@@ -178,16 +178,27 @@ describe("tech_jobs_board", () => {
 describe("request form and job controls (RLS)", () => {
   let requested: string;
 
-  it("a CSR can request tech work; it lands with the tech person and a due time", async () => {
+  it("a CSR cannot request tech work (0063)", async () => {
     await asUser(db, AUTH.amanda, async () => {
+      await expect(
+        db.query(
+          `insert into tech_jobs (type, title, client_id, requested_by, owner_id) values ('fix', 'Calendar not booking', $1, $2, app_role_holder('tech'))`,
+          [clinicA, people.amanda],
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+  });
+
+  it("a staff member can request tech work; it lands with the tech person and a due time", async () => {
+    await asUser(db, AUTH.aditya, async () => {
       const r = await db.query<{ id: string; requested_by: string; owner_id: string; status: string; due_at: string | null }>(
         `insert into tech_jobs (type, title, notes, client_id, requested_by, owner_id)
          values ('fix', 'Calendar not booking', 'Patients see no slots', $1, $2, app_role_holder('tech'))
          returning id, requested_by, owner_id, status, due_at`,
-        [clinicA, people.amanda],
+        [clinicA, people.aditya],
       );
       requested = r.rows[0].id;
-      expect(r.rows[0].requested_by).toBe(people.amanda);
+      expect(r.rows[0].requested_by).toBe(people.aditya);
       expect(r.rows[0].owner_id).toBe(people.sameer);
       expect(r.rows[0].status).toBe("todo");
       expect(r.rows[0].due_at).not.toBeNull();
@@ -197,28 +208,32 @@ describe("request form and job controls (RLS)", () => {
     });
   });
 
-  it("a CSR cannot request work in someone else's name", async () => {
-    await asUser(db, AUTH.amanda, async () => {
+  it("a staff member cannot request work in someone else's name", async () => {
+    await asUser(db, AUTH.aditya, async () => {
       await expect(
         db.query(`insert into tech_jobs (type, title, requested_by, owner_id) values ('fix', 'Forged', $1, $2)`, [people.marjorie, people.sameer]),
       ).rejects.toThrow(/row-level security/);
     });
   });
 
-  it("a CSR cannot update, pause or resume someone else's job", async () => {
+  it("the requester (or a CSR) cannot update, pause or resume someone else's job", async () => {
     await db.query(`insert into sla_pauses (tech_job_id, reason, evidence_note, paused_by) values ($1, 'third_party', 'GHL outage', $2)`, [requested, people.sameer]);
-    await asUser(db, AUTH.amanda, async () => {
-      const upd = await db.query(`update tech_jobs set status = 'done', blocked_on = 'nothing' where id = $1 returning id`, [requested]);
-      expect(upd.rows.length).toBe(0);
-      const resume = await db.query<{ n: number }>(`select resume_tech_job($1) as n`, [requested]);
-      expect(resume.rows[0].n).toBe(0);
-    });
+    for (const who of [AUTH.aditya, AUTH.amanda]) {
+      await asUser(db, who, async () => {
+        const upd = await db.query(`update tech_jobs set status = 'done', blocked_on = 'nothing' where id = $1 returning id`, [requested]);
+        expect(upd.rows.length).toBe(0);
+        const resume = await db.query<{ n: number }>(`select resume_tech_job($1) as n`, [requested]);
+        expect(resume.rows[0].n).toBe(0);
+      });
+    }
     await db.query(`update sla_pauses set resumed_at = now() where tech_job_id = $1`, [requested]);
-    await asUser(db, AUTH.amanda, async () => {
-      await expect(
-        db.query(`insert into sla_pauses (tech_job_id, reason, evidence_note, paused_by) values ($1, 'client_access', 'made up', $2)`, [requested, people.amanda]),
-      ).rejects.toThrow(/row-level security/);
-    });
+    for (const [who, id] of [[AUTH.aditya, people.aditya], [AUTH.amanda, people.amanda]]) {
+      await asUser(db, who, async () => {
+        await expect(
+          db.query(`insert into sla_pauses (tech_job_id, reason, evidence_note, paused_by) values ($1, 'client_access', 'made up', $2)`, [requested, id]),
+        ).rejects.toThrow(/row-level security/);
+      });
+    }
     const job = await db.query<{ status: string; blocked_on: string | null }>(`select status, blocked_on from tech_jobs where id = $1`, [requested]);
     expect(job.rows[0]).toEqual({ status: "todo", blocked_on: null });
   });
