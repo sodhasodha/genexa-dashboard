@@ -282,35 +282,38 @@ describe("weekly numbers and score", () => {
 
   it("colours from scoring_config: green 95+, amber 85-94, red below", async () => {
     await goLive(12);
-    await add(people.amanda, 1, 19, "on_time");
-    await add(people.amanda, 1, 1, "late"); // 95.0
+    await add(people.aditya, 1, 19, "on_time");
+    await add(people.aditya, 1, 1, "late"); // 95.0
     await add(people.sameer, 1, 9, "on_time");
     await add(people.sameer, 1, 1, "late"); // 90.0
-    await add(people.aditya, 1, 4, "on_time");
-    await add(people.aditya, 1, 1, "late"); // 80.0
-    expect(await score(people.amanda, 1, "attendance_pct")).toEqual({ card: "csr", value: "95.0", numerator: "19", denominator: "20", colour: "green" });
+    await add(people.aditya, 2, 4, "on_time");
+    await add(people.aditya, 2, 1, "late"); // 80.0
+    expect(await score(people.aditya, 1, "attendance_pct")).toEqual({ card: "media_buyer", value: "95.0", numerator: "19", denominator: "20", colour: "green" });
     expect(await score(people.sameer, 1, "attendance_pct")).toMatchObject({ card: "tech", value: "90.0", colour: "amber" });
-    expect(await score(people.aditya, 1, "attendance_pct")).toMatchObject({ card: "media_buyer", value: "80.0", colour: "red" });
-    expect(await score(people.amanda, 1, "late_count")).toEqual({ card: "csr", value: "1", numerator: "1", denominator: "20", colour: null });
-    expect(await score(people.amanda, 1, "no_shows")).toMatchObject({ value: "0", colour: null });
+    expect(await score(people.aditya, 2, "attendance_pct")).toMatchObject({ card: "media_buyer", value: "80.0", colour: "red" });
+    expect(await score(people.aditya, 1, "late_count")).toEqual({ card: "media_buyer", value: "1", numerator: "1", denominator: "20", colour: null });
+    expect(await score(people.aditya, 1, "no_shows")).toMatchObject({ value: "0", colour: null });
+    // CSRs do not clock in (0065), so they get no attendance score even with rows.
+    await add(people.amanda, 1, 5, "on_time");
+    expect(await score(people.amanda, 1, "attendance_pct")).toBeUndefined();
   });
 
   it("any no-show makes the week red, whatever the percentage", async () => {
     await goLive(12);
-    await add(people.amanda, 1, 39, "on_time");
-    await add(people.amanda, 1, 1, "no_show"); // 97.5%
-    expect(await score(people.amanda, 1, "attendance_pct")).toMatchObject({ value: "97.5", colour: "red" });
-    expect(await score(people.amanda, 1, "no_shows")).toMatchObject({ value: "1", colour: null });
+    await add(people.sameer, 1, 39, "on_time");
+    await add(people.sameer, 1, 1, "no_show"); // 97.5%
+    expect(await score(people.sameer, 1, "attendance_pct")).toMatchObject({ value: "97.5", colour: "red" });
+    expect(await score(people.sameer, 1, "no_shows")).toMatchObject({ value: "1", colour: null });
   });
 
   it("weeks before go-live are tracked but not scored; nothing rostered is no data", async () => {
     await goLive(1);
-    await add(people.amanda, 2, 1, "no_show");
-    await add(people.amanda, 1, 2, "on_time");
-    expect(await score(people.amanda, 2, "attendance_pct")).toEqual({ card: "csr", value: "0.0", numerator: "0", denominator: "1", colour: null });
-    expect(await score(people.amanda, 1, "attendance_pct")).toMatchObject({ value: "100.0", colour: "green" });
-    expect(await score(people.amanda, 3, "attendance_pct")).toEqual({ card: "csr", value: null, numerator: "0", denominator: "0", colour: null });
-    expect(await score(people.amanda, 3, "late_count")).toMatchObject({ value: null, colour: null });
+    await add(people.sameer, 2, 1, "no_show");
+    await add(people.sameer, 1, 2, "on_time");
+    expect(await score(people.sameer, 2, "attendance_pct")).toEqual({ card: "tech", value: "0.0", numerator: "0", denominator: "1", colour: null });
+    expect(await score(people.sameer, 1, "attendance_pct")).toMatchObject({ value: "100.0", colour: "green" });
+    expect(await score(people.sameer, 3, "attendance_pct")).toEqual({ card: "tech", value: null, numerator: "0", denominator: "0", colour: null });
+    expect(await score(people.sameer, 3, "late_count")).toMatchObject({ value: null, colour: null });
     // The owner has no attendance card; the view covers this week and the previous 12.
     expect((await db.query(`select 1 from score_attendance_weekly where staff_id = $1`, [people.ryan])).rows).toHaveLength(0);
     expect((await db.query(`select distinct week_start from score_attendance_weekly`)).rows).toHaveLength(13);

@@ -194,36 +194,45 @@ describe("person_scores_weekly: EODs", () => {
     const before = await db.query(`select 1 from person_scores_weekly where metric = 'eods' and week_start = ${lastWeek}`);
     expect(before.rows.length).toBe(0);
     await db.query(`update app_settings set value = to_jsonb((app_today() - 60)::text) where key = 'go_live_date'`);
-    // Last full week: tech filed 4 of 5 -> amber; media buyer 5 of 5 -> green; CSR 3 of 7 -> red.
-    const file = async (staff: string, offsets: number[]) => {
+    // Last full week: tech filed 4 of 5 -> amber; media buyer 5 of 5 -> green.
+    // The week before: media buyer filed 3 of 5 -> red (2 missed, amber allows 1).
+    const file = async (staff: string, week: string, offsets: number[]) => {
       for (const o of offsets) {
-        await db.query(`insert into eods (staff_id, date) values ($1, ${lastWeek} + $2::int)`, [staff, o]);
+        await db.query(`insert into eods (staff_id, date) values ($1, ${week} + $2::int)`, [staff, o]);
       }
     };
-    await file(people.sameer, [0, 1, 2, 3]);
-    await file(people.aditya, [0, 1, 2, 3, 4]);
-    await file(people.amanda, [0, 1, 2]);
-    const rows = await db.query<{ staff_id: string; value: string; denominator: string; colour: string }>(
-      `select staff_id, value, denominator, colour from person_scores_weekly where metric = 'eods' and week_start = ${lastWeek}`,
-    );
-    const by = Object.fromEntries(rows.rows.map((r) => [r.staff_id, r]));
+    await file(people.sameer, lastWeek, [0, 1, 2, 3]);
+    await file(people.aditya, lastWeek, [0, 1, 2, 3, 4]);
+    await file(people.aditya, `${lastWeek} - 7`, [0, 1, 2]);
+    await file(people.amanda, lastWeek, [0, 1, 2]);
+    type Row = { staff_id: string; value: string; denominator: string; colour: string };
+    const scores = async (week: string) =>
+      Object.fromEntries(
+        (await db.query<Row>(`select staff_id, value, denominator, colour from person_scores_weekly where metric = 'eods' and week_start = ${week}`)).rows.map(
+          (r) => [r.staff_id, r],
+        ),
+      );
+    const by = await scores(lastWeek);
     expect([Number(by[people.sameer].value), Number(by[people.sameer].denominator), by[people.sameer].colour]).toEqual([4, 5, "amber"]);
     expect([Number(by[people.aditya].value), Number(by[people.aditya].denominator), by[people.aditya].colour]).toEqual([5, 5, "green"]);
-    expect([Number(by[people.amanda].value), Number(by[people.amanda].denominator), by[people.amanda].colour]).toEqual([3, 7, "red"]);
+    const weekBefore = (await scores(`${lastWeek} - 7`))[people.aditya];
+    expect([Number(weekBefore.value), Number(weekBefore.denominator), weekBefore.colour]).toEqual([3, 5, "red"]);
     expect(by[people.ryan]).toBeUndefined();
+    // CSRs file no EODs (0065), so they are not scored on them.
+    expect(by[people.amanda]).toBeUndefined();
   });
 
   it("changing a threshold in scoring_config changes the colour", async () => {
-    await db.query(`update scoring_config set amber = 4 where key = 'csr_eods_missed'`);
+    await db.query(`update scoring_config set amber = 2 where key = 'media_eods_missed'`);
     const r = await one<{ colour: string }>(
-      `select colour from person_scores_weekly where metric = 'eods' and staff_id = $1 and week_start = app_week_start(app_today()) - 7`,
-      [people.amanda],
+      `select colour from person_scores_weekly where metric = 'eods' and staff_id = $1 and week_start = app_week_start(app_today()) - 14`,
+      [people.aditya],
     );
     expect(r.colour).toBe("amber");
   });
 
   it("is readable by staff through RLS", async () => {
-    await asUser(db, AUTH.amanda, async () => {
+    await asUser(db, AUTH.sameer, async () => {
       const r = await one<{ n: number }>(`select count(*)::int as n from person_scores_weekly`);
       expect(r.n).toBeGreaterThan(0);
     });
