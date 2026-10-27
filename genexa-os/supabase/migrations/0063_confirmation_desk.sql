@@ -153,7 +153,9 @@ revoke execute on function confirmations_expire(timestamptz) from public, anon, 
 grant execute on function confirmations_expire(timestamptz) to service_role;
 
 -- The desk: every appointment inside the window (34h to 3h before), with its calls.
-create view confirmation_desk with (security_invoker = true) as
+-- It runs as its owner because CSRs cannot read clients or other staff (the clinic
+-- name and who made the last call); instead it lets only the owner and CSRs in.
+create view confirmation_desk as
 select
   a.id, a.client_id, c.name as clinic, a.location_label, a.patient_name, a.phone, a.scheduled_for, a.clinic_timezone,
   a.status, a.status_source, a.status_at, a.on_main_calendar, a.first_seen_at,
@@ -178,7 +180,8 @@ left join lateral (
   where x.appointment_id = a.id
 ) k on true
 where a.scheduled_for > now() + interval '3 hours'
-  and a.scheduled_for <= now() + interval '34 hours';
+  and a.scheduled_for <= now() + interval '34 hours'
+  and (app_is_owner() or app_csr_id() is not null or current_user in ('service_role', 'postgres'));
 grant select on confirmation_desk to authenticated, service_role;
 
 -- The call centre's numbers, per CSR, for a period (ET days): calls, outcomes,
