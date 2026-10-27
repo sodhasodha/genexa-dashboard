@@ -27,8 +27,8 @@ beforeAll(async () => {
   db = await freshDb();
   people = await seedStaff(db);
   freelancer = (await db.query<{ id: string }>(`insert into staff (name, role) values ('Freya Freelance', 'freelance') returning id`)).rows[0].id;
-  // Everyone is on ET here, so a person's local day is app_today(). Amanda works all 7 days.
-  await db.query(`update staff set working_days = '{1,2,3,4,5,6,7}' where id = $1`, [people.amanda]);
+  // Everyone is on ET here, so a person's local day is app_today(). Aditya works all 7 days.
+  await db.query(`update staff set working_days = '{1,2,3,4,5,6,7}' where id = $1`, [people.aditya]);
 });
 
 describe("eod_status_7d", () => {
@@ -39,31 +39,34 @@ describe("eod_status_7d", () => {
 
   it("lists only each person's working days in the last 7 days", async () => {
     await setGoLive(30);
-    const amanda = await status(people.amanda);
-    expect(amanda.length).toBe(7);
-    expect(amanda.filter((r) => r.is_today).length).toBe(1);
-    expect(amanda[6].is_today).toBe(true);
-    expect(amanda.every((r) => !r.filed && r.submitted_at === null)).toBe(true);
+    const aditya = await status(people.aditya);
+    expect(aditya.length).toBe(7);
+    expect(aditya.filter((r) => r.is_today).length).toBe(1);
+    expect(aditya[6].is_today).toBe(true);
+    expect(aditya.every((r) => !r.filed && r.submitted_at === null)).toBe(true);
 
     // Mon-Fri by default: any 7 consecutive days hold exactly 5 weekdays.
     const sameer = await status(people.sameer);
     expect(sameer.length).toBe(5);
     expect(sameer.every((r) => r.isodow <= 5)).toBe(true);
 
-    await db.query(`update staff set working_days = '{}' where id = $1`, [people.aditya]);
-    expect((await status(people.aditya)).length).toBe(0);
+    await db.query(`update staff set working_days = '{}' where id = $1`, [people.sameer]);
+    expect((await status(people.sameer)).length).toBe(0);
+    await db.query(`update staff set working_days = default where id = $1`, [people.sameer]);
   });
 
   it("leaves out the owner, freelancers and leavers", async () => {
     expect((await status(people.ryan)).length).toBe(0);
     expect((await status(freelancer)).length).toBe(0);
     const roles = (await db.query<{ role: string }>(`select distinct role from eod_status_7d order by 1`)).rows.map((r) => r.role);
-    expect(roles).toEqual(["csr", "tech"]);
+    expect(roles).toEqual(["media_buyer", "tech"]);
+    // CSRs file no EODs (0065), so they are not listed either.
+    expect((await status(people.amanda)).length).toBe(0);
   });
 
   it("starts on the person's start date", async () => {
-    await db.query(`update staff set working_days = '{1,2,3,4,5,6,7}', start_date = app_today() - 2 where id = $1`, [people.marjorie]);
-    const rows = await status(people.marjorie);
+    await db.query(`update staff set working_days = '{1,2,3,4,5,6,7}', start_date = app_today() - 2 where id = $1`, [people.sameer]);
+    const rows = await status(people.sameer);
     expect(rows.length).toBe(3);
     const first = (await db.query<{ d: string }>(`select (app_today() - 2)::text as d`)).rows[0].d;
     expect(rows[0].day).toBe(first);
@@ -71,33 +74,36 @@ describe("eod_status_7d", () => {
 
   it("starts on the go-live date, and not before it is reached", async () => {
     await setGoLive(1);
-    expect((await status(people.amanda)).length).toBe(2);
-    expect((await status(people.marjorie)).length).toBe(2);
+    expect((await status(people.aditya)).length).toBe(2);
+    expect((await status(people.sameer)).length).toBe(2);
     await setGoLive(-1); // go-live is tomorrow
     expect((await db.query(`select 1 from eod_status_7d`)).rows.length).toBe(0);
     await setGoLive(30);
+    await db.query(`update staff set start_date = null where id = $1`, [people.sameer]);
   });
 
   it("marks a day filed, with when it was submitted", async () => {
-    await db.query(`insert into eods (staff_id, date, answers, submitted_at) values ($1, app_today() - 1, '{"v": 1}', now() - interval '20 hours')`, [
-      people.amanda,
+    // Two days ago: the filing-rules tests below file Aditya's yesterday themselves.
+    await db.query(`insert into eods (staff_id, date, answers, submitted_at) values ($1, app_today() - 2, '{"v": 1}', now() - interval '44 hours')`, [
+      people.aditya,
     ]);
-    const rows = await status(people.amanda);
+    const rows = await status(people.aditya);
     expect(rows.filter((r) => r.filed).length).toBe(1);
-    expect(rows[5].filed).toBe(true);
-    expect(rows[5].submitted_at).not.toBeNull();
-    expect(rows[5].eod_id).not.toBeNull();
+    expect(rows[4].filed).toBe(true);
+    expect(rows[4].submitted_at).not.toBeNull();
+    expect(rows[4].eod_id).not.toBeNull();
+    expect(rows[5].filed).toBe(false);
     expect(rows[6].filed).toBe(false);
   });
 
   it("uses each person's own calendar day", async () => {
     // Kiritimati is UTC+14: its date is ahead of ET for most of the day, and never behind.
-    await db.query(`update staff set timezone = 'Pacific/Kiritimati' where id = $1`, [people.amanda]);
+    await db.query(`update staff set timezone = 'Pacific/Kiritimati' where id = $1`, [people.aditya]);
     const today = (await db.query<{ d: string }>(`select (now() at time zone 'Pacific/Kiritimati')::date::text as d`)).rows[0].d;
-    const rows = await status(people.amanda);
+    const rows = await status(people.aditya);
     expect(rows.find((r) => r.is_today)?.day).toBe(today);
     expect(rows[rows.length - 1].day).toBe(today);
-    await db.query(`update staff set timezone = 'America/New_York' where id = $1`, [people.amanda]);
+    await db.query(`update staff set timezone = 'America/New_York' where id = $1`, [people.aditya]);
   });
 
   it("is readable by staff through RLS", async () => {
