@@ -34,12 +34,29 @@ export const getSession = cache(async (): Promise<Session> => {
   return { kind: "staff", staff: staff as CurrentStaff };
 });
 
-/** The logged-in staff member, or a redirect to /login. */
-export async function requireStaff(): Promise<CurrentStaff> {
+/** Anyone signed in and on the team, CSRs included. Only the confirmation desk uses this directly. */
+async function requireSession(): Promise<CurrentStaff> {
   const session = await getSession();
   if (session.kind === "anonymous") redirect("/login");
   if (session.kind === "not_staff") redirect("/login?error=not_staff");
   return session.staff;
+}
+
+/**
+ * The logged-in staff member, or a redirect to /login. A CSR is sent to the
+ * confirmation desk: every page and server action outside it refuses CSRs.
+ */
+export async function requireStaff(): Promise<CurrentStaff> {
+  const staff = await requireSession();
+  if (staff.role === "csr") redirect("/confirmations");
+  return staff;
+}
+
+/** The confirmation desk: CSRs and the owner. */
+export async function requireDeskUser(): Promise<CurrentStaff> {
+  const staff = await requireSession();
+  if (staff.role !== "csr" && staff.role !== "owner") redirect("/");
+  return staff;
 }
 
 export async function requireOwner(): Promise<CurrentStaff> {

@@ -17,6 +17,7 @@ export const NAV_GROUPS: NavGroup[] = [
     title: "Team",
     items: [
       { href: "/call-centre", label: "Call Centre" },
+      { href: "/confirmations", label: "Confirmations", ownerOnly: true },
       { href: "/media-buying", label: "Media Buying" },
       { href: "/tech", label: "Tech" },
       { href: "/team", label: "Team" },
@@ -48,7 +49,7 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-/** Where each role lands after login. A CSR lands on Call Centre filtered to themselves. */
+/** Where each role lands after login. A CSR only ever uses the confirmation desk. */
 export function landingPath(staff: { id: string; role: Role }): string {
   switch (staff.role) {
     case "owner":
@@ -58,7 +59,7 @@ export function landingPath(staff: { id: string; role: Role }): string {
     case "tech":
       return "/tech";
     case "csr":
-      return `/call-centre?csr=${staff.id}`;
+      return "/confirmations";
     default:
       return "/tasks";
   }

@@ -6,14 +6,14 @@ describe("role-based landing", () => {
     expect(landingPath({ id: "1", role: "owner" })).toBe("/overview");
     expect(landingPath({ id: "2", role: "media_buyer" })).toBe("/media-buying");
     expect(landingPath({ id: "3", role: "tech" })).toBe("/tech");
-    expect(landingPath({ id: "abc", role: "csr" })).toBe("/call-centre?csr=abc");
+    expect(landingPath({ id: "abc", role: "csr" })).toBe("/confirmations");
   });
 
   it("groups the sidebar into Pacing, Team, Clients, Work and System", () => {
     expect(NAV_GROUPS.map((g) => g.title)).toEqual(["Pacing", "Team", "Clients", "Work", "System"]);
     expect(NAV_GROUPS.map((g) => g.items.map((i) => i.label))).toEqual([
       ["Overview", "Today", "Week", "Month"],
-      ["Call Centre", "Media Buying", "Tech", "Team", "Payroll"],
+      ["Call Centre", "Confirmations", "Media Buying", "Tech", "Team", "Payroll"],
       ["Clients", "Reports", "Launches", "Pipeline"],
       ["Tasks", "Ideas"],
       ["Integrations", "Data review"],

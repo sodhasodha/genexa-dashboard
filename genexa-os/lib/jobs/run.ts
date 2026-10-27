@@ -11,6 +11,7 @@ import { JOBS_ATTENDANCE } from "@/lib/jobs/attendance";
 import { JOBS_REMINDERS } from "@/lib/jobs/reminders";
 import { JOBS_MISC } from "@/lib/jobs/misc";
 import { syncGhlForms } from "@/lib/integrations/ghl/forms";
+import { syncConfirmationDesk } from "@/lib/integrations/ghl/confirmations";
 import { createNewClientsFromWhop } from "@/lib/jobs/newClients";
 import { JOBS_NUDGES } from "@/lib/jobs/nudges";
 import { JOBS_ROUTER } from "@/lib/jobs/router";
@@ -66,6 +67,11 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
   // Our copy of each clinic's results is checked against Cortana and corrected (see cortana_checks).
   "cortana-verify": async () => {
     const r = await verifyCortana({ db: createAdminClient(), cortana: cortana() });
+    return { ok: r.ok, summary: r };
+  },
+  // The CSR confirmation desk: each clinic's Unconfirmed calendar, every 5 minutes. Reads GHL only.
+  "confirmations-sync": async () => {
+    const r = await syncConfirmationDesk({ db: createAdminClient(), keys: JSON.parse(requireEnv("GHL_API_KEYS_JSON")) as GhlKeys });
     return { ok: r.ok, summary: r };
   },
   // Genexa's own GHL sub-account: New Client Form -> client + launch, Onboarding Form -> "OB form complete".
