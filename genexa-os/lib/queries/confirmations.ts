@@ -15,10 +15,14 @@ export type Outcome = (typeof OUTCOMES)[number]["key"];
 export const MAX_ATTEMPTS = 10;
 const PH = "Asia/Manila";
 
+export type DeskCall = { id: string; attempt: number; outcome: Outcome; by: string; at: string; edited_by: string | null; edited_at: string | null; text: string };
+
 export type DeskRow = {
   id: string; client_id: string; clinic: string; location_label: string | null; patient_name: string | null; phone: string | null;
-  scheduled_for: string; clinic_timezone: string; status: DeskStatus; on_main_calendar: boolean; booked_on: "unconfirmed" | "main"; minutes_left: number;
+  scheduled_for: string; clinic_timezone: string; status: DeskStatus; status_source: "csr" | "ghl" | "system" | null; on_main_calendar: boolean; booked_on: "unconfirmed" | "main"; minutes_left: number;
   ghl_contact_id: string | null; ghl_location_id: string | null;
+  /** Every call on the appointment, first to last. */
+  calls: DeskCall[];
   attempts: number; last_at: string | null; last_outcome: Outcome | null; last_by: string | null; urgency: "red" | "amber" | "green" | "grey" | "none";
   /** Shown text, worked out here so the page only lays it out. */
   clinic_time: string; ph_time: string; time_left: string; last_text: string | null; tel: string | null; ghl_url: string | null;
@@ -82,6 +86,10 @@ export async function getDesk(): Promise<{ rows: DeskRow[]; clinics: { id: strin
     last_text: r.last_at ? `${r.last_by ?? "Someone"} · ${fmt(r.last_at, PH)} · ${OUTCOME_LABEL[r.last_outcome ?? ""] ?? r.last_outcome}` : null,
     tel: telLink(r.phone),
     ghl_url: ghlContactUrl(r.ghl_location_id, r.ghl_contact_id),
+    calls: ((r.calls ?? []) as Omit<DeskCall, "text">[]).map((c) => ({
+      ...c,
+      text: `${c.by} · ${fmt(c.at, PH)}${c.edited_by ? ` · changed by ${c.edited_by}` : ""}`,
+    })),
   })) as DeskRow[];
   const clinics = [...new Map(rows.map((r) => [r.client_id, r.clinic])).entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   const { data: all } = await supabase.from("clinic_calendars").select("client_id, clients(name)").eq("kind", "unconfirmed");

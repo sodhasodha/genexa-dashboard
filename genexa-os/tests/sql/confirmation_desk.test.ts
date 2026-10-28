@@ -178,3 +178,74 @@ describe("booked on the Confirmed calendar", () => {
     expect((await one<{ appointments: string }>(`select appointments from confirmation_desk_totals(app_today(), app_today())`)).appointments).toBe(before.appointments);
   });
 });
+
+describe("editing a logged call", () => {
+  const edit = (callId: string, outcome: string) => db.query<{ r: { status: string; was: string } }>(`select confirmation_edit_call($1, $2) as r`, [callId, outcome]);
+  const calls = async (id: string) => (await one<{ calls: { id: string; attempt: number; outcome: string; by: string; edited_by: string | null }[] }>(`select calls from confirmation_desk where id = $1`, [id])).calls;
+  const status = async (id: string) => (await one<{ status: string; status_source: string | null }>(`select status, status_source from confirmation_appointments where id = $1`, [id]));
+
+  it("the desk lists every call; a CSR changes one, and the appointment's status follows", async () => {
+    const id = await appt(10);
+    await asUser(db, AUTH.amanda, async () => { await log(id, "no_answer"); await log(id, "confirmed"); });
+    const [first, second] = await calls(id);
+    expect([first.attempt, first.outcome, first.by, second.outcome]).toEqual([1, "no_answer", "Amanda Harder", "confirmed"]);
+    expect((await status(id)).status).toBe("confirmed");
+
+    // Pressed Confirmed by mistake: it was a voicemail. Back to Unconfirmed, and calls can be logged again.
+    await asUser(db, AUTH.marjorie, async () => { expect((await edit(second.id, "voicemail")).rows[0].r).toMatchObject({ status: "unconfirmed", was: "confirmed" }); });
+    expect(await status(id)).toEqual({ status: "unconfirmed", status_source: null });
+    expect((await calls(id))[1]).toMatchObject({ outcome: "voicemail", by: "Amanda Harder", edited_by: "Marjorie Grace Villarino" });
+    await asUser(db, AUTH.amanda, async () => { await log(id, "no_answer"); });
+
+    // And the other way: the last no-answer was really a reschedule.
+    const third = (await calls(id))[2];
+    await asUser(db, AUTH.amanda, async () => { await edit(third.id, "rescheduled"); });
+    expect(await status(id)).toEqual({ status: "rescheduled", status_source: "csr" });
+    // Nothing deleted; the audit log has the change.
+    expect(Number((await one<{ n: string }>(`select count(*) as n from confirmation_calls where appointment_id = $1`, [id])).n)).toBe(3);
+    expect(await one(`select old_value, new_value, actor from audit_log where table_name = 'confirmation_calls' and row_id = $1 and field = 'outcome' order by at desc limit 1`, [third.id])).toEqual({ old_value: "no_answer", new_value: "rescheduled", actor: "Amanda Harder" });
+  });
+
+  it("only the last call can become Confirmed or Rescheduled; earlier ones can switch between No answer and Voicemail", async () => {
+    const id = await appt(11);
+    await asUser(db, AUTH.amanda, async () => { await log(id, "no_answer"); await log(id, "no_answer"); });
+    const [first] = await calls(id);
+    await asUser(db, AUTH.amanda, async () => {
+      await expect(edit(first.id, "confirmed")).rejects.toThrow(/DESK_NOT_LAST/);
+      await edit(first.id, "voicemail");
+    });
+    expect((await calls(id))[0].outcome).toBe("voicemail");
+    expect((await status(id)).status).toBe("unconfirmed");
+  });
+
+  it("taking the decision off the 10th call leaves it Unreachable", async () => {
+    const id = await appt(12);
+    await asUser(db, AUTH.amanda, async () => { for (let i = 0; i < 9; i++) await log(id, "no_answer"); await log(id, "confirmed"); });
+    expect((await status(id)).status).toBe("confirmed");
+    const tenth = (await calls(id))[9];
+    await asUser(db, AUTH.amanda, async () => { await edit(tenth.id, "no_answer"); });
+    expect((await status(id)).status).toBe("unreachable");
+  });
+
+  it("no edits once GHL or the cut-off has decided, inside 3 hours, or by anyone but CSRs and the owner", async () => {
+    const ghl = await appt(13), late = await appt(14);
+    await asUser(db, AUTH.amanda, async () => { await log(ghl, "no_answer"); await log(late, "no_answer"); });
+    await db.query(`update confirmation_appointments set status = 'confirmed', status_source = 'ghl', on_main_calendar = true where id = $1`, [ghl]);
+    const ghlCall = (await calls(ghl))[0], lateCall = (await calls(late))[0];
+    await db.query(`update confirmation_appointments set scheduled_for = now() + interval '2 hours' where id = $1`, [late]);
+    await asUser(db, AUTH.amanda, async () => {
+      await expect(edit(ghlCall.id, "voicemail")).rejects.toThrow(/DESK_CLOSED/);
+      await expect(edit(lateCall.id, "voicemail")).rejects.toThrow(/DESK_CLOSED/);
+    });
+    const open = await appt(15);
+    await asUser(db, AUTH.amanda, async () => { await log(open, "no_answer"); });
+    const call = (await calls(open))[0];
+    await asUser(db, AUTH.aditya, async () => { await expect(edit(call.id, "voicemail")).rejects.toThrow(/DESK_REFUSED/); });
+    await asUser(db, AUTH.ryan, async () => { await edit(call.id, "voicemail"); });
+    // A CSR cannot change the calls table directly, only through the function.
+    await asUser(db, AUTH.amanda, async () => {
+      await db.query(`update confirmation_calls set outcome = 'confirmed' where id = $1`, [call.id]).catch(() => null);
+    });
+    expect((await calls(open))[0].outcome).toBe("voicemail");
+  });
+});

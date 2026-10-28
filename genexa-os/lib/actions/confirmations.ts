@@ -16,6 +16,7 @@ const MESSAGE: Record<string, string> = {
   DESK_CLOSED: "This appointment no longer takes calls.",
   DESK_NOT_FOUND: "That appointment is no longer on the desk.",
   DESK_REFUSED: "You can't log calls.",
+  DESK_NOT_LAST: "Only the last call can be Confirmed or Rescheduled.",
 };
 
 /** Log one call attempt. The database numbers it, caps it at 10 and sets the status. */
@@ -32,6 +33,25 @@ export async function logCall(input: { appointment_id: string; outcome: string }
   revalidatePath("/confirmations");
   const r = data as { attempt: number; status: string };
   return { ok: true, attempt: r.attempt, status: r.status };
+}
+
+const Edit = z.object({ call_id: z.uuid(), outcome: Input.shape.outcome });
+export type EditResult = { ok: true; status: string; was: string } | { ok: false; message: string };
+
+/** Correct the outcome of a call already logged. The database works the appointment's status out again. */
+export async function editCall(input: { call_id: string; outcome: string }): Promise<EditResult> {
+  await requireDeskUser();
+  const parsed = Edit.safeParse(input);
+  if (!parsed.success) return { ok: false, message: "Pick an outcome." };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("confirmation_edit_call", { p_call: parsed.data.call_id, p_outcome: parsed.data.outcome });
+  if (error) {
+    const code = Object.keys(MESSAGE).find((k) => error.message.includes(k));
+    return { ok: false, message: code ? MESSAGE[code] : "Not saved. Try again." };
+  }
+  revalidatePath("/confirmations");
+  const r = data as { status: string; was: string };
+  return { ok: true, status: r.status, was: r.was };
 }
 
 export type PatientInfo = { ok: true; text: string | null } | { ok: false; message: string };

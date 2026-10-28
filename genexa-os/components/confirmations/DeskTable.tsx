@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState, useTransition } from "react";
-import { getPatientInfo, logCall, type PatientInfo } from "@/lib/actions/confirmations";
+import { editCall, getPatientInfo, logCall, type PatientInfo } from "@/lib/actions/confirmations";
 import type { DeskRow, Outcome } from "@/lib/queries/confirmations";
 
 const MAX = 10;
@@ -19,6 +19,14 @@ const GHL_STEP: Partial<Record<Outcome, string>> = {
   confirmed: "Now move this appointment to the clinic's Confirmed calendar in GoHighLevel. Genexa OS does not change GoHighLevel: until it is moved, the clinic's main calendar will not show the patient.",
   rescheduled: "Now change this appointment in GoHighLevel to the new date and time the patient agreed.",
 };
+/** What to undo in GoHighLevel when a Confirmed or Rescheduled call is changed to something else. */
+const GHL_UNDO: Partial<Record<Outcome, string>> = {
+  confirmed: "If you already moved this appointment to the Confirmed calendar in GoHighLevel, move it back to the Unconfirmed calendar.",
+  rescheduled: "If you already changed this appointment's time in GoHighLevel, change it back.",
+};
+const LABEL: Record<string, string> = Object.fromEntries(OUTCOMES.map((o) => [o.key, o.label]));
+/** Calls can be changed until GHL or the 3-hour cut-off decides the appointment. */
+const editable = (row: DeskRow) => row.status !== "cancelled" && row.status !== "expired" && row.status_source !== "ghl" && row.status_source !== "system";
 
 export function DeskTable({ rows }: { rows: DeskRow[] }) {
   const [openId, setOpenId] = useState<string | null>(null);
@@ -27,10 +35,12 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
   const [pending, start] = useTransition();
   // Patient Information is read from GHL when a patient is first opened, then kept for this visit.
   const [info, setInfo] = useState<Record<string, PatientInfo | "loading">>({});
+  const [editingCall, setEditingCall] = useState<string | null>(null);
   const open = rows.find((r) => r.id === openId) ?? null;
 
   const toggle = (id: string) => {
     setError(null);
+    setEditingCall(null);
     if (openId === id) { setOpenId(null); return; }
     setOpenId(id);
     if (info[id] && info[id] !== "loading" && info[id].ok) return;
@@ -49,6 +59,19 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
       const step = GHL_STEP[outcome];
       if (step) setNotice({ title: outcome === "confirmed" ? "Confirmed: now update GoHighLevel" : "Rescheduled: now update GoHighLevel", body: `${row.patient_name ?? "Patient"} · ${row.clinic}. ${step}` });
       else if (r.status === "unreachable") setNotice({ title: "Unreachable", body: `That was call ${MAX} of ${MAX} for ${row.patient_name ?? "this patient"}. No more calls can be logged.` });
+    });
+  };
+
+  const change = (row: DeskRow, callId: string, outcome: Outcome) => {
+    setError(null);
+    start(async () => {
+      const r = await editCall({ call_id: callId, outcome });
+      if (!r.ok) { setError(r.message); return; }
+      setEditingCall(null);
+      const was = r.was as Outcome;
+      if (was === outcome) return;
+      const steps = [GHL_UNDO[was], GHL_STEP[outcome]].filter(Boolean).join(" ");
+      if (steps) setNotice({ title: `Changed from ${LABEL[was] ?? was} to ${LABEL[outcome]}: update GoHighLevel`, body: `${row.patient_name ?? "Patient"} · ${row.clinic}. ${steps}` });
     });
   };
 
@@ -79,7 +102,42 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
             </p>
           )}
           {error ? <p className="mt-3 rounded bg-bad-bg px-3 py-2 text-sm text-bad">{error}</p> : null}
-          <p className="mt-3 text-xs text-muted">{row.attempts} of {MAX} calls made{row.last_text ? ` · last: ${row.last_text}` : ""}</p>
+          <p className="mt-3 text-xs text-muted">{row.attempts} of {MAX} calls made</p>
+          {row.calls.length > 0 ? (
+            <ol className="mt-2 space-y-1.5" aria-label="Calls logged">
+              {row.calls.map((c) => {
+                const last = c.attempt === row.calls[row.calls.length - 1].attempt;
+                return (
+                  <li key={c.id} className="rounded border border-line bg-raised px-2 py-1.5 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="font-medium">Call {c.attempt}: {LABEL[c.outcome] ?? c.outcome}</span>
+                        <span className="block text-xs text-muted">{c.text}</span>
+                      </div>
+                      {editable(row) && editingCall !== c.id ? (
+                        <button type="button" onClick={() => { setError(null); setEditingCall(c.id); }} className="shrink-0 cursor-pointer text-xs text-accent underline underline-offset-2">Edit</button>
+                      ) : null}
+                    </div>
+                    {editingCall === c.id ? (
+                      <div className="mt-2">
+                        <p className="text-xs text-muted">Change call {c.attempt} to:</p>
+                        <div className="mt-1 grid grid-cols-2 gap-1.5">
+                          {OUTCOMES.filter((o) => last || (o.key !== "confirmed" && o.key !== "rescheduled")).map((o) => (
+                            <button key={o.key} type="button" disabled={pending || o.key === c.outcome} onClick={() => change(row, c.id, o.key)}
+                              className="cursor-pointer rounded border border-line bg-panel px-2 py-1.5 text-xs hover:border-muted disabled:cursor-default disabled:opacity-40">
+                              {o.label}{o.key === c.outcome ? " (now)" : ""}
+                            </button>
+                          ))}
+                        </div>
+                        {!last ? <p className="mt-1 text-xs text-muted">Only the last call can be Confirmed or Rescheduled.</p> : null}
+                        <button type="button" onClick={() => setEditingCall(null)} className="mt-1 cursor-pointer text-xs text-muted underline underline-offset-2">Cancel</button>
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ol>
+          ) : null}
         </section>
 
         <section className={section} aria-label="Patient information">
