@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { logCall } from "@/lib/actions/confirmations";
+import { Fragment, useState, useTransition } from "react";
+import { getPatientInfo, logCall, type PatientInfo } from "@/lib/actions/confirmations";
 import type { DeskRow, Outcome } from "@/lib/queries/confirmations";
 
 const MAX = 10;
@@ -25,7 +25,20 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  // Patient Information is read from GHL when a patient is first opened, then kept for this visit.
+  const [info, setInfo] = useState<Record<string, PatientInfo | "loading">>({});
   const open = rows.find((r) => r.id === openId) ?? null;
+
+  const toggle = (id: string) => {
+    setError(null);
+    if (openId === id) { setOpenId(null); return; }
+    setOpenId(id);
+    if (info[id] && info[id] !== "loading" && info[id].ok) return;
+    setInfo((m) => ({ ...m, [id]: "loading" }));
+    getPatientInfo(id)
+      .then((r) => setInfo((m) => ({ ...m, [id]: r })))
+      .catch(() => setInfo((m) => ({ ...m, [id]: { ok: false, message: "Couldn't load it. Open the contact instead." } })));
+  };
 
   const log = (row: DeskRow, outcome: Outcome) => {
     setError(null);
@@ -37,6 +50,58 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
       if (step) setNotice({ title: outcome === "confirmed" ? "Confirmed: now update GoHighLevel" : "Rescheduled: now update GoHighLevel", body: `${row.patient_name ?? "Patient"} · ${row.clinic}. ${step}` });
       else if (r.status === "unreachable") setNotice({ title: "Unreachable", body: `That was call ${MAX} of ${MAX} for ${row.patient_name ?? "this patient"}. No more calls can be logged.` });
     });
+  };
+
+  const section = "rounded-lg border border-line bg-panel p-3";
+  const heading = "text-xs font-semibold uppercase tracking-wide text-muted";
+  const panel = (row: DeskRow) => {
+    const pi = info[row.id];
+    return (
+      <div className="grid gap-3 lg:grid-cols-3">
+        <section className={section} aria-label="Log call">
+          <p className={heading}>Log call</p>
+          {row.tel ? <a href={row.tel} className="mt-2 inline-block rounded bg-accent px-3 py-1.5 text-sm font-medium text-white">Call {row.phone}</a> : <p className="mt-2 text-sm text-muted">No phone number on this patient.</p>}
+          {row.status === "unconfirmed" && row.attempts < MAX ? (
+            <div className="mt-3">
+              <p className="text-sm font-medium">Call {row.attempts + 1} of {MAX}: how did it go?</p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {OUTCOMES.map((o) => (
+                  <button key={o.key} type="button" disabled={pending} onClick={() => log(row, o.key)}
+                    className="cursor-pointer rounded border border-line bg-raised px-3 py-2 text-sm hover:border-muted disabled:cursor-wait disabled:opacity-50">
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="mt-3 rounded bg-raised px-3 py-2 text-sm text-muted">
+              {row.attempts >= MAX || row.status === "unreachable" ? `Unreachable: all ${MAX} calls have been made.` : `${STATUS[row.status] ?? row.status}: no more calls to log.`}
+            </p>
+          )}
+          {error ? <p className="mt-3 rounded bg-bad-bg px-3 py-2 text-sm text-bad">{error}</p> : null}
+          <p className="mt-3 text-xs text-muted">{row.attempts} of {MAX} calls made{row.last_text ? ` · last: ${row.last_text}` : ""}</p>
+        </section>
+
+        <section className={section} aria-label="Patient information">
+          <p className={heading}>Patient information</p>
+          <p className="mt-1 text-xs text-muted">{row.clinic}{row.location_label ? ` · ${row.location_label}` : ""} · {row.clinic_time}</p>
+          {!pi || pi === "loading" ? <p className="mt-2 text-sm text-muted">Loading from GoHighLevel…</p>
+            : !pi.ok ? <p className="mt-2 text-sm text-bad">{pi.message}</p>
+            : pi.text ? <p className="mt-2 whitespace-pre-wrap text-sm">{pi.text}</p>
+            : <p className="mt-2 text-sm text-muted">Nothing filled in on the form.</p>}
+        </section>
+
+        <section className={section} aria-label="Contact in GoHighLevel">
+          <p className={heading}>Contact</p>
+          {row.ghl_url ? (
+            <a href={row.ghl_url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block rounded border border-line bg-raised px-3 py-2 text-sm font-medium hover:border-muted">
+              Open contact in GoHighLevel ↗
+            </a>
+          ) : <p className="mt-2 text-sm text-muted">No GoHighLevel contact on this appointment.</p>}
+          <p className="mt-2 text-xs text-muted">Opens in a new tab. You need to be logged in to GoHighLevel.</p>
+        </section>
+      </div>
+    );
   };
 
   if (rows.length === 0) return <p className="rounded-lg border border-line bg-panel px-4 py-8 text-center text-sm text-muted">Nothing here right now.</p>;
@@ -60,9 +125,10 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id} onClick={() => { setError(null); setOpenId(r.id); }}
+              <Fragment key={r.id}>
+              <tr onClick={() => toggle(r.id)} aria-expanded={openId === r.id}
                 className={`cursor-pointer border-b border-line align-top last:border-0 hover:brightness-110 ${ROW[r.urgency] ?? ""}`}>
-                <td className="whitespace-nowrap px-3 py-2 font-medium">{r.patient_name ?? "Unknown patient"}</td>
+                <td className="whitespace-nowrap px-3 py-2 font-medium"><span className="mr-1 inline-block w-3 text-muted">{openId === r.id ? "▾" : "▸"}</span>{r.patient_name ?? "Unknown patient"}</td>
                 <td className="whitespace-nowrap px-3 py-2">
                   {r.tel ? <a href={r.tel} onClick={(e) => e.stopPropagation()} className="text-accent underline underline-offset-2">{r.phone}</a> : <span className="text-muted">{r.phone ?? "no phone"}</span>}
                 </td>
@@ -78,44 +144,16 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{r.attempts}/{MAX}</td>
                 <td className="px-3 py-2 text-xs text-muted">{r.last_text ?? "No calls yet"}</td>
               </tr>
+              {open && open.id === r.id ? (
+                <tr className="border-b border-line bg-raised/40">
+                  <td colSpan={9} className="px-3 py-3">{panel(open)}</td>
+                </tr>
+              ) : null}
+              </Fragment>
             ))}
           </tbody>
         </table>
       </div>
-
-      {open ? (
-        <div role="dialog" aria-modal="true" aria-label="Log a call" className="fixed inset-0 z-30 flex items-end justify-center bg-black/50 p-4 sm:items-center" onClick={() => setOpenId(null)}>
-          <div className="w-full max-w-md rounded-lg border border-line bg-panel p-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="font-semibold">{open.patient_name ?? "Unknown patient"}</p>
-                <p className="text-xs text-muted">{open.clinic}{open.location_label ? ` · ${open.location_label}` : ""} · {open.clinic_time} · {open.ph_time}</p>
-              </div>
-              <button type="button" onClick={() => setOpenId(null)} className="cursor-pointer text-muted hover:text-ink" aria-label="Close">✕</button>
-            </div>
-            {open.tel ? <a href={open.tel} className="mt-3 inline-block rounded bg-accent px-3 py-1.5 text-sm font-medium text-white">Call {open.phone}</a> : <p className="mt-3 text-sm text-muted">No phone number on this patient.</p>}
-            {open.status === "unconfirmed" && open.attempts < MAX ? (
-              <div className="mt-4">
-                <p className="text-sm font-medium">Log call {open.attempts + 1} of {MAX}</p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  {OUTCOMES.map((o) => (
-                    <button key={o.key} type="button" disabled={pending} onClick={() => log(open, o.key)}
-                      className="cursor-pointer rounded border border-line bg-raised px-3 py-2 text-sm hover:border-muted disabled:cursor-wait disabled:opacity-50">
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <p className="mt-4 rounded bg-raised px-3 py-2 text-sm text-muted">
-                {open.attempts >= MAX || open.status === "unreachable" ? `Unreachable: all ${MAX} calls have been made.` : `${STATUS[open.status] ?? open.status}: no more calls to log.`}
-              </p>
-            )}
-            {error ? <p className="mt-3 rounded bg-bad-bg px-3 py-2 text-sm text-bad">{error}</p> : null}
-            <p className="mt-3 text-xs text-muted">{open.attempts} of {MAX} calls made{open.last_text ? ` · last: ${open.last_text}` : ""}</p>
-          </div>
-        </div>
-      ) : null}
 
       {notice ? (
         <div role="alertdialog" aria-modal="true" aria-label={notice.title} className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">

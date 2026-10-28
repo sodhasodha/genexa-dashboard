@@ -103,6 +103,13 @@ describe("expiry and access", () => {
       // The call-centre numbers are for the rest of the team, not for the CSRs themselves.
       expect((await db.query(`select * from confirmation_stats(app_today() - 1, app_today())`)).rows).toEqual([]);
     });
+    // The GHL contact and location come through the desk (for the contact link), though the CSR cannot read clients.
+    await db.query(`update clients set ghl_location_id = 'LOC_DESK' where id = $1`, [clinic]);
+    const withContact = await appt(9);
+    await db.query(`update confirmation_appointments set ghl_contact_id = 'CONTACT_1' where id = $1`, [withContact]);
+    await asUser(db, AUTH.amanda, async () => {
+      expect(await one(`select ghl_contact_id, ghl_location_id from confirmation_desk where id = $1`, [withContact])).toEqual({ ghl_contact_id: "CONTACT_1", ghl_location_id: "LOC_DESK" });
+    });
     await asUser(db, AUTH.aditya, async () => {
       expect((await db.query(`select 1 from confirmation_desk`)).rows.length).toBe(0);
       expect((await db.query(`select name from confirmation_stats(app_today() - 1, app_today())`)).rows.length).toBeGreaterThan(0);

@@ -204,3 +204,41 @@ export async function syncConfirmationDesk(opts: {
   out.ok = out.errors.length === 0;
   return out;
 }
+
+/** The "Patient Information (Pain Area, Duration, Additional Details…)" custom field, found by its key in each clinic's GHL. */
+export const PATIENT_INFO_FIELD_KEY = "contact.patient_information_pain_area_duration_additional_details";
+const FieldsResponse = z.object({ customFields: z.array(z.object({ id: z.string(), fieldKey: z.string().nullable().optional() }).loose()) }).loose();
+const ContactFields = z.object({ contact: z.object({ customFields: z.array(z.object({ id: z.string(), value: z.unknown() }).loose()).nullable().optional() }).loose() }).loose();
+
+/** A custom field's value as text: lists joined, empty -> null (pure). */
+export function fieldText(value: unknown): string | null {
+  const text = Array.isArray(value) ? value.map((v) => String(v).trim()).filter(Boolean).join(", ") : value === null || value === undefined ? "" : String(value).trim();
+  return text || null;
+}
+
+// Field ids do not change: looked up once per location while the server is warm.
+const fieldIds = new Map<string, string | null>();
+
+/**
+ * The patient's "Patient Information" answer, read live from GHL when a CSR opens
+ * the patient. Read only, and never stored in Genexa OS.
+ */
+export async function readPatientInformation(opts: { locationId: string; contactId: string; apiKey: string; fetchImpl?: typeof fetch }): Promise<string | null> {
+  const doFetch = opts.fetchImpl ?? fetch;
+  const get = async (path: string) => {
+    const res = await doFetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${opts.apiKey}`, Version: "2021-07-28", Accept: "application/json" }, cache: "no-store" });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`GHL ${res.status} on ${path.split("?")[0]}`);
+    return res.json() as Promise<unknown>;
+  };
+  let fieldId = fieldIds.get(opts.locationId);
+  if (fieldId === undefined) {
+    const fields = FieldsResponse.parse(await get(`/locations/${encodeURIComponent(opts.locationId)}/customFields`)).customFields;
+    fieldId = fields.find((f) => f.fieldKey === PATIENT_INFO_FIELD_KEY)?.id ?? null;
+    fieldIds.set(opts.locationId, fieldId);
+  }
+  if (!fieldId) return null;
+  const body = await get(`/contacts/${encodeURIComponent(opts.contactId)}`);
+  if (!body) return null;
+  return fieldText(ContactFields.parse(body).contact.customFields?.find((f) => f.id === fieldId)?.value);
+}

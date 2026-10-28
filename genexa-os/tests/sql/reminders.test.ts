@@ -256,7 +256,8 @@ describe("acceptance 3: shift hours", () => {
   it("someone with no shift entered gets nothing except urgent rules and new tasks", async () => {
     const noon = await at(1, "12:00");
     await job("build", "Media build", people.aditya, plus(noon, -5)); // Aditya has no shift
-    await db.query(`insert into tasks (owner_id, title, due, source, category) values ($1, 'Check the ads', app_today() + 1, 'ryan', 'ads')`, [people.aditya]);
+    // Created 5 minutes before the run, so the test does not depend on the time of day it is run at.
+    await db.query(`insert into tasks (owner_id, title, due, source, category, created_at) values ($1, 'Check the ads', app_today() + 1, 'ryan', 'ads', $2)`, [people.aditya, plus(noon, -5)]);
     await run(noon);
     // The new task reaches him (0068); the build job does not.
     expect(to("aditya").map((m) => m.text.split("\n")[0])).toEqual([expect.stringMatching(/^New task/)]);

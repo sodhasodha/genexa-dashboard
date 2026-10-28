@@ -18,9 +18,10 @@ const PH = "Asia/Manila";
 export type DeskRow = {
   id: string; client_id: string; clinic: string; location_label: string | null; patient_name: string | null; phone: string | null;
   scheduled_for: string; clinic_timezone: string; status: DeskStatus; on_main_calendar: boolean; booked_on: "unconfirmed" | "main"; minutes_left: number;
+  ghl_contact_id: string | null; ghl_location_id: string | null;
   attempts: number; last_at: string | null; last_outcome: Outcome | null; last_by: string | null; urgency: "red" | "amber" | "green" | "grey" | "none";
   /** Shown text, worked out here so the page only lays it out. */
-  clinic_time: string; ph_time: string; time_left: string; last_text: string | null; tel: string | null;
+  clinic_time: string; ph_time: string; time_left: string; last_text: string | null; tel: string | null; ghl_url: string | null;
 };
 
 const fmt = (iso: string, tz: string) =>
@@ -40,6 +41,12 @@ export function telLink(phone: string | null): string | null {
   const digits = phone.replace(/[^\d+]/g, "");
   if (digits.replace(/\D/g, "").length < 7) return null;
   return `tel:${digits.startsWith("+") ? digits : digits.length === 10 ? `+1${digits}` : `+${digits}`}`;
+}
+
+/** The contact's page in GoHighLevel (app.gohighlevel.com sends a white-label user on to their own domain). */
+export function ghlContactUrl(locationId: string | null, contactId: string | null): string | null {
+  if (!locationId || !contactId) return null;
+  return `https://app.gohighlevel.com/v2/location/${encodeURIComponent(locationId)}/contacts/detail/${encodeURIComponent(contactId)}`;
 }
 
 export const OUTCOME_LABEL: Record<string, string> = Object.fromEntries(OUTCOMES.map((o) => [o.key, o.label]));
@@ -65,7 +72,7 @@ export async function getDesk(): Promise<{ rows: DeskRow[]; clinics: { id: strin
   const supabase = await createClient();
   const { data, error } = await supabase.from("confirmation_desk").select("*").order("scheduled_for");
   if (error) throw new Error(`confirmation_desk: ${error.message}`);
-  const rows = ((data ?? []) as Omit<DeskRow, "clinic_time" | "ph_time" | "time_left" | "last_text" | "tel">[]).map((r) => ({
+  const rows = ((data ?? []) as Omit<DeskRow, "clinic_time" | "ph_time" | "time_left" | "last_text" | "tel" | "ghl_url">[]).map((r) => ({
     ...r,
     attempts: Number(r.attempts),
     minutes_left: Number(r.minutes_left),
@@ -74,6 +81,7 @@ export async function getDesk(): Promise<{ rows: DeskRow[]; clinics: { id: strin
     time_left: timeLeft(Number(r.minutes_left)),
     last_text: r.last_at ? `${r.last_by ?? "Someone"} · ${fmt(r.last_at, PH)} · ${OUTCOME_LABEL[r.last_outcome ?? ""] ?? r.last_outcome}` : null,
     tel: telLink(r.phone),
+    ghl_url: ghlContactUrl(r.ghl_location_id, r.ghl_contact_id),
   })) as DeskRow[];
   const clinics = [...new Map(rows.map((r) => [r.client_id, r.clinic])).entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   const { data: all } = await supabase.from("clinic_calendars").select("client_id, clients(name)").eq("kind", "unconfirmed");
