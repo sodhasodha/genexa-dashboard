@@ -1,7 +1,8 @@
 "use client";
 
-import { Fragment, useState, useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 import { editCall, getPatientInfo, logCall, type PatientInfo } from "@/lib/actions/confirmations";
+import { clinicNow } from "@/lib/clinic-time";
 import type { DeskRow, Outcome } from "@/lib/queries/confirmations";
 
 const MAX = 10;
@@ -36,6 +37,12 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
   // Patient Information is read from GHL when a patient is first opened, then kept for this visit.
   const [info, setInfo] = useState<Record<string, PatientInfo | "loading">>({});
   const [editingCall, setEditingCall] = useState<string | null>(null);
+  // The clinic's time now ticks every 30 seconds, so a CSR sees it is 6 AM there before calling.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, []);
   const open = rows.find((r) => r.id === openId) ?? null;
 
   const toggle = (id: string) => {
@@ -75,6 +82,16 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
     });
   };
 
+  const localNow = (tz: string) => {
+    const { time, window } = clinicNow(now, tz);
+    return (
+      <span suppressHydrationWarning className={window ? "font-semibold text-bad" : "text-muted"}>
+        {time}
+        {window ? <span className="block text-xs font-normal">{window === "early" ? "Too early to call (before 8 AM)" : "Too late to call (after 9 PM)"}</span> : null}
+      </span>
+    );
+  };
+
   const section = "rounded-lg border border-line bg-panel p-3";
   const heading = "text-xs font-semibold uppercase tracking-wide text-muted";
   const panel = (row: DeskRow) => {
@@ -83,6 +100,9 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
       <div className="grid gap-3 lg:grid-cols-3">
         <section className={section} aria-label="Log call">
           <p className={heading}>Log call</p>
+          {(() => { const c = clinicNow(now, row.clinic_timezone); return c.window ? (
+            <p suppressHydrationWarning className="mt-2 rounded bg-bad-bg px-3 py-2 text-sm text-bad">It is {c.time} at the clinic: too {c.window} to call. Calls are allowed 8 AM to 9 PM clinic time.</p>
+          ) : null; })()}
           {row.tel ? <a href={row.tel} className="mt-2 inline-block rounded bg-accent px-3 py-1.5 text-sm font-medium text-white">Call {row.phone}</a> : <p className="mt-2 text-sm text-muted">No phone number on this patient.</p>}
           {row.status === "unconfirmed" && row.attempts < MAX ? (
             <div className="mt-3">
@@ -174,7 +194,7 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
               <th className="px-3 py-2 font-normal">Phone</th>
               <th className="px-3 py-2 font-normal">Clinic</th>
               <th className="px-3 py-2 font-normal">Appointment (clinic time)</th>
-              <th className="px-3 py-2 font-normal">Philippines time</th>
+              <th className="px-3 py-2 font-normal">Clinic time now</th>
               <th className="px-3 py-2 font-normal">Time left</th>
               <th className="px-3 py-2 font-normal">Status</th>
               <th className="px-3 py-2 text-right font-normal">Calls</th>
@@ -192,7 +212,7 @@ export function DeskTable({ rows }: { rows: DeskRow[] }) {
                 </td>
                 <td className="whitespace-nowrap px-3 py-2">{r.clinic}{r.location_label ? <span className="text-muted"> · {r.location_label}</span> : null}</td>
                 <td className="whitespace-nowrap px-3 py-2">{r.clinic_time}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-muted">{r.ph_time}</td>
+                <td className="whitespace-nowrap px-3 py-2">{localNow(r.clinic_timezone)}</td>
                 <td className={`whitespace-nowrap px-3 py-2 font-semibold tabular-nums ${PILL[r.urgency] ?? ""}`}>{r.time_left}</td>
                 <td className="whitespace-nowrap px-3 py-2">
                   {STATUS[r.status] ?? r.status}

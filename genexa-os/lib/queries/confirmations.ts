@@ -25,7 +25,7 @@ export type DeskRow = {
   calls: DeskCall[];
   attempts: number; last_at: string | null; last_outcome: Outcome | null; last_by: string | null; urgency: "red" | "amber" | "green" | "grey" | "none";
   /** Shown text, worked out here so the page only lays it out. */
-  clinic_time: string; ph_time: string; time_left: string; last_text: string | null; tel: string | null; ghl_url: string | null;
+  clinic_time: string; time_left: string; last_text: string | null; tel: string | null; ghl_url: string | null;
 };
 
 const fmt = (iso: string, tz: string) =>
@@ -76,12 +76,11 @@ export async function getDesk(): Promise<{ rows: DeskRow[]; clinics: { id: strin
   const supabase = await createClient();
   const { data, error } = await supabase.from("confirmation_desk").select("*").order("scheduled_for");
   if (error) throw new Error(`confirmation_desk: ${error.message}`);
-  const rows = ((data ?? []) as Omit<DeskRow, "clinic_time" | "ph_time" | "time_left" | "last_text" | "tel" | "ghl_url">[]).map((r) => ({
+  const rows = ((data ?? []) as Omit<DeskRow, "clinic_time" | "time_left" | "last_text" | "tel" | "ghl_url">[]).map((r) => ({
     ...r,
     attempts: Number(r.attempts),
     minutes_left: Number(r.minutes_left),
     clinic_time: fmt(r.scheduled_for, r.clinic_timezone),
-    ph_time: fmt(r.scheduled_for, PH),
     time_left: timeLeft(Number(r.minutes_left)),
     last_text: r.last_at ? `${r.last_by ?? "Someone"} · ${fmt(r.last_at, PH)} · ${OUTCOME_LABEL[r.last_outcome ?? ""] ?? r.last_outcome}` : null,
     tel: telLink(r.phone),

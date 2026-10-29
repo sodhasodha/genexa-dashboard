@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => { throw new Error("not used"); } }));
 import { confirmedCalendarAdds, fieldText, ghlVerdict, isCancelled, locationLabel, PATIENT_INFO_FIELD_KEY, patientName, readPatientInformation } from "@/lib/integrations/ghl/confirmations";
+import { clinicNow } from "@/lib/clinic-time";
 import { ghlContactUrl, matchesStatus, parseDeskFilters, telLink, timeLeft } from "@/lib/queries/confirmations";
 
 const ev = (o: Record<string, unknown> = {}) => ({ id: "e1", calendarId: "CAL_U", contactId: "c1", startTime: "2026-10-28T15:00:00-04:00", appointmentStatus: "confirmed", ...o });
@@ -93,5 +94,19 @@ describe("the open patient: GHL contact link and Patient Information", () => {
   it("a clinic without the field, or a contact who left it blank, shows nothing", async () => {
     const fetchImpl = (async (url: string) => new Response(JSON.stringify(url.includes("/customFields") ? { customFields: [] } : { contact: { customFields: [] } }), { status: 200 })) as unknown as typeof fetch;
     expect(await readPatientInformation({ locationId: "LOC_T2", contactId: "C1", apiKey: "k", fetchImpl })).toBeNull();
+  });
+});
+
+describe("clinic time now (calling hours 8 AM to 9 PM at the clinic)", () => {
+  it("shows the clinic's own time and flags too early / too late", () => {
+    // 11:10 UTC on 29 Oct 2026 = 7:10 AM in New York (EDT), 6:10 AM in Chicago (CDT).
+    const t = new Date("2026-10-29T11:10:00Z");
+    expect(clinicNow(t, "America/New_York")).toEqual({ time: "7:10 AM EDT", window: "early" });
+    expect(clinicNow(t, "America/Chicago").window).toBe("early");
+    expect(clinicNow(new Date("2026-10-29T12:00:00Z"), "America/New_York")).toEqual({ time: "8:00 AM EDT", window: null });
+    expect(clinicNow(new Date("2026-10-30T00:59:00Z"), "America/New_York")).toEqual({ time: "8:59 PM EDT", window: null });
+    expect(clinicNow(new Date("2026-10-30T01:00:00Z"), "America/New_York").window).toBe("late");
+    // Phoenix has no daylight saving.
+    expect(clinicNow(new Date("2026-10-29T15:00:00Z"), "America/Phoenix").time).toBe("8:00 AM MST");
   });
 });
