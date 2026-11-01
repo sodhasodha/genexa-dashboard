@@ -72,7 +72,18 @@ export function confirmedCalendarAdds(
   return main.filter((e) => !isCancelled(e) && new Date(e.startTime).getTime() > from && !trackedIds.has(e.id) && !(e.contactId && knownContacts.has(e.contactId)));
 }
 
-export type DeskSyncResult = { ok: boolean; clinics: number; on_desk: number; added: number; added_confirmed: number; confirmed_in_ghl: number; cancelled_in_ghl: number; expired: number; skipped: string[]; errors: string[] };
+export type DeskGap = { client_id: string; name: string; reason: string };
+
+/** Why a clinic's appointments cannot reach the desk, or null when they can (pure). Only live clinics are expected to be connected. */
+export function deskGap(client: { stage: string; ghl_location_id: string | null }, hasKey: boolean, hasUnconfirmed: boolean | null): string | null {
+  if (client.stage !== "live") return null;
+  if (!client.ghl_location_id) return "no GHL sub-account set";
+  if (!hasKey) return "no GHL key";
+  if (hasUnconfirmed === false) return "no Unconfirmed calendar in GHL";
+  return null;
+}
+
+export type DeskSyncResult = { ok: boolean; clinics: number; on_desk: number; added: number; added_confirmed: number; confirmed_in_ghl: number; cancelled_in_ghl: number; expired: number; skipped: string[]; not_connected: DeskGap[]; errors: string[] };
 
 export async function syncConfirmationDesk(opts: {
   db: SupabaseClient; keys: Record<string, { location_id: string; api_key: string }>; fetchImpl?: typeof fetch; now?: Date;
@@ -80,7 +91,7 @@ export async function syncConfirmationDesk(opts: {
   const { db } = opts;
   const doFetch = opts.fetchImpl ?? fetch;
   const now = opts.now ?? new Date();
-  const out: DeskSyncResult = { ok: false, clinics: 0, on_desk: 0, added: 0, added_confirmed: 0, confirmed_in_ghl: 0, cancelled_in_ghl: 0, expired: 0, skipped: [], errors: [] };
+  const out: DeskSyncResult = { ok: false, clinics: 0, on_desk: 0, added: 0, added_confirmed: 0, confirmed_in_ghl: 0, cancelled_in_ghl: 0, expired: 0, skipped: [], not_connected: [], errors: [] };
   const keyByLocation = new Map(Object.values(opts.keys).map((k) => [k.location_id, k.api_key]));
   const get = async (apiKey: string, path: string, version = "2021-04-15"): Promise<{ status: number; body: unknown }> => {
     const res = await doFetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${apiKey}`, Version: version, Accept: "application/json" }, cache: "no-store" });
@@ -89,14 +100,19 @@ export async function syncConfirmationDesk(opts: {
     return { status: res.status, body: await res.json() };
   };
 
-  const { data: clients, error } = await db.from("clients").select("id, name, ghl_location_id, timezone").not("ghl_location_id", "is", null).neq("stage", "churned").is("deleted_at", null).order("name");
+  const { data: clients, error } = await db.from("clients").select("id, name, stage, ghl_location_id, timezone").neq("stage", "churned").is("deleted_at", null).order("name");
   if (error) throw new Error(`clients: ${error.message}`);
   const from = now.getTime();
   const to = from + DESK_AHEAD_HOURS * 3_600_000;
 
   for (const client of clients ?? []) {
+    const flag = (hasKey: boolean, hasUnconfirmed: boolean | null) => {
+      const reason = deskGap(client, hasKey, hasUnconfirmed);
+      if (reason) out.not_connected.push({ client_id: client.id, name: client.name, reason });
+    };
     const apiKey = keyByLocation.get(client.ghl_location_id as string);
-    if (!apiKey) { out.skipped.push(`${client.name}: no GHL key`); continue; }
+    if (!client.ghl_location_id) { flag(false, null); continue; }
+    if (!apiKey) { flag(false, null); out.skipped.push(`${client.name}: no GHL key`); continue; }
     try {
       const tz = (client.timezone as string | null) || "America/New_York";
       const calendars: Cal[] = GhlCalendarsResponse.parse((await get(apiKey, `/calendars/?locationId=${client.ghl_location_id}`)).body).calendars
@@ -104,7 +120,7 @@ export async function syncConfirmationDesk(opts: {
           const kind = calendarKind(c.name);
           return kind ? [{ calendar_id: c.id, kind: kind === "confirmed" ? "main" as const : "unconfirmed" as const, name: c.name, location_label: locationLabel(c.name) }] : [];
         });
-      if (!calendars.some((c) => c.kind === "unconfirmed")) { out.skipped.push(`${client.name}: no Unconfirmed calendar`); continue; }
+      if (!calendars.some((c) => c.kind === "unconfirmed")) { flag(true, false); out.skipped.push(`${client.name}: no Unconfirmed calendar`); continue; }
       const seen = new Date().toISOString();
       await db.from("clinic_calendars").upsert(calendars.map((c) => ({ client_id: client.id, ...c, seen_at: seen })), { onConflict: "client_id,calendar_id" });
 

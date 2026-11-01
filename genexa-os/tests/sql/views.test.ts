@@ -25,7 +25,16 @@ describe("client_mtd (all patient-side numbers from Cortana)", () => {
     const id = await client("Perf Clinic");
     await db.query(
       `insert into ad_metrics_daily (client_id, date, spend, impressions, clicks, unique_visitors) values
-         ($1, app_today(), 300, 10000, 150, 120), ($1, date_trunc('month', app_today())::date, 200, 10000, 50, 80)`,
+         ($1, app_today(), 300, 10000, 150, 120)`,
+      [id],
+    );
+    // A second day this month; on the 1st there is only one day, so it adds to today's row.
+    await db.query(
+      `insert into ad_metrics_daily (client_id, date, spend, impressions, clicks, unique_visitors) values
+         ($1, date_trunc('month', app_today())::date, 200, 10000, 50, 80)
+       on conflict (client_id, date) do update set spend = ad_metrics_daily.spend + excluded.spend,
+         impressions = ad_metrics_daily.impressions + excluded.impressions, clicks = ad_metrics_daily.clicks + excluded.clicks,
+         unique_visitors = ad_metrics_daily.unique_visitors + excluded.unique_visitors`,
       [id],
     );
     // 10 real leads; 4 booked, 3 confirmed; 2 showed, 1 no-show, 1 cancelled; 1 purchase of $8,000.

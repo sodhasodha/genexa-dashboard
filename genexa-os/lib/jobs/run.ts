@@ -12,6 +12,7 @@ import { JOBS_REMINDERS } from "@/lib/jobs/reminders";
 import { JOBS_MISC } from "@/lib/jobs/misc";
 import { syncGhlForms } from "@/lib/integrations/ghl/forms";
 import { syncConfirmationDesk } from "@/lib/integrations/ghl/confirmations";
+import { alertDeskGaps } from "@/lib/jobs/deskGaps";
 import { createNewClientsFromWhop } from "@/lib/jobs/newClients";
 import { JOBS_NUDGES } from "@/lib/jobs/nudges";
 import { JOBS_ROUTER } from "@/lib/jobs/router";
@@ -72,7 +73,9 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
   // The CSR confirmation desk: each clinic's Unconfirmed calendar, every 5 minutes. Reads GHL only.
   "confirmations-sync": async () => {
     const r = await syncConfirmationDesk({ db: createAdminClient(), keys: JSON.parse(requireEnv("GHL_API_KEYS_JSON")) as GhlKeys });
-    return { ok: r.ok, summary: r };
+    // A live clinic the desk cannot read: the owner is told once, not left to find out from a missed call.
+    const alerts = await alertDeskGaps({ db: createAdminClient(), gaps: r.not_connected });
+    return { ok: r.ok && alerts.dm_failed.length === 0, summary: { ...r, alerts } };
   },
   // Genexa's own GHL sub-account: New Client Form -> client + launch, Onboarding Form -> "OB form complete".
   "ghl-forms": async () => {

@@ -237,7 +237,7 @@ describe("deadline reminders", () => {
     for (const t of ["13:10", "14:00", "14:58"]) await run(await at(1, t));
     expect(to("sameer", "Due in 2h").length).toBe(1);
     expect(to("sameer", "Due in 2h")[0].text).toContain("Rebuild the calendar");
-    expect(to("sameer", "Due in 2h")[0].text).toContain("15:00 EDT");
+    expect(to("sameer", "Due in 2h")[0].text).toMatch(/15:00 E[DS]T/);
     expect(JSON.stringify(to("sameer", "Due in 2h")[0].blocks)).toContain(`tasks:${id}`);
     expect(to("sameer", "Overdue")).toEqual([]);
 
@@ -299,7 +299,7 @@ describe("deadline reminders", () => {
     await run(await at(1, "15:05")); // the old deadline passes: not overdue
     expect(to("sameer", "Overdue")).toEqual([]);
     expect(to("sameer", "Due in 2h").length).toBe(2); // 15:05 is inside two hours of 16:45
-    expect(to("sameer", "Due in 2h")[1].text).toContain("16:45 EDT");
+    expect(to("sameer", "Due in 2h")[1].text).toMatch(/16:45 E[DS]T/);
     await run(await at(1, "16:46"));
     await run(await at(1, "16:55"));
     expect(to("sameer", "Overdue").length).toBe(1);

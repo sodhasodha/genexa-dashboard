@@ -2,12 +2,25 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => { throw new Error("not used"); } }));
-import { confirmedCalendarAdds, fieldText, ghlVerdict, isCancelled, locationLabel, PATIENT_INFO_FIELD_KEY, patientName, readPatientInformation } from "@/lib/integrations/ghl/confirmations";
+import { confirmedCalendarAdds, deskGap, fieldText, ghlVerdict, isCancelled, locationLabel, PATIENT_INFO_FIELD_KEY, patientName, readPatientInformation } from "@/lib/integrations/ghl/confirmations";
 import { clinicNow } from "@/lib/clinic-time";
 import { ghlContactUrl, matchesStatus, parseDeskFilters, telLink, timeLeft } from "@/lib/queries/confirmations";
 
 const ev = (o: Record<string, unknown> = {}) => ({ id: "e1", calendarId: "CAL_U", contactId: "c1", startTime: "2026-10-28T15:00:00-04:00", appointmentStatus: "confirmed", ...o });
 const main = new Set(["CAL_MAIN"]);
+
+describe("desk sync: live clinics that cannot reach the desk", () => {
+  it("says what is missing, in the order it has to be fixed", () => {
+    expect(deskGap({ stage: "live", ghl_location_id: null }, false, null)).toBe("no GHL sub-account set");
+    expect(deskGap({ stage: "live", ghl_location_id: "L1" }, false, null)).toBe("no GHL key");
+    expect(deskGap({ stage: "live", ghl_location_id: "L1" }, true, false)).toBe("no Unconfirmed calendar in GHL");
+    expect(deskGap({ stage: "live", ghl_location_id: "L1" }, true, true)).toBeNull();
+  });
+  it("does not expect a clinic that is not live yet to be connected", () => {
+    expect(deskGap({ stage: "onboarding", ghl_location_id: null }, false, null)).toBeNull();
+    expect(deskGap({ stage: "paused", ghl_location_id: "L1" }, false, null)).toBeNull();
+  });
+});
 
 describe("desk sync: what GHL says about a tracked appointment", () => {
   it("on the main calendar = confirmed, by its own id or by the same patient after it left the Unconfirmed calendar", () => {
