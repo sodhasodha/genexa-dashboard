@@ -3,7 +3,7 @@
 export type Stage = "appointments_booked" | "no_show" | "closed_won" | "not_closed";
 export type Outcome = "no_show" | "closed_won" | "not_closed";
 export type Patient = { contact_id: string; name: string; stage: Stage; appointment: string; revenue: number };
-export type AskStatus = "asked" | "reminded" | "logged" | "thinking" | "thinking_asked" | "done" | "unsent";
+export type AskStatus = "asked" | "reminded" | "logged" | "thinking" | "thinking_asked" | "done" | "unsent" | "not_ours";
 export type Ask = {
   id: string;
   patient_contact_id: string;
@@ -114,13 +114,14 @@ export function remindText(asks: Ask[], timeZone: string): string {
 
 export const followUpText = (a: Ask) => `Did ${a.patient_name} get back to you? Reply Closed + amount, Still thinking, or No`;
 
-export type Logged = { name: string; outcome: Outcome | "thinking"; amount: number | null };
+export type Logged = { name: string; outcome: Outcome | "thinking" | "not_ours"; amount: number | null };
 
 export function describe(l: Logged): string {
   const n = shortName(l.name);
   if (l.outcome === "closed_won") return l.amount ? `${n} closed ${money(l.amount)}` : `${n} closed (amount?)`;
   if (l.outcome === "no_show") return `${n} no-show`;
   if (l.outcome === "thinking") return `${n} showed, thinking about it`;
+  if (l.outcome === "not_ours") return `${n} not from our ads, won't ask again`;
   return `${n} showed, not closed`;
 }
 
@@ -132,6 +133,17 @@ export function confirmText(logged: Logged[], problems: string[]): string {
   parts.push(...problems);
   if (logged.length) parts.push("Reply FIX to change.");
   return parts.join(" ");
+}
+
+type Attribution = { medium?: string | null; sessionSource?: string | null; utmSource?: string | null; campaign?: string | null; utmCampaign?: string | null };
+export type LeadContact = { source?: string | null; attributionSource?: Attribution | null; lastAttributionSource?: Attribution | null };
+
+// Genexa's patients come from its Meta ads, and GHL records that on the contact. A walk-in, podcast or referral
+// patient has no such trace, so the manager is never texted about them.
+const FROM_ADS = /\b(facebook|instagram|meta|paid social|fb|ig|genexa)\b/i;
+export function isGenexaLead(c: LeadContact): boolean {
+  const attributed = [c.attributionSource, c.lastAttributionSource].some((a) => a && [a.medium, a.sessionSource, a.utmSource, a.campaign, a.utmCampaign].some((v) => v && FROM_ADS.test(v)));
+  return attributed || FROM_ADS.test(c.source ?? "");
 }
 
 export const FIX_TEXT = `What should it be? Reply e.g. "Jane S closed $8,500" or "Mike R no-show"`;

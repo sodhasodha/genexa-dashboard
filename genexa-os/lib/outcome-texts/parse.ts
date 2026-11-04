@@ -15,9 +15,12 @@ For each patient the reply reports on, return:
   "no_show" — did not attend, no-showed, didn't come.
   "thinking" — attended but is thinking about it, wants to talk to a spouse, will get back to him, "still thinking".
   "not_closed" — attended and did not buy and is not still deciding: declined, not interested, too expensive, "no" to "did they get back to you".
+  "not_ours" — he says the patient didn't come through Genexa: a walk-in, podcast, referral, existing patient, "not one of yours".
 - amount: for closed_won, the dollar amount if given ("8.5k" = 8500, "$3,999" = 3999), else null. A reply that is only an amount ("8500") answers a question asking for an amount: it is closed_won for that patient. Null for the other outcomes.
 
 A patient already logged can be corrected: if he says one was wrong ("Mike actually showed and closed 5k"), return the corrected outcome for that patient.
+
+Several texts sent close together arrive as one reply, one text per line; read them together.
 
 Set unclear to true when the reply seems to report an outcome you could not tie to a patient, or you could not tell what happened. Set it false for replies with no outcome in them at all ("ok", "thanks", a question).`;
 
@@ -30,7 +33,7 @@ export const REPLY_JSON_SCHEMA = {
         type: "object",
         properties: {
           ref: { type: "integer" },
-          outcome: { type: "string", enum: ["closed_won", "no_show", "thinking", "not_closed"] },
+          outcome: { type: "string", enum: ["closed_won", "no_show", "thinking", "not_closed", "not_ours"] },
           amount: { anyOf: [{ type: "number" }, { type: "null" }] },
         },
         required: ["ref", "outcome", "amount"],
@@ -44,7 +47,7 @@ export const REPLY_JSON_SCHEMA = {
 } as const;
 
 const Parsed = z.object({
-  outcomes: z.array(z.object({ ref: z.number().int(), outcome: z.enum(["closed_won", "no_show", "thinking", "not_closed"]), amount: z.number().positive().max(1_000_000).nullable() })).max(20),
+  outcomes: z.array(z.object({ ref: z.number().int(), outcome: z.enum(["closed_won", "no_show", "thinking", "not_closed", "not_ours"]), amount: z.number().positive().max(1_000_000).nullable() })).max(20),
   unclear: z.boolean(),
 });
 export type ParsedReply = z.infer<typeof Parsed>;

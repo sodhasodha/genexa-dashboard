@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { plan, askText, remindText, confirmText, shortName, isBareFix, canText, type Ask, type Patient } from "@/lib/outcome-texts/plan";
+import { plan, askText, remindText, confirmText, shortName, isBareFix, canText, isGenexaLead, type Ask, type Patient } from "@/lib/outcome-texts/plan";
 import { parseReplyJson, buildReplyMessage } from "@/lib/outcome-texts/parse";
 
 const TZ = "America/Chicago";
@@ -100,5 +100,24 @@ describe("reading the manager's reply", () => {
 describe("a question that could not be texted", () => {
   it("is asked again on the next run", () => {
     expect(plan({ now: at("2026-11-04T16:00:00"), timeZone: TZ, liveFrom: LIVE, patients: [patient()], asks: [ask({ status: "unsent" })] }).ask).toHaveLength(1);
+  });
+});
+
+describe("patients who didn't come from Genexa", () => {
+  it("are told apart by the ad attribution GHL keeps on the contact", () => {
+    expect(isGenexaLead({ source: "Facebook", attributionSource: { medium: "facebook", sessionSource: "Paid Social", campaign: "Genexa | Fresh Batch | 21 Oct" } })).toBe(true);
+    expect(isGenexaLead({ source: "Organic" })).toBe(false);
+    expect(isGenexaLead({ source: null, attributionSource: { medium: "manual", campaign: "Podcast" } })).toBe(false);
+  });
+
+  it("are never asked about or reminded about once marked", () => {
+    const now = at("2026-11-05T09:05:00");
+    const p = plan({ now, timeZone: TZ, liveFrom: LIVE, patients: [patient()], asks: [ask({ status: "not_ours" })] });
+    expect(p.ask).toHaveLength(0);
+    expect(p.remind).toHaveLength(0);
+  });
+
+  it("are confirmed back when the manager says so", () => {
+    expect(confirmText([{ name: "Chelisa Corey", outcome: "not_ours", amount: null }], [])).toBe("Logged: Chelisa C not from our ads, won't ask again. Reply FIX to change.");
   });
 });
