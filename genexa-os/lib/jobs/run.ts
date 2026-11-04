@@ -22,6 +22,7 @@ import { addDays, etToday } from "@/lib/time";
 import { runExceptionsEngine } from "@/lib/exceptions/engine";
 import { recheckZeroSpend } from "@/lib/integrations/cortana/sync";
 import { verifyCortana } from "@/lib/integrations/cortana/verify";
+import { runOutcomeTexts } from "@/lib/outcome-texts/run";
 
 export type JobResult = { ok: boolean; summary: Record<string, unknown> };
 
@@ -76,6 +77,11 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
     // A live clinic the desk cannot read: the owner is told once, not left to find out from a missed call.
     const alerts = await alertDeskGaps({ db: createAdminClient(), gaps: r.not_connected });
     return { ok: r.ok && alerts.dm_failed.length === 0, summary: { ...r, alerts } };
+  },
+  // Clinic managers texted for each confirmed appointment's outcome; their replies logged on the client dashboard.
+  "outcome-texts": async () => {
+    const r = await runOutcomeTexts({ db: createAdminClient(), keys: JSON.parse(requireEnv("GHL_API_KEYS_JSON")) as GhlKeys, apiKey: requireEnv("ANTHROPIC_API_KEY") });
+    return { ok: r.ok, summary: r };
   },
   // Genexa's own GHL sub-account: New Client Form -> client + launch, Onboarding Form -> "OB form complete".
   "ghl-forms": async () => {

@@ -11,7 +11,7 @@ import { proposalBlocks, outcomeText, type Candidate } from "./compose";
 const DASHBOARD = () => process.env.CLIENT_DASHBOARD_URL || "https://client.genexascaling.com";
 export const outcomeProposalsConfigured = () => !!(process.env.CLIENT_DASHBOARD_AGENT_TOKEN && process.env.ANTHROPIC_API_KEY && slackConfigured());
 
-async function dashboard<T>(path: string, body: unknown): Promise<{ status: number; json: T }> {
+export async function dashboard<T>(path: string, body: unknown): Promise<{ status: number; json: T }> {
   const res = await fetch(`${DASHBOARD()}${path}`, {
     method: "POST",
     headers: { authorization: `Bearer ${process.env.CLIENT_DASHBOARD_AGENT_TOKEN}`, "content-type": "application/json" },
