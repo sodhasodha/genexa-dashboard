@@ -14,7 +14,7 @@ describe("role-based landing", () => {
     expect(NAV_GROUPS.map((g) => g.items.map((i) => i.label))).toEqual([
       ["Overview", "Today", "Week", "Month"],
       ["Call Centre", "Confirmations", "Media Buying", "Tech", "Team", "Payroll"],
-      ["Clients", "Reports", "Launches", "Pipeline"],
+      ["Clients", "Renewals", "Reports", "Launches", "Pipeline"],
       ["Tasks", "Ideas"],
       ["Integrations", "Data review"],
     ]);
