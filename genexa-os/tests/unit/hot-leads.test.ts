@@ -35,8 +35,8 @@ describe("change-of-plans keywords", () => {
 const H = 3_600_000;
 const NOW = Date.parse("2026-11-09T18:00:00Z");
 const facts = (o: Partial<LeadFacts> = {}): LeadFacts => ({
-  hidden: false, upcoming: false, lastInboundAt: null, inboundReschedule: false, inboundCallback: false,
-  callbackTag: false, lastMessageAt: null, cancelledAt: null, noShowAt: null, ...o,
+  hidden: false, onDesk: false, upcoming: false, lastInboundAt: null, inboundReschedule: false, inboundCallback: false,
+  callbackTag: false, lastMessageAt: null, noShowAt: null, ...o,
 });
 
 describe("who is hot", () => {
@@ -52,17 +52,19 @@ describe("who is hot", () => {
     expect(decideLead(facts({ lastInboundAt: NOW - 70 * H, inboundCallback: true }), NOW)?.reason).toBe("callback");
     expect(decideLead(facts({ callbackTag: true, lastMessageAt: NOW - 6 * 24 * H }), NOW)?.reason).toBe("callback");
     expect(decideLead(facts({ callbackTag: true, lastMessageAt: NOW - 8 * 24 * H }), NOW)).toBeNull();
-    expect(decideLead(facts({ cancelledAt: NOW - 13 * 24 * H }), NOW)?.reason).toBe("cancelled");
-    expect(decideLead(facts({ cancelledAt: NOW - 15 * 24 * H }), NOW)).toBeNull();
     expect(decideLead(facts({ noShowAt: NOW - 6 * 24 * H }), NOW)?.reason).toBe("no_show");
     expect(decideLead(facts({ noShowAt: NOW - 8 * 24 * H }), NOW)).toBeNull();
   });
 
-  it("one badge per lead: reschedule, then callback, then mid conversation, then cancelled, then no-show", () => {
+  it("anyone on the confirmation desk is never shown, even texting to reschedule", () => {
+    expect(decideLead(facts({ onDesk: true, lastInboundAt: NOW - H, inboundReschedule: true }), NOW)).toBeNull();
+    expect(decideLead(facts({ onDesk: true, lastInboundAt: NOW - H }), NOW)).toBeNull();
+  });
+
+  it("one badge per lead: reschedule, then callback, then mid conversation, then no-show", () => {
     expect(decideLead(facts({ lastInboundAt: NOW - H, inboundReschedule: true, callbackTag: true, lastMessageAt: NOW }), NOW)?.reason).toBe("reschedule");
     expect(decideLead(facts({ lastInboundAt: NOW - H, callbackTag: true, lastMessageAt: NOW }), NOW)).toEqual({ reason: "callback", signal_at: NOW, last_reply_at: NOW - H });
-    expect(decideLead(facts({ lastInboundAt: NOW - H, cancelledAt: NOW - 2 * H, noShowAt: NOW - 3 * H }), NOW)?.reason).toBe("mid_conversation");
-    expect(decideLead(facts({ cancelledAt: NOW - 2 * H, noShowAt: NOW - H }), NOW)?.reason).toBe("cancelled");
+    expect(decideLead(facts({ lastInboundAt: NOW - H, noShowAt: NOW - 3 * H }), NOW)?.reason).toBe("mid_conversation");
   });
 
   it("DNC and not interested are never shown, even wanting to reschedule", () => {
@@ -98,7 +100,7 @@ describe("reading GHL", () => {
     expect(latestInboundSms([m("outbound", "TYPE_SMS", "hi", "2026-11-09T17:00:00Z")])).toBeNull();
   });
 
-  it("appointments on any calendar: upcoming, latest cancellation (when cancelled) and no-show", () => {
+  it("appointments on any calendar: upcoming and latest no-show; a cancellation is neither", () => {
     const e = (contactId: string, startTime: string, appointmentStatus: string, dateUpdated = startTime) => ({ id: Math.random().toString(), contactId, startTime, appointmentStatus, dateUpdated });
     const f = appointmentFacts([
       e("a", "2026-11-12T15:00:00-06:00", "confirmed"),
@@ -108,7 +110,7 @@ describe("reading GHL", () => {
       e("d", "2026-11-01T15:00:00-06:00", "noshow"),
     ], NOW);
     expect([...f.upcoming].sort()).toEqual(["a", "d"]);
-    expect(f.cancelledAt.get("b")).toBe(Date.parse("2026-11-08T10:00:00Z"));
+    expect(f.noShowAt.has("b")).toBe(false);
     expect(f.noShowAt.get("c")).toBe(Date.parse("2026-11-05T15:00:00-06:00"));
     expect(f.upcoming.has("b")).toBe(false);
   });

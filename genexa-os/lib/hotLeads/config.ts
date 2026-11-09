@@ -34,8 +34,6 @@ export const WINDOWS = {
   freshReplyHours: 2,
   /** A callback tag counts while the conversation has had a message within this many days (GHL does not date tags). */
   callbackTagDays: 7,
-  /** "Cancelled": an appointment cancelled (or logged Rescheduled on the desk) within this many days. */
-  cancelledDays: 14,
   /** "No-show": a no-show appointment within this many days. */
   noShowDays: 7,
   /** Greyed out for everyone this long after a CSR opens the lead. */

@@ -46,10 +46,9 @@ export function latestInboundSms(messages: z.infer<typeof Message>[]): { at: num
   return { at: Date.parse(best.dateAdded), reschedule: findKeyword(body, RESCHEDULE_KEYWORDS) !== null, callback: findKeyword(body, CALLBACK_KEYWORDS) !== null };
 }
 
-/** Per contact, from every calendar's appointments (pure): who has one to come, their latest cancellation and no-show. */
+/** Per contact, from every calendar's appointments (pure): who has one to come, and their latest no-show. */
 export function appointmentFacts(events: z.infer<typeof Event>[], now: number) {
   const upcoming = new Set<string>();
-  const cancelledAt = new Map<string, number>();
   const noShowAt = new Map<string, number>();
   const later = (m: Map<string, number>, k: string, t: number) => { if (Number.isFinite(t) && t > (m.get(k) ?? -Infinity)) m.set(k, t); };
   for (const e of events) {
@@ -58,9 +57,8 @@ export function appointmentFacts(events: z.infer<typeof Event>[], now: number) {
     const status = e.appointmentStatus ?? "";
     if (start > now && !isCancelled(e)) upcoming.add(e.contactId);
     else if (/no_?show/i.test(status) && start <= now) later(noShowAt, e.contactId, start);
-    else if (/cancel/i.test(status)) later(cancelledAt, e.contactId, Date.parse(e.dateUpdated ?? e.startTime));
   }
-  return { upcoming, cancelledAt, noShowAt };
+  return { upcoming, noShowAt };
 }
 
 type Cached = {
@@ -124,24 +122,23 @@ export async function syncHotLeads(opts: {
       after = tail.sort?.[0] ?? tail.lastMessageDate;
     }
 
-    // 2. Every calendar's appointments: from the oldest cancellation that still counts to a year ahead.
+    // 2. Every calendar's appointments: from the oldest no-show that still counts to a year ahead.
     const calendars = Calendars.parse(await get(apiKey, `/calendars/?locationId=${loc}`)).calendars;
-    const from = now - Math.max(WINDOWS.cancelledDays, WINDOWS.noShowDays) * 24 * HOUR;
+    const from = now - WINDOWS.noShowDays * 24 * HOUR;
     const events: z.infer<typeof Event>[] = [];
     for (const cal of calendars) {
       const r = await get(apiKey, `/calendars/events?locationId=${loc}&calendarId=${encodeURIComponent(cal.id)}&startTime=${from}&endTime=${now + AHEAD_DAYS * 24 * HOUR}`);
       if (r) events.push(...Events.parse(r).events);
     }
     const appts = appointmentFacts(events, now);
-    // A patient logged Rescheduled on the confirmation desk counts as cancelled until they rebook.
-    const { data: desk } = await db.from("confirmation_appointments").select("ghl_contact_id, status_at")
-      .eq("client_id", client.id).eq("status", "rescheduled").gte("status_at", new Date(now - WINDOWS.cancelledDays * 24 * HOUR).toISOString());
-    for (const d of (desk ?? []) as { ghl_contact_id: string | null; status_at: string }[]) {
-      if (d.ghl_contact_id && Date.parse(d.status_at) > (appts.cancelledAt.get(d.ghl_contact_id) ?? -Infinity)) appts.cancelledAt.set(d.ghl_contact_id, Date.parse(d.status_at));
-    }
+    // Patients on the confirmation desk (an appointment still to come, any status): CSRs call them there, never here.
+    const { data: desk, error: deskError } = await db.from("confirmation_appointments").select("ghl_contact_id")
+      .eq("client_id", client.id).gt("scheduled_for", new Date(now).toISOString()).not("ghl_contact_id", "is", null);
+    if (deskError) throw new Error(`confirmation_appointments: ${deskError.message}`);
+    const onDesk = new Set(((desk ?? []) as { ghl_contact_id: string }[]).map((d) => d.ghl_contact_id));
 
     // 3. What was remembered about these contacts last time.
-    const ids = [...new Set([...convs.keys(), ...appts.cancelledAt.keys(), ...appts.noShowAt.keys()])];
+    const ids = [...new Set([...convs.keys(), ...appts.noShowAt.keys()])].filter((id) => !onDesk.has(id));
     const cache = new Map<string, Cached>();
     for (let i = 0; i < ids.length; i += 100) {
       const { data, error: cacheError } = await db.from("hot_lead_contacts").select("*").eq("client_id", client.id).in("ghl_contact_id", ids.slice(i, i + 100));
@@ -184,11 +181,11 @@ export async function syncHotLeads(opts: {
       // A remembered text older than the windows is ignored by decideLead.
       const facts = {
         upcoming: appts.upcoming.has(id),
+        onDesk: false,
         lastInboundAt: c?.last_inbound_sms_at ? Date.parse(c.last_inbound_sms_at) : null,
         inboundReschedule: !!c?.inbound_reschedule,
         inboundCallback: !!c?.inbound_callback,
         lastMessageAt: s?.lastMessageAt ?? null,
-        cancelledAt: appts.cancelledAt.get(id) ?? null,
         noShowAt: appts.noShowAt.get(id) ?? null,
       };
       let tags = s?.tags ?? c?.tags ?? [];

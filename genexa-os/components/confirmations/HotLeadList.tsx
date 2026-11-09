@@ -10,7 +10,6 @@ const BADGE: Record<HotReason, string> = {
   reschedule: "bg-bad-bg text-bad",
   callback: "bg-warn-bg text-warn",
   mid_conversation: "bg-good-bg text-good",
-  cancelled: "bg-stale-bg text-muted",
   no_show: "bg-stale-bg text-muted",
 };
 const time = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });

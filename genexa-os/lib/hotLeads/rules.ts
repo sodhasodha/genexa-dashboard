@@ -1,12 +1,11 @@
 // Hot Leads rules (pure): keyword matching and which leads are hot, and why.
 import { NEGATIONS, NEVER_MATCH, WINDOWS } from "./config";
 
-export type HotReason = "reschedule" | "callback" | "mid_conversation" | "cancelled" | "no_show";
+export type HotReason = "reschedule" | "callback" | "mid_conversation" | "no_show";
 export const REASON_LABEL: Record<HotReason, string> = {
   reschedule: "Wants to reschedule",
   callback: "Callback requested",
   mid_conversation: "Mid conversation",
-  cancelled: "Cancelled",
   no_show: "No-show",
 };
 
@@ -60,6 +59,8 @@ export function findKeyword(text: string, keywords: string[]): string | null {
 export type LeadFacts = {
   /** Tagged DNC or not interested. */
   hidden: boolean;
+  /** Has an appointment on the confirmation desk (CSRs already call them there). */
+  onDesk: boolean;
   /** Has an appointment still to come on any calendar (not cancelled or no-show). */
   upcoming: boolean;
   /** Their latest inbound text, and whether it asks to reschedule or to be called. */
@@ -69,8 +70,7 @@ export type LeadFacts = {
   /** Tagged as having asked for a callback, and the conversation's latest message. */
   callbackTag: boolean;
   lastMessageAt: number | null;
-  /** Their most recent cancelled appointment (when it was cancelled) and no-show (its time). */
-  cancelledAt: number | null;
+  /** Their most recent no-show appointment (its time). Cancellations are not leads. */
   noShowAt: number | null;
 };
 
@@ -79,10 +79,11 @@ export type Lead = { reason: HotReason; signal_at: number; last_reply_at: number
 /**
  * Whether a contact is a hot lead, and the one reason shown (pure).
  * Anyone with an appointment to come is left out, unless their latest text
- * (last 72h) asks to change it. DNC / not interested are never shown.
+ * (last 72h) asks to change it. Anyone on the confirmation desk, DNC or not
+ * interested is never shown. Cancellations are not leads.
  */
 export function decideLead(f: LeadFacts, now: number): Lead | null {
-  if (f.hidden) return null;
+  if (f.hidden || f.onDesk) return null;
   const within = (t: number | null, hours: number): t is number => t !== null && t <= now + 60_000 && now - t <= hours * 3_600_000;
   const reply = within(f.lastInboundAt, WINDOWS.replyHours) ? f.lastInboundAt : null;
   const lead = (reason: HotReason, at: number): Lead => ({ reason, signal_at: at, last_reply_at: reply });
@@ -91,7 +92,6 @@ export function decideLead(f: LeadFacts, now: number): Lead | null {
   if (f.inboundCallback && within(f.lastInboundAt, WINDOWS.keywordHours)) return lead("callback", f.lastInboundAt);
   if (f.callbackTag && within(f.lastMessageAt, WINDOWS.callbackTagDays * 24)) return lead("callback", f.lastMessageAt);
   if (reply !== null) return lead("mid_conversation", reply);
-  if (within(f.cancelledAt, WINDOWS.cancelledDays * 24)) return lead("cancelled", f.cancelledAt);
   if (within(f.noShowAt, WINDOWS.noShowDays * 24)) return lead("no_show", f.noShowAt);
   return null;
 }
