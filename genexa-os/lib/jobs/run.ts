@@ -12,6 +12,7 @@ import { JOBS_REMINDERS } from "@/lib/jobs/reminders";
 import { JOBS_MISC } from "@/lib/jobs/misc";
 import { syncGhlForms } from "@/lib/integrations/ghl/forms";
 import { syncConfirmationDesk } from "@/lib/integrations/ghl/confirmations";
+import { syncHotLeads } from "@/lib/integrations/ghl/hotLeads";
 import { alertDeskGaps } from "@/lib/jobs/deskGaps";
 import { createNewClientsFromWhop } from "@/lib/jobs/newClients";
 import { JOBS_NUDGES } from "@/lib/jobs/nudges";
@@ -77,6 +78,11 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
     // A live clinic the desk cannot read: the owner is told once, not left to find out from a missed call.
     const alerts = await alertDeskGaps({ db: createAdminClient(), gaps: r.not_connected });
     return { ok: r.ok && alerts.dm_failed.length === 0, summary: { ...r, alerts } };
+  },
+  // Hot Leads, every 2 minutes: who CSRs call when the desk is clear. Reads GHL only.
+  "hot-leads-sync": async () => {
+    const r = await syncHotLeads({ db: createAdminClient(), keys: JSON.parse(requireEnv("GHL_API_KEYS_JSON")) as GhlKeys });
+    return { ok: r.ok, summary: r };
   },
   // Clinic managers texted for each confirmed appointment's outcome; their replies logged on the client dashboard.
   "outcome-texts": async () => {

@@ -28,6 +28,7 @@ const INTERVAL = [
   ["genexa-ghl-appointments", "50 * * * *", "ghl-appointments", 290000],
   ["genexa-cortana-verify", "15 */3 * * *", "cortana-verify", 290000], // every 3h: our copy checked against Cortana, longest-unchecked clinics first
   ["genexa-confirmations-sync", "*/5 * * * *", "confirmations-sync", 240000], // the CSR confirmation desk
+  ["genexa-hot-leads-sync", "1-59/2 * * * *", "hot-leads-sync", 110000], // Hot Leads for the CSRs
   ["genexa-outcome-texts", "2-59/5 * * * *", "outcome-texts", 240000], // clinic managers texted for outcomes, replies logged
   ["genexa-ghl-forms", "40 * * * *", "ghl-forms", 120000],
   ["genexa-fathom-sync", "45 * * * *", "fathom-sync", 120000],

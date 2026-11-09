@@ -25,13 +25,14 @@ export async function proxy(request: NextRequest) {
   const isApi = pathname.startsWith("/api/");
   const isPublic = pathname.startsWith("/login") || pathname.startsWith("/auth");
 
-  // CSRs use the confirmation desk and nothing else: every other page redirects
+  // CSRs use the confirmation desk (and its Hot Leads tab) and nothing else: every other page redirects
   // there and every other API answers 403. (Pages, server actions and the
   // database refuse them as well; this is the first of three locks.)
   if (data.user) {
     const { data: me } = await supabase.from("staff").select("role").eq("auth_user_id", data.user.id).neq("status", "left").maybeSingle();
     if (me?.role === "csr") {
-      const allowed = pathname === "/confirmations" || pathname.startsWith("/confirmations/") || pathname.startsWith("/api/confirmations") || isPublic;
+      const onDesk = ["/confirmations", "/hot-leads"].some((p) => pathname === p || pathname.startsWith(`${p}/`));
+      const allowed = onDesk || pathname.startsWith("/api/confirmations") || isPublic;
       if (!allowed) {
         if (isApi) return NextResponse.json({ error: "forbidden" }, { status: 403 });
         const desk = request.nextUrl.clone();

@@ -1,9 +1,10 @@
-import Image from "next/image";
 import Link from "next/link";
+import { DeskHeader } from "@/components/confirmations/DeskHeader";
 import { DeskTable } from "@/components/confirmations/DeskTable";
 import { DeskFilters } from "@/components/confirmations/DeskFilters";
 import { requireDeskUser } from "@/lib/auth/staff";
 import { getDesk, matchesStatus, parseDeskFilters, STATUS_FILTERS } from "@/lib/queries/confirmations";
+import { getHotLeads, waiting } from "@/lib/queries/hotLeads";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,10 @@ export const dynamic = "force-dynamic";
 export default async function ConfirmationsPage({ searchParams }: PageProps<"/confirmations">) {
   const me = await requireDeskUser();
   const filters = parseDeskFilters(await searchParams);
-  const { rows, clinics } = await getDesk();
+  const [{ rows, clinics }, hot] = await Promise.all([getDesk(), getHotLeads()]);
+  const hotWaiting = waiting(hot);
+  // Nothing on the desk still takes calls (any clinic): point the CSR at Hot Leads.
+  const queueClear = !rows.some((r) => r.status === "unconfirmed");
   const inClinics = filters.clinics.length ? rows.filter((r) => filters.clinics.includes(r.client_id)) : rows;
   const shown = inClinics.filter((r) => matchesStatus(r, filters.status));
   // The summary follows the clinic filter, and the status filter where it narrows things.
@@ -28,20 +32,14 @@ export default async function ConfirmationsPage({ searchParams }: PageProps<"/co
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="flex items-center gap-3 border-b border-line bg-panel px-4 py-2.5">
-        <Image src="/logo.png" alt="" width={24} height={24} className="rounded-md" />
-        <span className="font-semibold">Confirmations</span>
-        <span className="text-xs text-muted">Unconfirmed calendars · 34h to 3h before each appointment · updates every 5 minutes</span>
-        <div className="ml-auto flex items-center gap-3 text-sm">
-          {me.role === "owner" ? <Link href="/overview" className="text-muted hover:text-ink">← Genexa OS</Link> : null}
-          <span className="text-muted">{me.name}</span>
-          <form action="/auth/signout" method="post">
-            <button type="submit" className="cursor-pointer rounded border border-line px-2.5 py-1 text-xs hover:border-muted">Log out</button>
-          </form>
-        </div>
-      </header>
+      <DeskHeader me={me} active="confirmations" hotWaiting={hotWaiting} note="Unconfirmed calendars · 34h to 3h before each appointment · updates every 5 minutes" />
 
       <main className="flex flex-col gap-3 p-4">
+        {queueClear ? (
+          <Link href="/hot-leads" className="rounded-lg border border-good bg-good-bg px-4 py-3 text-sm font-medium text-good hover:underline">
+            Queue clear: go to Hot Leads ({hotWaiting} waiting) →
+          </Link>
+        ) : null}
         <DeskFilters clinics={clinics} selected={filters.clinics} status={filters.status} statuses={STATUS_FILTERS} />
         <div className="flex flex-wrap gap-2 text-sm">
           {[
