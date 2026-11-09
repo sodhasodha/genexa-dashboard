@@ -1,12 +1,11 @@
 // Hot Leads rules (pure): keyword matching and which leads are hot, and why.
 import { NEGATIONS, NEVER_MATCH, WINDOWS } from "./config";
 
-export type HotReason = "reschedule" | "callback" | "mid_conversation" | "no_show";
+export type HotReason = "reschedule" | "callback" | "mid_conversation";
 export const REASON_LABEL: Record<HotReason, string> = {
   reschedule: "Wants to reschedule",
   callback: "Callback requested",
   mid_conversation: "Mid conversation",
-  no_show: "No-show",
 };
 
 /** Lower case, apostrophes dropped ("can't" -> "cant"), everything else that is not a letter or digit a space. */
@@ -70,8 +69,6 @@ export type LeadFacts = {
   /** Tagged as having asked for a callback, and the conversation's latest message. */
   callbackTag: boolean;
   lastMessageAt: number | null;
-  /** Their most recent no-show appointment (its time). Cancellations are not leads. */
-  noShowAt: number | null;
 };
 
 export type Lead = { reason: HotReason; signal_at: number; last_reply_at: number | null };
@@ -80,7 +77,7 @@ export type Lead = { reason: HotReason; signal_at: number; last_reply_at: number
  * Whether a contact is a hot lead, and the one reason shown (pure).
  * Anyone with an appointment to come is left out, unless their latest text
  * (last 72h) asks to change it. Anyone on the confirmation desk, DNC or not
- * interested is never shown. Cancellations are not leads.
+ * interested is never shown. Cancellations and no-shows are not leads.
  */
 export function decideLead(f: LeadFacts, now: number): Lead | null {
   if (f.hidden || f.onDesk) return null;
@@ -92,7 +89,6 @@ export function decideLead(f: LeadFacts, now: number): Lead | null {
   if (f.inboundCallback && within(f.lastInboundAt, WINDOWS.keywordHours)) return lead("callback", f.lastInboundAt);
   if (f.callbackTag && within(f.lastMessageAt, WINDOWS.callbackTagDays * 24)) return lead("callback", f.lastMessageAt);
   if (reply !== null) return lead("mid_conversation", reply);
-  if (within(f.noShowAt, WINDOWS.noShowDays * 24)) return lead("no_show", f.noShowAt);
   return null;
 }
 

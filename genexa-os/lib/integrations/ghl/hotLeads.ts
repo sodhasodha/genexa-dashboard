@@ -46,19 +46,11 @@ export function latestInboundSms(messages: z.infer<typeof Message>[]): { at: num
   return { at: Date.parse(best.dateAdded), reschedule: findKeyword(body, RESCHEDULE_KEYWORDS) !== null, callback: findKeyword(body, CALLBACK_KEYWORDS) !== null };
 }
 
-/** Per contact, from every calendar's appointments (pure): who has one to come, and their latest no-show. */
+/** Contacts with an appointment still to come on any calendar (not cancelled or no-show) (pure). */
 export function appointmentFacts(events: z.infer<typeof Event>[], now: number) {
   const upcoming = new Set<string>();
-  const noShowAt = new Map<string, number>();
-  const later = (m: Map<string, number>, k: string, t: number) => { if (Number.isFinite(t) && t > (m.get(k) ?? -Infinity)) m.set(k, t); };
-  for (const e of events) {
-    if (!e.contactId) continue;
-    const start = Date.parse(e.startTime);
-    const status = e.appointmentStatus ?? "";
-    if (start > now && !isCancelled(e)) upcoming.add(e.contactId);
-    else if (/no_?show/i.test(status) && start <= now) later(noShowAt, e.contactId, start);
-  }
-  return { upcoming, noShowAt };
+  for (const e of events) if (e.contactId && Date.parse(e.startTime) > now && !isCancelled(e)) upcoming.add(e.contactId);
+  return { upcoming };
 }
 
 type Cached = {
@@ -122,9 +114,9 @@ export async function syncHotLeads(opts: {
       after = tail.sort?.[0] ?? tail.lastMessageDate;
     }
 
-    // 2. Every calendar's appointments: from the oldest no-show that still counts to a year ahead.
+    // 2. Every calendar's appointments from now to a year ahead.
     const calendars = Calendars.parse(await get(apiKey, `/calendars/?locationId=${loc}`)).calendars;
-    const from = now - WINDOWS.noShowDays * 24 * HOUR;
+    const from = now;
     const events: z.infer<typeof Event>[] = [];
     for (const cal of calendars) {
       const r = await get(apiKey, `/calendars/events?locationId=${loc}&calendarId=${encodeURIComponent(cal.id)}&startTime=${from}&endTime=${now + AHEAD_DAYS * 24 * HOUR}`);
@@ -138,7 +130,7 @@ export async function syncHotLeads(opts: {
     const onDesk = new Set(((desk ?? []) as { ghl_contact_id: string }[]).map((d) => d.ghl_contact_id));
 
     // 3. What was remembered about these contacts last time.
-    const ids = [...new Set([...convs.keys(), ...appts.noShowAt.keys()])].filter((id) => !onDesk.has(id));
+    const ids = [...convs.keys()].filter((id) => !onDesk.has(id));
     const cache = new Map<string, Cached>();
     for (let i = 0; i < ids.length; i += 100) {
       const { data, error: cacheError } = await db.from("hot_lead_contacts").select("*").eq("client_id", client.id).in("ghl_contact_id", ids.slice(i, i + 100));
@@ -155,7 +147,7 @@ export async function syncHotLeads(opts: {
     // 4. Latest text in: re-read only conversations with something new since last time.
     const keywordFrom = now - WINDOWS.keywordHours * HOUR;
     for (const [contactId, s] of convs) {
-      if (s.lastMessageAt < keywordFrom) continue;
+      if (s.lastMessageAt < keywordFrom || onDesk.has(contactId)) continue;
       const lastIso = new Date(s.lastMessageAt).toISOString();
       const readFor = cache.get(contactId)?.messages_read_for;
       if (readFor && Date.parse(readFor) === s.lastMessageAt) continue;
@@ -186,7 +178,6 @@ export async function syncHotLeads(opts: {
         inboundReschedule: !!c?.inbound_reschedule,
         inboundCallback: !!c?.inbound_callback,
         lastMessageAt: s?.lastMessageAt ?? null,
-        noShowAt: appts.noShowAt.get(id) ?? null,
       };
       let tags = s?.tags ?? c?.tags ?? [];
       let name = s?.name ?? c?.name ?? null;
@@ -209,7 +200,12 @@ export async function syncHotLeads(opts: {
 
     // 6. Save: what to remember, the current leads, and drop the ones no longer hot.
     if (changed.size) {
-      const rows = [...changed.values()].map((r) => ({ client_id: client.id, ...r }));
+      // Same columns on every row: in a batch, a column missing from one row is sent as null for it.
+      const rows = [...changed.values()].map((r) => ({
+        client_id: client.id, ghl_contact_id: r.ghl_contact_id, name: r.name ?? null, tags: r.tags ?? [], contact_read_at: r.contact_read_at ?? null,
+        messages_read_for: r.messages_read_for ?? null, last_inbound_sms_at: r.last_inbound_sms_at ?? null,
+        inbound_reschedule: r.inbound_reschedule ?? false, inbound_callback: r.inbound_callback ?? false,
+      }));
       const { error: e } = await db.from("hot_lead_contacts").upsert(rows, { onConflict: "client_id,ghl_contact_id" });
       if (e) throw new Error(`hot_lead_contacts: ${e.message}`);
     }
