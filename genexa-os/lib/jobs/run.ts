@@ -13,6 +13,7 @@ import { JOBS_MISC } from "@/lib/jobs/misc";
 import { syncGhlForms } from "@/lib/integrations/ghl/forms";
 import { syncConfirmationDesk } from "@/lib/integrations/ghl/confirmations";
 import { syncHotLeads } from "@/lib/integrations/ghl/hotLeads";
+import { syncClientDashboard } from "@/lib/integrations/clientDashboard/sync";
 import { alertDeskGaps } from "@/lib/jobs/deskGaps";
 import { createNewClientsFromWhop } from "@/lib/jobs/newClients";
 import { JOBS_NUDGES } from "@/lib/jobs/nudges";
@@ -78,6 +79,11 @@ export const JOBS: Record<string, () => Promise<JobResult>> = {
     // A live clinic the desk cannot read: the owner is told once, not left to find out from a missed call.
     const alerts = await alertDeskGaps({ db: createAdminClient(), gaps: r.not_connected });
     return { ok: r.ok && alerts.dm_failed.length === 0, summary: { ...r, alerts } };
+  },
+  // The client dashboard, every 10 minutes: outcomes, revenue and what each clinic owes, as the clinic sees them.
+  "client-dashboard-sync": async () => {
+    const r = await syncClientDashboard({ db: createAdminClient(), url: process.env.CLIENT_DASHBOARD_URL || "https://client.genexascaling.com", token: requireEnv("CLIENT_DASHBOARD_AGENT_TOKEN") });
+    return { ok: r.ok, summary: r };
   },
   // Hot Leads, every 2 minutes: who CSRs call when the desk is clear. Reads GHL only.
   "hot-leads-sync": async () => {

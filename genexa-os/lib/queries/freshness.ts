@@ -17,6 +17,7 @@ const SOURCE_NAMES: Record<string, string> = {
   whop: "Whop",
   mercury: "Mercury",
   fathom: "Fathom",
+  client_dashboard: "Client dashboard",
 };
 
 /** One entry per data source for the freshness bar, from the source_freshness view. */
@@ -25,8 +26,7 @@ export async function getSourceFreshness(): Promise<SourceFreshness[]> {
   const { data, error } = await supabase
     .from("source_freshness")
     .select("source, freshness, minutes_since_success, error")
-    // The client dashboard is no longer a source of its own: its outcomes reach the app through Cortana.
-    .not("source", "in", "(client_dashboard,hot_prospector)")
+    .not("source", "in", "(hot_prospector)")
     .order("source");
   if (error) throw new Error(`source_freshness: ${error.message}`);
   return (data ?? []).map((row) => ({
