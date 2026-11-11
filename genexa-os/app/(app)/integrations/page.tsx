@@ -3,13 +3,13 @@ import { requireStaff } from "@/lib/auth/staff";
 import { formatAge } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
-const NAME: Record<string, string> = { cortana: "Cortana (ads, funnel, outcomes per clinic)", ghl: "GHL (appointments only: consult times and status)", hot_prospector: "Hot Prospector (calls) — not set up yet", whop: "Whop direct (payments, memberships, renewals)", mercury: "Mercury (expenses, profit)", fathom: "Fathom (client and sales calls)" };
+const NAME: Record<string, string> = { cortana: "Cortana (ads, funnel, outcomes per clinic)", ghl: "GHL (appointments only: consult times and status)", hot_prospector: "Hot Prospector (calls) — not set up yet", whop: "Whop direct (payments, memberships, renewals)", mercury: "Mercury (expenses, profit)", fathom: "Fathom (client and sales calls)", client_dashboard: "Client dashboard (outcomes, revenue, what each clinic owes)" };
 const STATE: Record<string, string> = { fresh: "Fresh", late: "Late", stale: "Stale", never: "Not connected" };
 
 export default async function IntegrationsPage() {
   const me = await requireStaff();
   const supabase = await createClient();
-  const { data: sources, error } = await supabase.from("source_freshness").select("source, schedule_minutes, last_attempt_at, last_success_at, minutes_since_success, rows_processed, error, freshness").neq("source", "client_dashboard").order("source");
+  const { data: sources, error } = await supabase.from("source_freshness").select("source, schedule_minutes, last_attempt_at, last_success_at, minutes_since_success, rows_processed, error, freshness").order("source");
   if (error) throw new Error(error.message);
   const { data: runs } = me.role === "owner"
     ? await supabase.from("job_runs").select("job, started_at, finished_at, ok, rows_processed, error").order("started_at", { ascending: false }).limit(25)
