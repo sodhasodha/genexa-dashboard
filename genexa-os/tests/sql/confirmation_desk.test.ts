@@ -249,3 +249,22 @@ describe("editing a logged call", () => {
     expect((await calls(open))[0].outcome).toBe("voicemail");
   });
 });
+
+describe("a rescheduled appointment moved to a new time", () => {
+  it("starts a new cycle: Unconfirmed, attempts from 1, old calls kept but not shown or editable", async () => {
+    const a = await appt(10);
+    await asUser(db, AUTH.amanda, async () => { await log(a, "no_answer"); await log(a, "rescheduled"); });
+    const was = await one<{ rescheduled_from: string; scheduled_for: string }>(`select rescheduled_from, scheduled_for from confirmation_appointments where id = $1`, [a]);
+    expect(was.rescheduled_from).toEqual(was.scheduled_for);
+    const oldCall = await one<{ id: string }>(`select id from confirmation_calls where appointment_id = $1 and attempt_no = 2`, [a]);
+    // What the GHL sync does when the booking shows up at its new time.
+    await db.query(`update confirmation_appointments set scheduled_for = now() + interval '20 hours', status = 'unconfirmed', status_source = null, status_at = null, rescheduled_from = null, cycle = cycle + 1 where id = $1`, [a]);
+    expect(await desk(a)).toMatchObject({ status: "unconfirmed", attempts: 0, last_outcome: null });
+    await asUser(db, AUTH.marjorie, async () => {
+      expect((await log(a, "voicemail")).rows[0].r).toEqual({ attempt: 1, status: "unconfirmed" });
+      await expect(db.query(`select confirmation_edit_call($1, 'confirmed')`, [oldCall.id])).rejects.toThrow(/DESK_CLOSED/);
+      expect((await log(a, "confirmed")).rows[0].r).toEqual({ attempt: 2, status: "confirmed" });
+    });
+    expect((await one<{ n: number }>(`select count(*)::int as n from confirmation_calls where appointment_id = $1`, [a])).n).toBe(4);
+  });
+});

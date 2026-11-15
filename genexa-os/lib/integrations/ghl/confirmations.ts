@@ -39,7 +39,7 @@ export function patientName(contact: { firstName?: string | null; lastName?: str
   return n || title?.trim() || null;
 }
 
-type Tracked = { id: string; ghl_appointment_id: string; ghl_contact_id: string | null; status: string; status_source: string | null; scheduled_for: string; patient_name: string | null; phone: string | null; booked_on: "unconfirmed" | "main" };
+type Tracked = { id: string; ghl_appointment_id: string; ghl_contact_id: string | null; status: string; status_source: string | null; scheduled_for: string; patient_name: string | null; phone: string | null; booked_on: "unconfirmed" | "main"; cycle: number; rescheduled_from: string | null };
 type Cal = { calendar_id: string; kind: "unconfirmed" | "main"; name: string; location_label: string | null };
 
 /**
@@ -72,6 +72,17 @@ export function confirmedCalendarAdds(
   return main.filter((e) => !isCancelled(e) && new Date(e.startTime).getTime() > from && !trackedIds.has(e.id) && !(e.contactId && knownContacts.has(e.contactId)));
 }
 
+/**
+ * A Rescheduled appointment that GHL now has at a different time (pure): the CSR moved
+ * the booking (GHL keeps the same id), so it comes back to the desk as a new booking,
+ * Unconfirmed, with its calls starting again. Null when nothing changes.
+ */
+export function rebooked(row: Pick<Tracked, "status" | "scheduled_for" | "rescheduled_from" | "cycle">, startTime: string) {
+  if (row.status !== "rescheduled") return null;
+  if (Date.parse(startTime) === Date.parse(row.rescheduled_from ?? row.scheduled_for)) return null;
+  return { status: "unconfirmed" as const, status_source: null, status_at: null, rescheduled_from: null, cycle: row.cycle + 1 };
+}
+
 export type DeskGap = { client_id: string; name: string; reason: string };
 
 /** Why a clinic's appointments cannot reach the desk, or null when they can (pure). Only live clinics are expected to be connected. */
@@ -83,7 +94,7 @@ export function deskGap(client: { stage: string; ghl_location_id: string | null 
   return null;
 }
 
-export type DeskSyncResult = { ok: boolean; clinics: number; on_desk: number; added: number; added_confirmed: number; confirmed_in_ghl: number; cancelled_in_ghl: number; expired: number; skipped: string[]; not_connected: DeskGap[]; errors: string[] };
+export type DeskSyncResult = { ok: boolean; clinics: number; on_desk: number; added: number; added_confirmed: number; confirmed_in_ghl: number; cancelled_in_ghl: number; expired: number; rebooked: number; skipped: string[]; not_connected: DeskGap[]; errors: string[] };
 
 export async function syncConfirmationDesk(opts: {
   db: SupabaseClient; keys: Record<string, { location_id: string; api_key: string }>; fetchImpl?: typeof fetch; now?: Date;
@@ -91,7 +102,7 @@ export async function syncConfirmationDesk(opts: {
   const { db } = opts;
   const doFetch = opts.fetchImpl ?? fetch;
   const now = opts.now ?? new Date();
-  const out: DeskSyncResult = { ok: false, clinics: 0, on_desk: 0, added: 0, added_confirmed: 0, confirmed_in_ghl: 0, cancelled_in_ghl: 0, expired: 0, skipped: [], not_connected: [], errors: [] };
+  const out: DeskSyncResult = { ok: false, clinics: 0, on_desk: 0, added: 0, added_confirmed: 0, confirmed_in_ghl: 0, cancelled_in_ghl: 0, expired: 0, rebooked: 0, skipped: [], not_connected: [], errors: [] };
   const keyByLocation = new Map(Object.values(opts.keys).map((k) => [k.location_id, k.api_key]));
   const get = async (apiKey: string, path: string, version = "2021-04-15"): Promise<{ status: number; body: unknown }> => {
     const res = await doFetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${apiKey}`, Version: version, Accept: "application/json" }, cache: "no-store" });
@@ -134,10 +145,16 @@ export async function syncConfirmationDesk(opts: {
       // GHL's window is loose and returns some that already started: those never reach the desk.
       const unconfirmed = events.filter((x) => x.cal.kind === "unconfirmed" && !isCancelled(x.e) && new Date(x.e.startTime).getTime() > from);
 
-      const { data: existing } = await db.from("confirmation_appointments")
-        .select("id, ghl_appointment_id, ghl_contact_id, status, status_source, scheduled_for, patient_name, phone, booked_on")
+      const columns = "id, ghl_appointment_id, ghl_contact_id, status, status_source, scheduled_for, patient_name, phone, booked_on, cycle, rescheduled_from";
+      const { data: existing } = await db.from("confirmation_appointments").select(columns)
         .eq("client_id", client.id).gt("scheduled_for", new Date(from - 3_600_000).toISOString());
       const tracked = new Map(((existing ?? []) as Tracked[]).map((t) => [t.ghl_appointment_id, t]));
+      // Appointments on the Unconfirmed calendar the desk saw before at an earlier time (rescheduled).
+      const earlierIds = unconfirmed.map((x) => x.e.id).filter((id) => !tracked.has(id));
+      const { data: earlier } = earlierIds.length
+        ? await db.from("confirmation_appointments").select(columns).eq("client_id", client.id).in("ghl_appointment_id", earlierIds)
+        : { data: [] };
+      const before = new Map(((earlier ?? []) as Tracked[]).map((t) => [t.ghl_appointment_id, t]));
       const known = new Map(((existing ?? []) as Tracked[]).filter((t) => t.ghl_contact_id).map((t) => [t.ghl_contact_id as string, t]));
 
       /** Name and phone: from the desk's own row, another row for the same patient, or GHL. */
@@ -158,12 +175,14 @@ export async function syncConfirmationDesk(opts: {
 
       // New and still-unconfirmed appointments.
       for (const { e, cal } of unconfirmed) {
-        const row = tracked.get(e.id);
+        const row = tracked.get(e.id) ?? before.get(e.id);
         const values = {
           client_id: client.id, ghl_appointment_id: e.id, ghl_contact_id: e.contactId ?? null, calendar_id: cal.calendar_id,
           location_label: cal.location_label, ...(await person(e, row)), scheduled_for: new Date(e.startTime).toISOString(),
           clinic_timezone: tz, ghl_status: e.appointmentStatus ?? null, last_seen_at: seen,
+          ...(row ? rebooked(row, e.startTime) : null),
         };
+        if (row && rebooked(row, e.startTime)) out.rebooked++;
         const { error: upsertError } = await db.from("confirmation_appointments").upsert(values, { onConflict: "client_id,ghl_appointment_id" });
         if (upsertError) throw new Error(`confirmation_appointments: ${upsertError.message}`);
         if (!row) out.added++;

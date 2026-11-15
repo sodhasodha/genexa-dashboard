@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => { throw new Error("not used"); } }));
-import { confirmedCalendarAdds, deskGap, fieldText, ghlVerdict, isCancelled, locationLabel, PATIENT_INFO_FIELD_KEY, patientName, readPatientInformation } from "@/lib/integrations/ghl/confirmations";
+import { confirmedCalendarAdds, deskGap, fieldText, ghlVerdict, isCancelled, rebooked, locationLabel, PATIENT_INFO_FIELD_KEY, patientName, readPatientInformation } from "@/lib/integrations/ghl/confirmations";
 import { clinicNow } from "@/lib/clinic-time";
 import { ghlContactUrl, matchesStatus, parseDeskFilters, telLink, timeLeft } from "@/lib/queries/confirmations";
 
@@ -121,5 +121,18 @@ describe("clinic time now (calling hours 8 AM to 9 PM at the clinic)", () => {
     expect(clinicNow(new Date("2026-10-30T01:00:00Z"), "America/New_York").window).toBe("late");
     // Phoenix has no daylight saving.
     expect(clinicNow(new Date("2026-10-29T15:00:00Z"), "America/Phoenix").time).toBe("8:00 AM MST");
+  });
+});
+
+describe("desk sync: a rescheduled appointment moved in GHL", () => {
+  const row = { status: "rescheduled", scheduled_for: "2026-11-05T15:00:00Z", rescheduled_from: "2026-11-05T15:00:00Z", cycle: 1 };
+  it("comes back Unconfirmed in a new call cycle when GHL has it at a new time", () => {
+    expect(rebooked(row, "2026-11-10T10:00:00-05:00")).toEqual({ status: "unconfirmed", status_source: null, status_at: null, rescheduled_from: null, cycle: 2 });
+  });
+  it("stays Rescheduled while GHL still has the old time (same instant, any offset)", () => {
+    expect(rebooked(row, "2026-11-05T10:00:00-05:00")).toBeNull();
+  });
+  it("leaves every other status alone", () => {
+    for (const status of ["unconfirmed", "confirmed", "cancelled", "expired", "unreachable"]) expect(rebooked({ ...row, status }, "2026-11-10T15:00:00Z")).toBeNull();
   });
 });
